@@ -92,7 +92,13 @@ function keyPressed() {
   }
 
   if (key >= '1' && key <= '9') {
-    selectedHotbarSlot = int(key) - 1;
+  let slot = int(key) - 1;
+
+  if (selectedHotbarSlot === slot) {
+    selectedHotbarSlot = -1; // deselect
+  } else {
+    selectedHotbarSlot = slot; // select new slot
+  }
   } else if (keyCode === LEFT_ARROW) {
     selectedHotbarSlot--;
     if (selectedHotbarSlot < 0) {
