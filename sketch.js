@@ -1,5 +1,7 @@
 let currentState = "MENU";
 let startButton, settingsButton, backButton;
+let selectedHotbarSlot = 0;
+const hotbarSlots = 9;
 
 function setup() {
   createCanvas(500, 500);
@@ -38,10 +40,41 @@ function drawMenu() {
 
 function drawGame() {
   backButton.draw();
+  drawHotbar();
 }
 
 function drawSettings() {
   backButton.draw();
+}
+
+function drawHotbar() {
+  let slotSize = 42;
+  let gap = 8;
+  let totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
+  let startX = width / 2 - totalWidth / 2;
+  let y = height - 60;
+
+  for (let i = 0; i < hotbarSlots; i++) {
+    let x = startX + i * (slotSize + gap);
+
+    if (i === selectedHotbarSlot) {
+      fill(255, 230, 120);
+      stroke(255, 180, 0);
+      strokeWeight(3);
+    } else {
+      fill(245);
+      stroke(100);
+      strokeWeight(1);
+    }
+
+    rect(x, y, slotSize, slotSize, 6);
+
+    fill(30);
+    noStroke();
+    textSize(16);
+    textStyle(NORMAL);
+    text(i + 1, x + slotSize / 2, y + slotSize / 2);
+  }
 }
 
 function mousePressed() {
@@ -50,6 +83,26 @@ function mousePressed() {
     settingsButton.checkClick();
   } else if (currentState == "GAME" || currentState == "SETTINGS") {
     backButton.checkClick();
+  }
+}
+
+function keyPressed() {
+  if (currentState != "GAME") {
+    return;
+  }
+
+  if (key >= '1' && key <= '9') {
+    selectedHotbarSlot = int(key) - 1;
+  } else if (keyCode === LEFT_ARROW) {
+    selectedHotbarSlot--;
+    if (selectedHotbarSlot < 0) {
+      selectedHotbarSlot = hotbarSlots - 1;
+    }
+  } else if (keyCode === RIGHT_ARROW) {
+    selectedHotbarSlot++;
+    if (selectedHotbarSlot >= hotbarSlots) {
+      selectedHotbarSlot = 0;
+    }
   }
 }
 
