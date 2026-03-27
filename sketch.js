@@ -43,7 +43,7 @@ function drawGame() {
     drawGame.config = {
       tileSize: 32,
       mapCols: 14,
-      mapRows: 12,
+      mapRows: 10,
       margin: 20,
       topMargin: 80
     };
