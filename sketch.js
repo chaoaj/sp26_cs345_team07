@@ -39,6 +39,43 @@ function drawMenu() {
 }
 
 function drawGame() {
+  if (!drawGame.map) {
+    drawGame.config = {
+      tileSize: 32,
+      mapCols: 14,
+      mapRows: 12,
+      margin: 20,
+      topMargin: 80
+    };
+
+    const { mapCols, mapRows } = drawGame.config;
+    const tiles = [];
+
+    for (let y = 0; y < mapRows; y++) {
+      const row = [];
+      for (let x = 0; x < mapCols; x++) {
+        row.push({ type: "empty", item: null });
+      }
+      tiles.push(row);
+    }
+
+    drawGame.map = { tiles };
+  }
+
+  const { tileSize, mapCols, mapRows, margin, topMargin } = drawGame.config;
+  const startX = margin;
+  const startY = topMargin;
+
+  stroke(200);
+  fill(240, 240, 245);
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tileX = startX + x * tileSize;
+      const tileY = startY + y * tileSize;
+      rect(tileX, tileY, tileSize, tileSize);
+    }
+  }
+
   backButton.draw();
   drawHotbar();
 }
