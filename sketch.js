@@ -65,7 +65,7 @@ class Button {
 
   isHovered() {
     return mouseX > this.x && mouseX < this.x + this.w &&
-           mouseY < this.y && mouseY < this.y + this.h;
+           mouseY > this.y && mouseY < this.y + this.h;
   }
   draw() {
     if (this.isHovered()) {
