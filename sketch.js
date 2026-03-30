@@ -1,5 +1,7 @@
 let currentState = "MENU";
 let startButton, settingsButton, backButton;
+let selectedHotbarSlot = 0;
+const hotbarSlots = 9;
 
 function setup() {
   createCanvas(500, 500);
@@ -37,11 +39,79 @@ function drawMenu() {
 }
 
 function drawGame() {
+  if (!drawGame.map) {
+    drawGame.config = {
+      tileSize: 32,
+      mapCols: 14,
+      mapRows: 10,
+      margin: 20,
+      topMargin: 80
+    };
+
+    const { mapCols, mapRows } = drawGame.config;
+    const tiles = [];
+
+    for (let y = 0; y < mapRows; y++) {
+      const row = [];
+      for (let x = 0; x < mapCols; x++) {
+        row.push({ type: "empty", item: null });
+      }
+      tiles.push(row);
+    }
+
+    drawGame.map = { tiles };
+  }
+
+  const { tileSize, mapCols, mapRows, margin, topMargin } = drawGame.config;
+  const startX = margin;
+  const startY = topMargin;
+
+  stroke(200);
+  fill(240, 240, 245);
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tileX = startX + x * tileSize;
+      const tileY = startY + y * tileSize;
+      rect(tileX, tileY, tileSize, tileSize);
+    }
+  }
+
   backButton.draw();
+  drawHotbar();
 }
 
 function drawSettings() {
   backButton.draw();
+}
+
+function drawHotbar() {
+  let slotSize = 42;
+  let gap = 8;
+  let totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
+  let startX = width / 2 - totalWidth / 2;
+  let y = height - 60;
+
+  for (let i = 0; i < hotbarSlots; i++) {
+    let x = startX + i * (slotSize + gap);
+
+    if (i === selectedHotbarSlot) {
+      fill(255, 230, 120);
+      stroke(255, 180, 0);
+      strokeWeight(3);
+    } else {
+      fill(245);
+      stroke(100);
+      strokeWeight(1);
+    }
+
+    rect(x, y, slotSize, slotSize, 6);
+
+    fill(30);
+    noStroke();
+    textSize(16);
+    textStyle(NORMAL);
+    text(i + 1, x + slotSize / 2, y + slotSize / 2);
+  }
 }
 
 function mousePressed() {
@@ -50,6 +120,32 @@ function mousePressed() {
     settingsButton.checkClick();
   } else if (currentState == "GAME" || currentState == "SETTINGS") {
     backButton.checkClick();
+  }
+}
+
+function keyPressed() {
+  if (currentState != "GAME") {
+    return;
+  }
+
+  if (key >= '1' && key <= '9') {
+  let slot = int(key) - 1;
+
+  if (selectedHotbarSlot === slot) {
+    selectedHotbarSlot = -1; // deselect
+  } else {
+    selectedHotbarSlot = slot; // select new slot
+  }
+  } else if (keyCode === LEFT_ARROW) {
+    selectedHotbarSlot--;
+    if (selectedHotbarSlot < 0) {
+      selectedHotbarSlot = hotbarSlots - 1;
+    }
+  } else if (keyCode === RIGHT_ARROW) {
+    selectedHotbarSlot++;
+    if (selectedHotbarSlot >= hotbarSlots) {
+      selectedHotbarSlot = 0;
+    }
   }
 }
 
@@ -65,7 +161,7 @@ class Button {
 
   isHovered() {
     return mouseX > this.x && mouseX < this.x + this.w &&
-           mouseY < this.y && mouseY < this.y + this.h;
+           mouseY > this.y && mouseY < this.y + this.h;
   }
   draw() {
     if (this.isHovered()) {
