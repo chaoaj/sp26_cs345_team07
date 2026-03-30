@@ -39,16 +39,10 @@ function drawMenu() {
 }
 
 function drawGame() {
-  if (!drawGame.map) {
-    drawGame.config = {
-      tileSize: 32,
-      mapCols: 14,
-      mapRows: 10,
-      margin: 20,
-      topMargin: 80
-    };
-
-    const { mapCols, mapRows } = drawGame.config;
+  if (!drawGame.state) {
+    const tileSize = 32;
+    const mapCols = 25;
+    const mapRows = 25;
     const tiles = [];
 
     for (let y = 0; y < mapRows; y++) {
@@ -59,23 +53,131 @@ function drawGame() {
       tiles.push(row);
     }
 
-    drawGame.map = { tiles };
+    for (let x = 4; x < 11; x++) {
+      tiles[6][x].type = "dirt";
+    }
+    for (let y = 8; y < 15; y++) {
+      tiles[y][12].type = "dirt";
+    }
+    for (let y = 16; y < 22; y++) {
+      for (let x = 15; x < 21; x++) {
+        tiles[y][x].type = "dirt";
+      }
+    }
+
+    drawGame.state = {
+      config: {
+        tileSize,
+        mapCols,
+        mapRows,
+        mapOriginX: 0,
+        mapOriginY: 0
+      },
+      map: { tiles },
+      player: {
+        x: tileSize * 5,
+        y: tileSize * 5,
+        size: 16,
+        speed: 180
+      }
+    };
   }
 
-  const { tileSize, mapCols, mapRows, margin, topMargin } = drawGame.config;
-  const startX = margin;
-  const startY = topMargin;
+  const { config, map, player } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+
+  let moveX = 0;
+  let moveY = 0;
+  if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) moveX -= 1;
+  if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) moveX += 1;
+  if (keyIsDown(UP_ARROW) || keyIsDown(87)) moveY -= 1;
+  if (keyIsDown(DOWN_ARROW) || keyIsDown(83)) moveY += 1;
+
+  const dt = min(0.05, deltaTime / 1000);
+  if (moveX !== 0 || moveY !== 0) {
+    const len = Math.hypot(moveX, moveY);
+    const speed = player.speed * dt;
+    player.x += (moveX / len) * speed;
+    player.y += (moveY / len) * speed;
+  }
+
+  const mapWidth = mapCols * tileSize;
+  const mapHeight = mapRows * tileSize;
+  const halfPlayer = player.size / 2;
+  player.x = constrain(player.x, mapOriginX + halfPlayer, mapOriginX + mapWidth - halfPlayer);
+  player.y = constrain(player.y, mapOriginY + halfPlayer, mapOriginY + mapHeight - halfPlayer);
+
+  const cameraX = player.x - width / 2;
+  const cameraY = player.y - height / 2;
+
+  push();
+  translate(-cameraX, -cameraY);
+
+  const viewLeft = cameraX;
+  const viewTop = cameraY;
+  const viewRight = cameraX + width;
+  const viewBottom = cameraY + height;
+  const startCol = max(0, floor((viewLeft - mapOriginX) / tileSize));
+  const endCol = min(mapCols - 1, ceil((viewRight - mapOriginX) / tileSize) - 1);
+  const startRow = max(0, floor((viewTop - mapOriginY) / tileSize));
+  const endRow = min(mapRows - 1, ceil((viewBottom - mapOriginY) / tileSize) - 1);
 
   stroke(200);
-  fill(240, 240, 245);
-  for (let y = 0; y < mapRows; y++) {
-    for (let x = 0; x < mapCols; x++) {
-      const tileX = startX + x * tileSize;
-      const tileY = startY + y * tileSize;
+  for (let y = startRow; y <= endRow; y++) {
+    for (let x = startCol; x <= endCol; x++) {
+      const tileX = mapOriginX + x * tileSize;
+      const tileY = mapOriginY + y * tileSize;
+      const tile = map.tiles[y][x];
+      if (tile.type === "dirt") {
+        fill(150, 120, 80);
+      } else {
+        fill(240, 240, 245);
+      }
       rect(tileX, tileY, tileSize, tileSize);
     }
   }
 
+  pop();
+
+  noStroke();
+  fill(255, 0, 0);
+  rect(
+    width / 2 - player.size / 2,
+    height / 2 - player.size / 2,
+    player.size,
+    player.size
+  );
+
+  const miniMaxSize = 140;
+  const miniTile = max(1, floor(miniMaxSize / mapCols));
+  const miniWidth = mapCols * miniTile;
+  const miniHeight = mapRows * miniTile;
+  const miniX = width - miniWidth - 10;
+  const miniY = 10;
+
+  noStroke();
+  fill(245);
+  rect(miniX - 4, miniY - 4, miniWidth + 8, miniHeight + 8, 6);
+
+  stroke(210);
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tile = map.tiles[y][x];
+      if (tile.type === "dirt") {
+        fill(150, 120, 80);
+      } else {
+        fill(230, 230, 235);
+      }
+      rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
+    }
+  }
+
+  const miniPlayerX = miniX + ((player.x - mapOriginX) / tileSize) * miniTile;
+  const miniPlayerY = miniY + ((player.y - mapOriginY) / tileSize) * miniTile;
+  noStroke();
+  fill(255, 0, 0);
+  rect(miniPlayerX - 2, miniPlayerY - 2, 4, 4);
+  
   backButton.draw();
   drawHotbar();
 }
