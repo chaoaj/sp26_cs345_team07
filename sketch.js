@@ -47,6 +47,7 @@ function draw() {
 
 function drawMenu() {
   fill(255);
+  textAlign(CENTER, CENTER);
   textSize(24);
   textStyle(BOLD);
   text("Helium-3", width / 2, 150);
