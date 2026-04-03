@@ -2,15 +2,24 @@ let currentState = "MENU";
 let startButton, settingsButton, backButton;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 9;
-let isSidebarOpen = false;
-let sidebarX = 20 - 160;
-let sidebarWidth = 160;
+let isSidebarOpen = false; 
+let sidebarX = 20 - 80; // start hidden to the left
+let sidebarWidth = 70; 
+
+let iron = 0;
+let copper = 0;
+let helium = 0;
 
 function setup() {
   createCanvas(500, 500);
   textAlign(CENTER, CENTER);
   startButton = new Button (width / 2 - 100, height / 2 - 20, 200, 50, "Start", () => {
     currentState = "GAME";
+  });
+  debugButton = new Button (175, 25, 100, 50, "Debug", () => {
+      iron += 1;
+      copper += 1;
+      helium += 1;
   });
   settingsButton = new Button(width / 2 - 100, height / 2 + 50, 200, 50, "Settings", () => {
     currentState = "SETTINGS";
@@ -79,6 +88,7 @@ function drawGame() {
     }
   }
 
+  noStroke();
   backButton.draw();
   drawHotbar();
   drawSideBar();
@@ -119,26 +129,37 @@ function drawSideBar() {
   fill(255, 200, 100);
   noStroke();
   let h = mapY + 20;
-  let iron = 0;
-  let copper = 1;
-  let Helium = 2;
-  let item = "";
+  let ironName = 0;
+  let copperName = 1;
+  let heliumName = 2;
   // Loop through 3 items and draw them in the sidebar
   for (let i = 0; i < 3; i++) {
-    rect(sidebarX + 20, h, 32, 32, 4);
-
-    fill(50);
-    textSize(14);
-    textAlign(LEFT, CENTER);
-    textStyle(NORMAL);
-    if (iron == i) {
-      item = "Iron Ore";
-    } else if (copper == i) {
-      item = "Copper Ore";
-    } else if (Helium == i) {
-      item = "Helium-3";
+    let rX = sidebarX + 17.5;
+    let rY = h;
+    let rSize = 37.5;
+    if (ironName == i) {
+      fill(67, 67, 65);
+    } else if (copperName == i) {
+      fill(255, 215, 0);
+    } else if (heliumName == i) {
+      fill(0, 200, 255);
     }
-    text(item, sidebarX + 65, h + 16);
+
+    rect(rX, rY, rSize, rSize, 4);
+
+    fill(255);
+    textAlign(RIGHT, BOTTOM);
+    textSize(12);
+
+    let centerX = rX + (rSize / 2) + 17;
+    let centerY = rY + (rSize / 2) + 17;
+    if (ironName == i) {
+      text(iron + "x", centerX, centerY);
+    } else if (copperName == i) {
+      text(copper + "x", centerX, centerY);
+    } else if (heliumName == i) {
+      text(helium + "x", centerX, centerY);
+    }
 
     fill(255, 200, 100);
     h += 50;
@@ -175,6 +196,7 @@ function drawSideBar() {
   textSize(18);
   if (isSidebarOpen) {
     text("<", tabX + tabW / 2, tabY + tabH / 2);
+    debugButton.draw();
   } else {
     text(">", tabX + tabW / 2, tabY + tabH / 2);
   }
@@ -226,6 +248,7 @@ function mousePressed() {
     }
 
     backButton.checkClick();
+    debugButton.checkClick();
   } else if (currentState == "SETTINGS") {
     backButton.checkClick();
   }
