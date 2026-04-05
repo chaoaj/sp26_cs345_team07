@@ -23,6 +23,19 @@ const hotbarItems = [
   null
 ];
 
+// Slot -> entity type mapping for quick experimentation
+const HOTBAR_ENTITY_TYPES = [
+  ENTITY_TYPES.MINER,
+  ENTITY_TYPES.SMELTER,
+  ENTITY_TYPES.CONSTRUCTOR,
+  ENTITY_TYPES.TUBE,
+  ENTITY_TYPES.SHUTTLE,
+  ENTITY_TYPES.ROCKET_SITE,
+  ENTITY_TYPES.SPLITTER,
+  ENTITY_TYPES.MERGER,
+  ENTITY_TYPES.EXTRACTOR
+];
+
 function setup() {
   createCanvas(500, 500);
   textAlign(CENTER, CENTER);
@@ -130,6 +143,7 @@ function drawGame() {
       tiles.push(row);
     }
 
+    // Existing terrain
     for (let x = 4; x < 11; x++) {
       tiles[6][x].type = "dirt";
     }
@@ -139,6 +153,24 @@ function drawGame() {
     for (let y = 16; y < 22; y++) {
       for (let x = 15; x < 21; x++) {
         tiles[y][x].type = "dirt";
+      }
+    }
+
+    // Optional resource patches for testing
+    tiles[6][6].type = "iron";
+    tiles[10][12].type = "copper";
+    tiles[18][20].type = "helium3";
+
+    const entities = createStarterEntities();
+
+    // Stamp starter entities onto tiles
+    for (const entity of entities) {
+      if (
+        entity.tileY >= 0 && entity.tileY < mapRows &&
+        entity.tileX >= 0 && entity.tileX < mapCols
+      ) {
+        tiles[entity.tileY][entity.tileX].entityId = entity.id;
+        tiles[entity.tileY][entity.tileX].item = entity.type;
       }
     }
 
@@ -152,6 +184,7 @@ function drawGame() {
         modificationRadiusTiles: 5
       },
       map: { tiles },
+      entities,
       player: {
         x: tileSize * 5,
         y: tileSize * 5,
@@ -210,6 +243,73 @@ function drawGame() {
 
   pop();
 
+  drawMiniMap(map, player, config);
+  backButton.draw();
+  drawHotbar();
+  drawSelectedBlockLabel();
+}
+
+function drawEntities(entities, tileSize) {
+  textAlign(CENTER, CENTER);
+  textSize(10);
+
+  for (const entity of entities) {
+    const px = entity.tileX * tileSize;
+    const py = entity.tileY * tileSize;
+
+    stroke(50);
+
+    if (entity.type === ENTITY_TYPES.MINER) fill(90, 170, 90);
+    else if (entity.type === ENTITY_TYPES.SMELTER) fill(200, 120, 80);
+    else if (entity.type === ENTITY_TYPES.CONSTRUCTOR) fill(90, 140, 220);
+    else if (entity.type === ENTITY_TYPES.TUBE) fill(120, 120, 120);
+    else if (entity.type === ENTITY_TYPES.SHUTTLE) fill(230, 230, 120);
+    else if (entity.type === ENTITY_TYPES.ROCKET_SITE) fill(180, 180, 255);
+    else if (entity.type === ENTITY_TYPES.SPLITTER) fill(180, 120, 220);
+    else if (entity.type === ENTITY_TYPES.MERGER) fill(120, 220, 180);
+    else if (entity.type === ENTITY_TYPES.EXTRACTOR) fill(120, 255, 255);
+    else fill(200);
+
+    rect(px + 4, py + 4, tileSize - 8, tileSize - 8, 4);
+
+    // Broken overlay
+    if (entity.state.isBroken) {
+      stroke(255, 0, 0);
+      strokeWeight(3);
+      line(px + 6, py + 6, px + tileSize - 6, py + tileSize - 6);
+      line(px + tileSize - 6, py + 6, px + 6, py + tileSize - 6);
+      strokeWeight(1);
+    }
+
+    // Small on/off indicator
+    noStroke();
+    fill(entity.state.isOn ? color(0, 220, 0) : color(220, 0, 0));
+    circle(px + tileSize - 8, py + 8, 8);
+
+    fill(20);
+    noStroke();
+    text(getEntityShortLabel(entity.type), px + tileSize / 2, py + tileSize / 2);
+  }
+}
+
+function getEntityShortLabel(type) {
+  switch (type) {
+    case ENTITY_TYPES.MINER: return "M";
+    case ENTITY_TYPES.SMELTER: return "S";
+    case ENTITY_TYPES.CONSTRUCTOR: return "C";
+    case ENTITY_TYPES.TUBE: return "T";
+    case ENTITY_TYPES.SHUTTLE: return "SH";
+    case ENTITY_TYPES.ROCKET_SITE: return "R";
+    case ENTITY_TYPES.SPLITTER: return "SP";
+    case ENTITY_TYPES.MERGER: return "MG";
+    case ENTITY_TYPES.EXTRACTOR: return "EX";
+    default: return "?";
+  }
+}
+
+function drawMiniMap(map, player, config) {
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+
   const miniMaxSize = 140;
   const miniTile = max(1, floor(miniMaxSize / mapCols));
   const miniWidth = mapCols * miniTile;
@@ -235,6 +335,7 @@ function drawGame() {
   
   const miniPlayerX = miniX + ((player.x - mapOriginX) / tileSize) * miniTile;
   const miniPlayerY = miniY + ((player.y - mapOriginY) / tileSize) * miniTile;
+
   noStroke();
   fill(255, 0, 0);
   rect(miniPlayerX - 2, miniPlayerY - 2, 4, 4);
@@ -592,6 +693,88 @@ function mousePressed() {
     backButtonGame.checkClick();
     backButtonSettings.checkClick();
   }
+
+  if (currentState == "SETTINGS") {
+    backButton.checkClick();
+    return;
+  }
+
+  if (currentState != "GAME") return;
+
+  // UI back button first
+  if (backButton.isHovered()) {
+    backButton.checkClick();
+    return;
+  }
+
+  placeSelectedEntityAtMouse();
+}
+
+function placeSelectedEntityAtMouse() {
+  if (!drawGame.state) return;
+  if (selectedHotbarSlot < 0) return;
+
+  const { config, map, entities, player } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+
+  const cameraX = player.x - width / 2;
+  const cameraY = player.y - height / 2;
+
+  const worldMouseX = mouseX + cameraX;
+  const worldMouseY = mouseY + cameraY;
+
+  const tileX = floor((worldMouseX - mapOriginX) / tileSize);
+  const tileY = floor((worldMouseY - mapOriginY) / tileSize);
+
+  if (tileX < 0 || tileX >= mapCols || tileY < 0 || tileY >= mapRows) return;
+
+  const tile = map.tiles[tileY][tileX];
+  if (tile.entityId !== null) return;
+
+  const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
+  const options = getPlacementOptionsForTile(type, tile);
+
+  const newEntity = createEntity(type, tileX, tileY, options);
+
+  // Minimal testing behavior:
+  // place most buildings broken first if you want to test repair flow,
+  // but leave tubes on by default.
+  if (
+    type === ENTITY_TYPES.MINER ||
+    type === ENTITY_TYPES.SMELTER ||
+    type === ENTITY_TYPES.CONSTRUCTOR ||
+    type === ENTITY_TYPES.EXTRACTOR
+  ) {
+    newEntity.state.isBroken = false;
+    newEntity.state.isOn = true;
+  }
+
+  entities.push(newEntity);
+  tile.entityId = newEntity.id;
+  tile.item = type;
+
+  refreshEntityConnectionStates(entities);
+
+  console.log("Placed entity:", newEntity);
+}
+
+function getPlacementOptionsForTile(type, tile) {
+  if (type === ENTITY_TYPES.MINER) {
+    if (tile.type === "copper") {
+      return { resourceType: "copperOre", tier: 1 };
+    }
+    return { resourceType: "ironOre", tier: 1 };
+  }
+
+  if (type === ENTITY_TYPES.EXTRACTOR) {
+    return { resourceType: "helium3" };
+  }
+
+  if (type === ENTITY_TYPES.CONSTRUCTOR) {
+    return { chosenOutput: "ironPlate" };
+  }
+
+  return {};
 }
 
 function keyPressed() {
@@ -607,7 +790,60 @@ function keyPressed() {
     } else {
       selectedHotbarSlot = slot;
     }
+  } else if (key === 'r' || key === 'R') {
+    repairEntityUnderMouse();
+  } else if (key === 'i' || key === 'I') {
+    inspectEntityUnderMouse();
+  } else if (key === 'o' || key === 'O') {
+    toggleEntityUnderMouse();
   }
+}
+
+function repairEntityUnderMouse() {
+  const entity = getEntityUnderMouse();
+  if (!entity) return;
+
+  entity.state.isBroken = false;
+  entity.state.isOn = true;
+  console.log("Repaired entity:", entity);
+}
+
+function toggleEntityUnderMouse() {
+  const entity = getEntityUnderMouse();
+  if (!entity) return;
+
+  entity.state.isOn = !entity.state.isOn;
+  console.log("Toggled entity:", entity);
+}
+
+function inspectEntityUnderMouse() {
+  const entity = getEntityUnderMouse();
+  if (!entity) return;
+
+  console.log("Inspect entity:", entity);
+}
+
+function getEntityUnderMouse() {
+  if (!drawGame.state) return null;
+
+  const { config, map, player, entities } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+
+  const cameraX = player.x - width / 2;
+  const cameraY = player.y - height / 2;
+
+  const worldMouseX = mouseX + cameraX;
+  const worldMouseY = mouseY + cameraY;
+
+  const tileX = floor((worldMouseX - mapOriginX) / tileSize);
+  const tileY = floor((worldMouseY - mapOriginY) / tileSize);
+
+  if (tileX < 0 || tileX >= mapCols || tileY < 0 || tileY >= mapRows) return null;
+
+  const tile = map.tiles[tileY][tileX];
+  if (tile.entityId === null) return null;
+
+  return getEntityById(entities, tile.entityId);
 }
 
 class Button {
@@ -653,6 +889,7 @@ class Button {
     textSize(20);
     textStyle(NORMAL);
     text(this.label, this.x + this.w / 2, this.y + this.h / 2);
+    pop();
 
     pop();
   }
