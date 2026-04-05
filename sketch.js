@@ -11,6 +11,18 @@ let iron = 0;
 let copper = 0;
 let helium = 0;
 
+const hotbarItems = [
+  { kind: "paint", color: [255, 80, 80], shape: "circle", name: "Red Paint" },
+  { kind: "paint", color: [80, 200, 120], shape: "triangle", name: "Green Paint" },
+  { kind: "paint", color: [80, 140, 255], shape: "square", name: "Blue Paint" },
+  null,
+  null,
+  null,
+  null,
+  null,
+  null
+];
+
 function setup() {
   createCanvas(500, 500);
   textAlign(CENTER, CENTER);
@@ -108,7 +120,12 @@ function drawGame() {
     for (let y = 0; y < mapRows; y++) {
       const row = [];
       for (let x = 0; x < mapCols; x++) {
-        row.push({ type: "empty", item: null });
+        row.push({
+          type: "empty",
+          item: null,
+          colorOverride: null,
+          entity: null
+        });
       }
       tiles.push(row);
     }
@@ -131,7 +148,8 @@ function drawGame() {
         mapCols,
         mapRows,
         mapOriginX: 0,
-        mapOriginY: 0
+        mapOriginY: 0,
+        modificationRadiusTiles: 5
       },
       map: { tiles },
       player: {
@@ -139,19 +157,22 @@ function drawGame() {
         y: tileSize * 5,
         size: 16,
         speed: 180
+      },
+      feedback: {
+        rangeBlinkUntil: 0
       }
     };
   }
 
-  const { config, map, player } = drawGame.state;
-  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+  const { config, map, player, feedback } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY, modificationRadiusTiles } = config;
 
   let moveX = 0;
   let moveY = 0;
-  if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) moveX -= 1;
-  if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) moveX += 1;
-  if (keyIsDown(UP_ARROW) || keyIsDown(87)) moveY -= 1;
-  if (keyIsDown(DOWN_ARROW) || keyIsDown(83)) moveY += 1;
+  if (keyIsDown(65)) moveX -= 1;
+  if (keyIsDown(68)) moveX += 1;
+  if (keyIsDown(87)) moveY -= 1;
+  if (keyIsDown(83)) moveY += 1;
 
   const dt = min(0.05, deltaTime / 1000);
   if (moveX !== 0 || moveY !== 0) {
@@ -180,28 +201,14 @@ function drawGame() {
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
-      const tileX = x * tileSize;
-      const tileY = y * tileSize;
-      if (tile.type === "dirt") {
-        fill(150, 120, 80);
-      } else {
-        fill(240, 240, 245);
-      }
+      const tileColor = getTileRenderColor(tile);
+      fill(tileColor[0], tileColor[1], tileColor[2]);
       rect(tileX, tileY, tileSize, tileSize);
     }
   }
   pop();
 
   pop();
-
-  noStroke();
-  fill(255, 0, 0);
-  rect(
-    width / 2 - player.size / 2,
-    height / 2 - player.size / 2,
-    player.size,
-    player.size
-  );
 
   const miniMaxSize = 140;
   const miniTile = max(1, floor(miniMaxSize / mapCols));
@@ -218,11 +225,8 @@ function drawGame() {
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
-      if (tile.type === "dirt") {
-        fill(150, 120, 80);
-      } else {
-        fill(230, 230, 235);
-      }
+      const tileColor = getTileRenderColor(tile);
+      fill(tileColor[0], tileColor[1], tileColor[2]);
       rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
     }
   }
@@ -234,8 +238,19 @@ function drawGame() {
   noStroke();
   fill(255, 0, 0);
   rect(miniPlayerX - 2, miniPlayerY - 2, 4, 4);
-  
-  backButtonGame.draw();
+
+  drawModificationRangeIndicator(config, feedback);
+
+  noStroke();
+  fill(255, 0, 0);
+  rect(
+    width / 2 - player.size / 2,
+    height / 2 - player.size / 2,
+    player.size,
+    player.size
+  );
+
+  backButton.draw();
   drawHotbar();
   drawSideBar();
 }
@@ -358,6 +373,132 @@ function drawSideBar() {
   }
 }
 
+function getSelectedHotbarItem() {
+  if (selectedHotbarSlot < 0 || selectedHotbarSlot >= hotbarItems.length) {
+    return null;
+  }
+  return hotbarItems[selectedHotbarSlot];
+}
+
+function getTileBaseColor(tile) {
+  if (tile.type === "dirt") {
+    return [150, 120, 80];
+  }
+  return [240, 240, 245];
+}
+
+function getTileRenderColor(tile) {
+  if (tile.colorOverride) {
+    return tile.colorOverride;
+  }
+  return getTileBaseColor(tile);
+}
+
+function getTileAtScreenPosition(screenX, screenY) {
+  if (!drawGame.state) {
+    return null;
+  }
+
+  const { config, map, player } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+
+  const cameraX = player.x - width / 2;
+  const cameraY = player.y - height / 2;
+
+  const worldX = screenX + cameraX;
+  const worldY = screenY + cameraY;
+
+  const tileCol = floor((worldX - mapOriginX) / tileSize);
+  const tileRow = floor((worldY - mapOriginY) / tileSize);
+
+  if (tileCol < 0 || tileCol >= mapCols || tileRow < 0 || tileRow >= mapRows) {
+    return null;
+  }
+
+  return {
+    tile: map.tiles[tileRow][tileCol],
+    row: tileRow,
+    col: tileCol
+  };
+}
+
+function getPlayerTilePosition() {
+  if (!drawGame.state) {
+    return null;
+  }
+
+  const { config, player } = drawGame.state;
+  const { tileSize, mapOriginX, mapOriginY } = config;
+
+  return {
+    col: floor((player.x - mapOriginX) / tileSize),
+    row: floor((player.y - mapOriginY) / tileSize)
+  };
+}
+
+function isTileWithinModificationRange(tileRow, tileCol) {
+  if (!drawGame.state) {
+    return false;
+  }
+
+  const { config, player } = drawGame.state;
+  const { tileSize, mapOriginX, mapOriginY, modificationRadiusTiles } = config;
+
+  const circleX = player.x;
+  const circleY = player.y;
+  const radius = tileSize * (modificationRadiusTiles * 2 + 1) / 2;
+
+  const tileLeft = mapOriginX + tileCol * tileSize;
+  const tileTop = mapOriginY + tileRow * tileSize;
+  const tileRight = tileLeft + tileSize;
+  const tileBottom = tileTop + tileSize;
+
+  const closestX = constrain(circleX, tileLeft, tileRight);
+  const closestY = constrain(circleY, tileTop, tileBottom);
+
+  const dx = circleX - closestX;
+  const dy = circleY - closestY;
+
+  return dx * dx + dy * dy <= radius * radius;
+}
+
+function triggerModificationRangeBlink() {
+  if (!drawGame.state) {
+    return;
+  }
+
+  drawGame.state.feedback.rangeBlinkUntil = millis() + 600;
+}
+
+function drawModificationRangeIndicator(config, feedback) {
+  const remaining = feedback.rangeBlinkUntil - millis();
+  if (remaining <= 0) {
+    return;
+  }
+
+  const blinkIndex = floor((600 - remaining) / 150);
+  if (blinkIndex % 2 !== 0) {
+    return;
+  }
+
+  const radius = config.tileSize * (config.modificationRadiusTiles * 2 + 1) / 2;
+
+  noFill();
+  stroke(255, 255, 210, 120);
+  strokeWeight(5);
+  ellipse(width / 2, height / 2, radius * 2, radius * 2);
+}
+
+function applyHotbarItemToTile(tile, hotbarItem) {
+  if (!hotbarItem || !tile) {
+    return;
+  }
+
+  if (hotbarItem.kind === "paint") {
+    tile.colorOverride = hotbarItem.color.slice();
+  }
+}
+
 function drawHotbar() {
   let slotSize = 42;
   let gap = 8;
@@ -366,8 +507,9 @@ function drawHotbar() {
   let y = height - 60;
 
   for (let i = 0; i < hotbarSlots; i++) {
-    let x = startX + i * (slotSize + gap);``
-    push();
+    let x = startX + i * (slotSize + gap);
+    let item = hotbarItems[i];
+
     if (i === selectedHotbarSlot) {
       fill(255, 230, 120);
       stroke(255, 180, 0);
@@ -380,12 +522,32 @@ function drawHotbar() {
 
     rect(x, y, slotSize, slotSize, 6);
 
+    if (item) {
+      noStroke();
+      fill(item.color[0], item.color[1], item.color[2]);
+
+      let cx = x + slotSize / 2;
+      let cy = y + slotSize / 2;
+      let iconSize = 18;
+
+      if (item.shape === "circle") {
+        ellipse(cx, cy, iconSize, iconSize);
+      } else if (item.shape === "triangle") {
+        triangle(
+          cx, cy - iconSize / 2,
+          cx - iconSize / 2, cy + iconSize / 2,
+          cx + iconSize / 2, cy + iconSize / 2
+        );
+      } else if (item.shape === "square") {
+        rect(cx - iconSize / 2, cy - iconSize / 2, iconSize, iconSize, 3);
+      }
+    }
+
     fill(30);
     noStroke();
-    textSize(16);
+    textSize(12);
     textStyle(NORMAL);
-    text(i + 1, x + slotSize / 2, y + slotSize / 2);
-    pop();
+    text(i + 1, x + slotSize / 2, y + slotSize - 8);
   }
 }
 
@@ -398,8 +560,7 @@ function mousePressed() {
     let tabH = 60;
     let tabX = sidebarX + sidebarWidth;
     let tabY = 175 / 2;
-    if (mouseX > tabX && mouseX < tabX + tabW && mouseY
-      > tabY && mouseY < tabY + tabH) {
+    if (mouseX > tabX && mouseX < tabX + tabW && mouseY > tabY && mouseY < tabY + tabH) {
       isSidebarOpen = !isSidebarOpen;
       return;
     }
@@ -409,6 +570,29 @@ function mousePressed() {
   } else if (currentState == "GAME" || currentState == "SETTINGS") {
     backButtonGame.checkClick();
     backButtonSettings.checkClick();
+    if (backButton.isHovered()) {
+      backButton.checkClick();
+      return;
+    }
+
+    const selectedItem = getSelectedHotbarItem();
+    if (!selectedItem) {
+      return;
+    }
+
+    const hit = getTileAtScreenPosition(mouseX, mouseY);
+    if (!hit) {
+      return;
+    }
+
+    if (!isTileWithinModificationRange(hit.row, hit.col)) {
+      triggerModificationRangeBlink();
+      return;
+    }
+
+    applyHotbarItemToTile(hit.tile, selectedItem);
+  } else if (currentState == "SETTINGS") {
+    backButton.checkClick();
   }
 }
 
@@ -418,22 +602,12 @@ function keyPressed() {
   }
 
   if (key >= '1' && key <= '9') {
-  let slot = int(key) - 1;
+    let slot = int(key) - 1;
 
-  if (selectedHotbarSlot === slot) {
-    selectedHotbarSlot = -1; // deselect
-  } else {
-    selectedHotbarSlot = slot; // select new slot
-  }
-  } else if (keyCode === LEFT_ARROW) {
-    selectedHotbarSlot--;
-    if (selectedHotbarSlot < 0) {
-      selectedHotbarSlot = hotbarSlots - 1;
-    }
-  } else if (keyCode === RIGHT_ARROW) {
-    selectedHotbarSlot++;
-    if (selectedHotbarSlot >= hotbarSlots) {
-      selectedHotbarSlot = 0;
+    if (selectedHotbarSlot === slot) {
+      selectedHotbarSlot = -1;
+    } else {
+      selectedHotbarSlot = slot;
     }
   }
 }
