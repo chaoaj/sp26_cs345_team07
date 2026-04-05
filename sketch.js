@@ -1,5 +1,6 @@
 let currentState = "MENU";
-let startButton, settingsButton, backButton;
+let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton;
+let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 9;
 let isSidebarOpen = false; 
@@ -13,7 +14,7 @@ let helium = 0;
 function setup() {
   createCanvas(500, 500);
   textAlign(CENTER, CENTER);
-  startButton = new Button (width / 2 - 100, height / 2 - 20, 200, 50, "Start", () => {
+  startButton = new Button (65, 300, 150, 50, "Start", () => {
     currentState = "GAME";
   });
   debugButton = new Button (175, 25, 100, 50, "Debug", () => {
@@ -21,33 +22,80 @@ function setup() {
       copper += 1;
       helium += 1;
   });
-  settingsButton = new Button(width / 2 - 100, height / 2 + 50, 200, 50, "Settings", () => {
+  settingsButton = new Button(65, 350, 150, 50, "Settings", () => {
     currentState = "SETTINGS";
   });
-  backButton = new Button(30, 30, 100, 40, "<-- Back", () => {
+  backButtonGame = new Button(30, 20, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
+  backButtonSettings = new Button(280, 390, 100, 40, "<- Return", () => {
+    currentState = "MENU";
+  });
+  escapeButton = new Button(65, 400, 150, 50, "Quit", () => {
+    window.close();
+  });
+  setupSettings();
+}
+
+function preload() {
+  titlePage = loadImage('resources/Title.jpg');
+  settingsPage = loadImage('resources/Settings.jpg');
+  
 }
 
 function draw() {
   background(220);
+  cursor('default');
   if (currentState == "MENU") {
     drawMenu();
+    hideSettingsUI();
   } else if (currentState == "GAME") {
     drawGame();
+    hideSettingsUI();
   } else if (currentState == "SETTINGS") {
     drawSettings();
   }
 }
 
 function drawMenu() {
-  fill(255);
-  textSize(24);
-  textStyle(BOLD);
-  text("Helium-3", width / 2, 150);
 
+  // Draw the background image
+  if (titlePage) {
+    image(titlePage, 0, 0, width, height);
+  }
+
+  push(); // Save current drawing style
+
+  // Set style for button outlines
+  noFill();
+  stroke(0);
+  strokeWeight(3);
+
+  // Draw buttons
   startButton.draw();
   settingsButton.draw();
+  escapeButton.draw();
+
+  // Draw a rectangle around all buttons (from start to escape)
+  rect(
+    startButton.x,
+    startButton.y,
+    startButton.w,
+    (escapeButton.y + escapeButton.h) - startButton.y,
+    2
+  );
+
+  // Draw a separate rectangle around the settings button
+  // -------- May want to change this later --------
+  rect(
+    settingsButton.x,
+    settingsButton.y,
+    settingsButton.w,
+    50,
+    2
+  );
+
+  pop();
 }
 
 function drawGame() {
@@ -125,21 +173,15 @@ function drawGame() {
   push();
   translate(-cameraX, -cameraY);
 
-  const viewLeft = cameraX;
-  const viewTop = cameraY;
-  const viewRight = cameraX + width;
-  const viewBottom = cameraY + height;
-  const startCol = max(0, floor((viewLeft - mapOriginX) / tileSize));
-  const endCol = min(mapCols - 1, ceil((viewRight - mapOriginX) / tileSize) - 1);
-  const startRow = max(0, floor((viewTop - mapOriginY) / tileSize));
-  const endRow = min(mapRows - 1, ceil((viewBottom - mapOriginY) / tileSize) - 1);
 
+  push();
   stroke(200);
-  for (let y = startRow; y <= endRow; y++) {
-    for (let x = startCol; x <= endCol; x++) {
-      const tileX = mapOriginX + x * tileSize;
-      const tileY = mapOriginY + y * tileSize;
+  strokeWeight(1);
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
+      const tileX = x * tileSize;
+      const tileY = y * tileSize;
       if (tile.type === "dirt") {
         fill(150, 120, 80);
       } else {
@@ -148,6 +190,7 @@ function drawGame() {
       rect(tileX, tileY, tileSize, tileSize);
     }
   }
+  pop();
 
   pop();
 
@@ -192,13 +235,23 @@ function drawGame() {
   fill(255, 0, 0);
   rect(miniPlayerX - 2, miniPlayerY - 2, 4, 4);
   
-  backButton.draw();
+  backButtonGame.draw();
   drawHotbar();
   drawSideBar();
 }
 
 function drawSettings() {
-  backButton.draw();
+  if (settingsPage) {
+    image(settingsPage, 0, 0, width, height);
+  }
+  push();
+  fill("#445072");
+  stroke(0);
+  strokeWeight(2);
+  rect(width/2 - 135, height/2 - 85, 270, 270);
+  pop();
+  backButtonSettings.draw();
+  drawSettingsUI();
 }
 
 function drawSideBar() {
@@ -283,7 +336,7 @@ function drawSideBar() {
     cursor('pointer');
   } else {
     fill(255);
-    if (!backButton.isHovered()) {
+    if (!backButtonGame.isHovered()) {
       cursor('default');
     }
   }
@@ -313,8 +366,8 @@ function drawHotbar() {
   let y = height - 60;
 
   for (let i = 0; i < hotbarSlots; i++) {
-    let x = startX + i * (slotSize + gap);
-
+    let x = startX + i * (slotSize + gap);``
+    push();
     if (i === selectedHotbarSlot) {
       fill(255, 230, 120);
       stroke(255, 180, 0);
@@ -332,6 +385,7 @@ function drawHotbar() {
     textSize(16);
     textStyle(NORMAL);
     text(i + 1, x + slotSize / 2, y + slotSize / 2);
+    pop();
   }
 }
 
@@ -350,10 +404,11 @@ function mousePressed() {
       return;
     }
 
-    backButton.checkClick();
+    backButtonGame.checkClick();
     debugButton.checkClick();
-  } else if (currentState == "SETTINGS") {
-    backButton.checkClick();
+  } else if (currentState == "GAME" || currentState == "SETTINGS") {
+    backButtonGame.checkClick();
+    backButtonSettings.checkClick();
   }
 }
 
@@ -385,40 +440,53 @@ function keyPressed() {
 
 class Button {
   constructor(x, y, w, h, label, onClick) {
+    // Position and size
     this.x = x;
     this.y = y;
     this.w = w;
     this.h = h;
+
+    // Button text and click behavior
     this.label = label;
     this.onClick = onClick;
   }
 
   isHovered() {
+    // Check if mouse is inside button area
     return mouseX > this.x && mouseX < this.x + this.w &&
            mouseY > this.y && mouseY < this.y + this.h;
   }
+
   draw() {
+    push();
+
+    // Change appearance when hovered
     if (this.isHovered()) {
-      fill(220, 220, 250);
+      fill(170, 170, 175); 
+      stroke(80, 80, 85);
+      strokeWeight(2);
       cursor('pointer');
     } else {
-      fill(255);
+      fill(200, 200, 215);
+      stroke(100);
+      strokeWeight(1);
     }
-    rect(this.x, this.y, this.w, this.h, 10);
 
-    fill(30, 30, 50);
-    textSize(24);
+    // Draw button rectangle
+    rect(this.x, this.y, this.w, this.h, 4);
+
+    // Draw button label
+    fill(30, 30, 30);
+    noStroke();
+    textSize(20);
     textStyle(NORMAL);
     text(this.label, this.x + this.w / 2, this.y + this.h / 2);
 
-    if (!this.isHovered() && currentState != "MENU" && !backButton.isHovered()) {
-      cursor('default');
-    } else if (!this.isHovered() && currentState == "MENU" && !startButton.isHovered() && !settingsButton.isHovered()) {
-      cursor('default');
-    }
+    pop();
   }
 
   checkClick() {
+    // Run the assigned function if button is clicked
     if (this.isHovered()) {
       this.onClick();
     }
