@@ -203,7 +203,7 @@ function drawGame() {
       const tile = map.tiles[y][x];
       const tileColor = getTileRenderColor(tile);
       fill(tileColor[0], tileColor[1], tileColor[2]);
-      rect(tileX, tileY, tileSize, tileSize);
+      rect(x * tileSize, y * tileSize, tileSize, tileSize);
     }
   }
   pop();
@@ -250,7 +250,7 @@ function drawGame() {
     player.size
   );
 
-  backButton.draw();
+  backButtonGame.draw();
   drawHotbar();
   drawSideBar();
 }
@@ -567,11 +567,8 @@ function mousePressed() {
 
     backButtonGame.checkClick();
     debugButton.checkClick();
-  } else if (currentState == "GAME" || currentState == "SETTINGS") {
-    backButtonGame.checkClick();
-    backButtonSettings.checkClick();
-    if (backButton.isHovered()) {
-      backButton.checkClick();
+    if (backButtonGame.isHovered()) {
+      backButtonGame.checkClick();
       return;
     }
 
@@ -592,7 +589,8 @@ function mousePressed() {
 
     applyHotbarItemToTile(hit.tile, selectedItem);
   } else if (currentState == "SETTINGS") {
-    backButton.checkClick();
+    backButtonGame.checkClick();
+    backButtonSettings.checkClick();
   }
 }
 
