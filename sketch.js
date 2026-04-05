@@ -161,18 +161,8 @@ function drawGame() {
     tiles[10][12].type = "copper";
     tiles[18][20].type = "helium3";
 
-    const entities = createStarterEntities();
-
-    // Stamp starter entities onto tiles
-    for (const entity of entities) {
-      if (
-        entity.tileY >= 0 && entity.tileY < mapRows &&
-        entity.tileX >= 0 && entity.tileX < mapCols
-      ) {
-        tiles[entity.tileY][entity.tileX].entityId = entity.id;
-        tiles[entity.tileY][entity.tileX].item = entity.type;
-      }
-    }
+    // Placeholder until entities.js integration
+    const entities = [];
 
     drawGame.state = {
       config: {
@@ -243,10 +233,9 @@ function drawGame() {
 
   pop();
 
-  drawMiniMap(map, player, config);
-  backButton.draw();
+  drawMiniMap(map, player, config, feedback);
+  backButtonGame.draw();
   drawHotbar();
-  drawSelectedBlockLabel();
 }
 
 function drawEntities(entities, tileSize) {
@@ -307,7 +296,7 @@ function getEntityShortLabel(type) {
   }
 }
 
-function drawMiniMap(map, player, config) {
+function drawMiniMap(map, player, config, feedback) {
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
 
   const miniMaxSize = 140;
@@ -695,15 +684,15 @@ function mousePressed() {
   }
 
   if (currentState == "SETTINGS") {
-    backButton.checkClick();
+    backButtonGame.checkClick();
     return;
   }
 
   if (currentState != "GAME") return;
 
   // UI back button first
-  if (backButton.isHovered()) {
-    backButton.checkClick();
+  if (backButtonGame.isHovered()) {
+    backButtonGame.checkClick();
     return;
   }
 
@@ -888,8 +877,8 @@ class Button {
     noStroke();
     textSize(20);
     textStyle(NORMAL);
+    textAlign(CENTER, CENTER);
     text(this.label, this.x + this.w / 2, this.y + this.h / 2);
-    pop();
 
     pop();
   }
