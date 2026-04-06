@@ -854,6 +854,54 @@ function getEntityUnderMouse() {
   return getEntityById(entities, tile.entityId);
 }
 
+function getTubeSourcesByTarget(entities) {
+  const tubeSources = new Map();
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.TUBE) continue;
+    if (!entity.state.fromEntityId || !entity.state.toEntityId) continue;
+
+    if (!tubeSources.has(entity.state.toEntityId)) {
+      tubeSources.set(entity.state.toEntityId, new Set());
+    }
+    tubeSources.get(entity.state.toEntityId).add(entity.state.fromEntityId);
+  }
+
+  return tubeSources;
+}
+
+function updateSmelterInputs(entities) {
+  const tubeSources = getTubeSourcesByTarget(entities);
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.SMELTER) continue;
+    const smelterState = entity.state;
+    const sourceIds = tubeSources.get(entity.id);
+    const sourceId = sourceIds ? [...sourceIds][0] : null;
+    const sourceEntity = entities.find((entry) => entry.id === sourceId) || null;
+    const outputType = sourceEntity?.state?.outputType || null;
+    const inputType = smelterState.acceptedInputs?.includes(outputType)
+      ? outputType
+      : null;
+
+    if (smelterState.inputType === inputType) {
+      continue;
+    }
+
+    smelterState.inputType = inputType;
+    smelterState.currentRecipe = inputType;
+    smelterState.isActive = !!inputType;
+    smelterState.outputType = smelterState.recipes?.get(inputType) || null;
+    smelterState.inputRate = inputType ? 1 : 0;
+    smelterState.outputRate = smelterState.outputType ? 1 : 0;
+
+    if (!inputType) {
+      smelterState.storedInput = 0;
+      smelterState.outputBuffer = 0;
+    }
+  }
+}
+
 class Button {
   constructor(x, y, w, h, label, onClick) {
     // Position and size
