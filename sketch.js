@@ -1,5 +1,6 @@
 let currentState = "MENU";
-let startButton, settingsButton, backButton;
+let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton, debugButton;
+let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 9;
 let isSidebarOpen = false; 
@@ -10,10 +11,35 @@ let iron = 0;
 let copper = 0;
 let helium = 0;
 
+const hotbarItems = [
+  { kind: "paint", color: [255, 80, 80], shape: "circle", name: "Red Paint" },
+  { kind: "paint", color: [80, 200, 120], shape: "triangle", name: "Green Paint" },
+  { kind: "paint", color: [80, 140, 255], shape: "square", name: "Blue Paint" },
+  null,
+  null,
+  null,
+  null,
+  null,
+  null
+];
+
+// Slot -> entity type mapping for quick experimentation
+const HOTBAR_ENTITY_TYPES = [
+  ENTITY_TYPES.MINER,
+  ENTITY_TYPES.SMELTER,
+  ENTITY_TYPES.CONSTRUCTOR,
+  ENTITY_TYPES.TUBE,
+  ENTITY_TYPES.SHUTTLE,
+  ENTITY_TYPES.ROCKET_SITE,
+  ENTITY_TYPES.SPLITTER,
+  ENTITY_TYPES.MERGER,
+  ENTITY_TYPES.EXTRACTOR
+];
+
 function setup() {
   createCanvas(500, 500);
   textAlign(CENTER, CENTER);
-  startButton = new Button (width / 2 - 100, height / 2 - 20, 200, 50, "Start", () => {
+  startButton = new Button (65, 300, 150, 50, "Start", () => {
     currentState = "GAME";
   });
   debugButton = new Button (175, 25, 100, 50, "Debug", () => {
@@ -21,33 +47,80 @@ function setup() {
       copper += 1;
       helium += 1;
   });
-  settingsButton = new Button(width / 2 - 100, height / 2 + 50, 200, 50, "Settings", () => {
+  settingsButton = new Button(65, 350, 150, 50, "Settings", () => {
     currentState = "SETTINGS";
   });
-  backButton = new Button(30, 30, 100, 40, "<-- Back", () => {
+  backButtonGame = new Button(30, 20, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
+  backButtonSettings = new Button(280, 390, 100, 40, "<- Return", () => {
+    currentState = "MENU";
+  });
+  escapeButton = new Button(65, 400, 150, 50, "Quit", () => {
+    window.close();
+  });
+  setupSettings();
+}
+
+function preload() {
+  titlePage = loadImage('resources/Title.jpg');
+  settingsPage = loadImage('resources/Settings.jpg');
+  
 }
 
 function draw() {
   background(220);
+  cursor('default');
   if (currentState == "MENU") {
     drawMenu();
+    hideSettingsUI();
   } else if (currentState == "GAME") {
     drawGame();
+    hideSettingsUI();
   } else if (currentState == "SETTINGS") {
     drawSettings();
   }
 }
 
 function drawMenu() {
-  fill(255);
-  textSize(24);
-  textStyle(BOLD);
-  text("Helium-3", width / 2, 150);
 
+  // Draw the background image
+  if (titlePage) {
+    image(titlePage, 0, 0, width, height);
+  }
+
+  push(); // Save current drawing style
+
+  // Set style for button outlines
+  noFill();
+  stroke(0);
+  strokeWeight(3);
+
+  // Draw buttons
   startButton.draw();
   settingsButton.draw();
+  escapeButton.draw();
+
+  // Draw a rectangle around all buttons (from start to escape)
+  rect(
+    startButton.x,
+    startButton.y,
+    startButton.w,
+    (escapeButton.y + escapeButton.h) - startButton.y,
+    2
+  );
+
+  // Draw a separate rectangle around the settings button
+  // -------- May want to change this later --------
+  rect(
+    settingsButton.x,
+    settingsButton.y,
+    settingsButton.w,
+    50,
+    2
+  );
+
+  pop();
 }
 
 function drawGame() {
@@ -60,11 +133,17 @@ function drawGame() {
     for (let y = 0; y < mapRows; y++) {
       const row = [];
       for (let x = 0; x < mapCols; x++) {
-        row.push({ type: "empty", item: null });
+        row.push({
+          type: "empty",
+          item: null,
+          colorOverride: null,
+          entity: null
+        });
       }
       tiles.push(row);
     }
 
+    // Existing terrain
     for (let x = 4; x < 11; x++) {
       tiles[6][x].type = "dirt";
     }
@@ -77,6 +156,14 @@ function drawGame() {
       }
     }
 
+    // Optional resource patches for testing
+    tiles[6][6].type = "iron";
+    tiles[10][12].type = "copper";
+    tiles[18][20].type = "helium3";
+
+    // Placeholder until entities.js integration
+    const entities = [];
+
     drawGame.state = {
       config: {
         tileSize,
@@ -85,27 +172,32 @@ function drawGame() {
         mapOriginX: 0,
         mapOriginY: 0,
         margin: 0,
-        topMargin: 80 
+        topMargin: 80,
+        modificationRadiusTiles: 5
       },
       map: { tiles },
+      entities,
       player: {
         x: tileSize * 5,
         y: tileSize * 5,
         size: 16,
         speed: 180
+      },
+      feedback: {
+        rangeBlinkUntil: 0
       }
     };
   }
 
-  const { config, map, player } = drawGame.state;
-  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+  const { config, map, player, feedback } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY, modificationRadiusTiles } = config;
 
   let moveX = 0;
   let moveY = 0;
-  if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) moveX -= 1;
-  if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) moveX += 1;
-  if (keyIsDown(UP_ARROW) || keyIsDown(87)) moveY -= 1;
-  if (keyIsDown(DOWN_ARROW) || keyIsDown(83)) moveY += 1;
+  if (keyIsDown(65)) moveX -= 1;
+  if (keyIsDown(68)) moveX += 1;
+  if (keyIsDown(87)) moveY -= 1;
+  if (keyIsDown(83)) moveY += 1;
 
   const dt = min(0.05, deltaTime / 1000);
   if (moveX !== 0 || moveY !== 0) {
@@ -127,40 +219,87 @@ function drawGame() {
   push();
   translate(-cameraX, -cameraY);
 
-  const viewLeft = cameraX;
-  const viewTop = cameraY;
-  const viewRight = cameraX + width;
-  const viewBottom = cameraY + height;
-  const startCol = max(0, floor((viewLeft - mapOriginX) / tileSize));
-  const endCol = min(mapCols - 1, ceil((viewRight - mapOriginX) / tileSize) - 1);
-  const startRow = max(0, floor((viewTop - mapOriginY) / tileSize));
-  const endRow = min(mapRows - 1, ceil((viewBottom - mapOriginY) / tileSize) - 1);
 
+  push();
   stroke(200);
-  for (let y = startRow; y <= endRow; y++) {
-    for (let x = startCol; x <= endCol; x++) {
-      const tileX = mapOriginX + x * tileSize;
-      const tileY = mapOriginY + y * tileSize;
+  strokeWeight(1);
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
-      if (tile.type === "dirt") {
-        fill(150, 120, 80);
-      } else {
-        fill(240, 240, 245);
-      }
-      rect(tileX, tileY, tileSize, tileSize);
+      const tileColor = getTileRenderColor(tile);
+      fill(tileColor[0], tileColor[1], tileColor[2]);
+      rect(x * tileSize, y * tileSize, tileSize, tileSize);
     }
   }
+  pop();
 
   pop();
 
-  noStroke();
-  fill(255, 0, 0);
-  rect(
-    width / 2 - player.size / 2,
-    height / 2 - player.size / 2,
-    player.size,
-    player.size
-  );
+  drawMiniMap(map, player, config, feedback);
+  backButtonGame.draw();
+  drawHotbar();
+}
+
+function drawEntities(entities, tileSize) {
+  textAlign(CENTER, CENTER);
+  textSize(10);
+
+  for (const entity of entities) {
+    const px = entity.tileX * tileSize;
+    const py = entity.tileY * tileSize;
+
+    stroke(50);
+
+    if (entity.type === ENTITY_TYPES.MINER) fill(90, 170, 90);
+    else if (entity.type === ENTITY_TYPES.SMELTER) fill(200, 120, 80);
+    else if (entity.type === ENTITY_TYPES.CONSTRUCTOR) fill(90, 140, 220);
+    else if (entity.type === ENTITY_TYPES.TUBE) fill(120, 120, 120);
+    else if (entity.type === ENTITY_TYPES.SHUTTLE) fill(230, 230, 120);
+    else if (entity.type === ENTITY_TYPES.ROCKET_SITE) fill(180, 180, 255);
+    else if (entity.type === ENTITY_TYPES.SPLITTER) fill(180, 120, 220);
+    else if (entity.type === ENTITY_TYPES.MERGER) fill(120, 220, 180);
+    else if (entity.type === ENTITY_TYPES.EXTRACTOR) fill(120, 255, 255);
+    else fill(200);
+
+    rect(px + 4, py + 4, tileSize - 8, tileSize - 8, 4);
+
+    // Broken overlay
+    if (entity.state.isBroken) {
+      stroke(255, 0, 0);
+      strokeWeight(3);
+      line(px + 6, py + 6, px + tileSize - 6, py + tileSize - 6);
+      line(px + tileSize - 6, py + 6, px + 6, py + tileSize - 6);
+      strokeWeight(1);
+    }
+
+    // Small on/off indicator
+    noStroke();
+    fill(entity.state.isOn ? color(0, 220, 0) : color(220, 0, 0));
+    circle(px + tileSize - 8, py + 8, 8);
+
+    fill(20);
+    noStroke();
+    text(getEntityShortLabel(entity.type), px + tileSize / 2, py + tileSize / 2);
+  }
+}
+
+function getEntityShortLabel(type) {
+  switch (type) {
+    case ENTITY_TYPES.MINER: return "M";
+    case ENTITY_TYPES.SMELTER: return "S";
+    case ENTITY_TYPES.CONSTRUCTOR: return "C";
+    case ENTITY_TYPES.TUBE: return "T";
+    case ENTITY_TYPES.SHUTTLE: return "SH";
+    case ENTITY_TYPES.ROCKET_SITE: return "R";
+    case ENTITY_TYPES.SPLITTER: return "SP";
+    case ENTITY_TYPES.MERGER: return "MG";
+    case ENTITY_TYPES.EXTRACTOR: return "EX";
+    default: return "?";
+  }
+}
+
+function drawMiniMap(map, player, config, feedback) {
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
 
   const miniMaxSize = 140;
   const miniTile = max(1, floor(miniMaxSize / mapCols));
@@ -177,11 +316,8 @@ function drawGame() {
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
-      if (tile.type === "dirt") {
-        fill(150, 120, 80);
-      } else {
-        fill(230, 230, 235);
-      }
+      const tileColor = getTileRenderColor(tile);
+      fill(tileColor[0], tileColor[1], tileColor[2]);
       rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
     }
   }
@@ -190,17 +326,39 @@ function drawGame() {
   
   const miniPlayerX = miniX + ((player.x - mapOriginX) / tileSize) * miniTile;
   const miniPlayerY = miniY + ((player.y - mapOriginY) / tileSize) * miniTile;
+
   noStroke();
   fill(255, 0, 0);
   rect(miniPlayerX - 2, miniPlayerY - 2, 4, 4);
-  
-  backButton.draw();
+
+  drawModificationRangeIndicator(config, feedback);
+
+  noStroke();
+  fill(255, 0, 0);
+  rect(
+    width / 2 - player.size / 2,
+    height / 2 - player.size / 2,
+    player.size,
+    player.size
+  );
+
+  backButtonGame.draw();
   drawHotbar();
   drawSideBar();
 }
 
 function drawSettings() {
-  backButton.draw();
+  if (settingsPage) {
+    image(settingsPage, 0, 0, width, height);
+  }
+  push();
+  fill("#445072");
+  stroke(0);
+  strokeWeight(2);
+  rect(width/2 - 135, height/2 - 85, 270, 270);
+  pop();
+  backButtonSettings.draw();
+  drawSettingsUI();
 }
 
 function drawSideBar() {
@@ -285,7 +443,7 @@ function drawSideBar() {
     cursor('pointer');
   } else {
     fill(255);
-    if (!backButton.isHovered()) {
+    if (!backButtonGame.isHovered()) {
       cursor('default');
     }
   }
@@ -307,6 +465,132 @@ function drawSideBar() {
   }
 }
 
+function getSelectedHotbarItem() {
+  if (selectedHotbarSlot < 0 || selectedHotbarSlot >= hotbarItems.length) {
+    return null;
+  }
+  return hotbarItems[selectedHotbarSlot];
+}
+
+function getTileBaseColor(tile) {
+  if (tile.type === "dirt") {
+    return [150, 120, 80];
+  }
+  return [240, 240, 245];
+}
+
+function getTileRenderColor(tile) {
+  if (tile.colorOverride) {
+    return tile.colorOverride;
+  }
+  return getTileBaseColor(tile);
+}
+
+function getTileAtScreenPosition(screenX, screenY) {
+  if (!drawGame.state) {
+    return null;
+  }
+
+  const { config, map, player } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+
+  const cameraX = player.x - width / 2;
+  const cameraY = player.y - height / 2;
+
+  const worldX = screenX + cameraX;
+  const worldY = screenY + cameraY;
+
+  const tileCol = floor((worldX - mapOriginX) / tileSize);
+  const tileRow = floor((worldY - mapOriginY) / tileSize);
+
+  if (tileCol < 0 || tileCol >= mapCols || tileRow < 0 || tileRow >= mapRows) {
+    return null;
+  }
+
+  return {
+    tile: map.tiles[tileRow][tileCol],
+    row: tileRow,
+    col: tileCol
+  };
+}
+
+function getPlayerTilePosition() {
+  if (!drawGame.state) {
+    return null;
+  }
+
+  const { config, player } = drawGame.state;
+  const { tileSize, mapOriginX, mapOriginY } = config;
+
+  return {
+    col: floor((player.x - mapOriginX) / tileSize),
+    row: floor((player.y - mapOriginY) / tileSize)
+  };
+}
+
+function isTileWithinModificationRange(tileRow, tileCol) {
+  if (!drawGame.state) {
+    return false;
+  }
+
+  const { config, player } = drawGame.state;
+  const { tileSize, mapOriginX, mapOriginY, modificationRadiusTiles } = config;
+
+  const circleX = player.x;
+  const circleY = player.y;
+  const radius = tileSize * (modificationRadiusTiles * 2 + 1) / 2;
+
+  const tileLeft = mapOriginX + tileCol * tileSize;
+  const tileTop = mapOriginY + tileRow * tileSize;
+  const tileRight = tileLeft + tileSize;
+  const tileBottom = tileTop + tileSize;
+
+  const closestX = constrain(circleX, tileLeft, tileRight);
+  const closestY = constrain(circleY, tileTop, tileBottom);
+
+  const dx = circleX - closestX;
+  const dy = circleY - closestY;
+
+  return dx * dx + dy * dy <= radius * radius;
+}
+
+function triggerModificationRangeBlink() {
+  if (!drawGame.state) {
+    return;
+  }
+
+  drawGame.state.feedback.rangeBlinkUntil = millis() + 600;
+}
+
+function drawModificationRangeIndicator(config, feedback) {
+  const remaining = feedback.rangeBlinkUntil - millis();
+  if (remaining <= 0) {
+    return;
+  }
+
+  const blinkIndex = floor((600 - remaining) / 150);
+  if (blinkIndex % 2 !== 0) {
+    return;
+  }
+
+  const radius = config.tileSize * (config.modificationRadiusTiles * 2 + 1) / 2;
+
+  noFill();
+  stroke(255, 255, 210, 120);
+  strokeWeight(5);
+  ellipse(width / 2, height / 2, radius * 2, radius * 2);
+}
+
+function applyHotbarItemToTile(tile, hotbarItem) {
+  if (!hotbarItem || !tile) {
+    return;
+  }
+
+  if (hotbarItem.kind === "paint") {
+    tile.colorOverride = hotbarItem.color.slice();
+  }
+}
+
 function drawHotbar() {
   let slotSize = 42;
   let gap = 8;
@@ -316,6 +600,7 @@ function drawHotbar() {
 
   for (let i = 0; i < hotbarSlots; i++) {
     let x = startX + i * (slotSize + gap);
+    let item = hotbarItems[i];
 
     if (i === selectedHotbarSlot) {
       fill(255, 230, 120);
@@ -329,11 +614,32 @@ function drawHotbar() {
 
     rect(x, y, slotSize, slotSize, 6);
 
+    if (item) {
+      noStroke();
+      fill(item.color[0], item.color[1], item.color[2]);
+
+      let cx = x + slotSize / 2;
+      let cy = y + slotSize / 2;
+      let iconSize = 18;
+
+      if (item.shape === "circle") {
+        ellipse(cx, cy, iconSize, iconSize);
+      } else if (item.shape === "triangle") {
+        triangle(
+          cx, cy - iconSize / 2,
+          cx - iconSize / 2, cy + iconSize / 2,
+          cx + iconSize / 2, cy + iconSize / 2
+        );
+      } else if (item.shape === "square") {
+        rect(cx - iconSize / 2, cy - iconSize / 2, iconSize, iconSize, 3);
+      }
+    }
+
     fill(30);
     noStroke();
-    textSize(16);
+    textSize(12);
     textStyle(NORMAL);
-    text(i + 1, x + slotSize / 2, y + slotSize / 2);
+    text(i + 1, x + slotSize / 2, y + slotSize - 8);
   }
 }
 
@@ -346,8 +652,7 @@ function mousePressed() {
     let tabH = 60;
     let tabX = sidebarX + sidebarWidth;
     let tabY = 175 / 2;
-    if (mouseX > tabX && mouseX < tabX + tabW && mouseY
-      > tabY && mouseY < tabY + tabH) {
+    if (mouseX > tabX && mouseX < tabX + tabW && mouseY > tabY && mouseY < tabY + tabH) {
       isSidebarOpen = !isSidebarOpen;
       return;
     }
@@ -356,9 +661,114 @@ function mousePressed() {
     if (isSidebarOpen) {
       debugButton.checkClick();
     }
+    backButtonGame.checkClick();
+    if (backButtonGame.isHovered()) {
+      backButtonGame.checkClick();
+      return;
+    }
+
+    const selectedItem = getSelectedHotbarItem();
+    if (!selectedItem) {
+      return;
+    }
+
+    const hit = getTileAtScreenPosition(mouseX, mouseY);
+    if (!hit) {
+      return;
+    }
+
+    if (!isTileWithinModificationRange(hit.row, hit.col)) {
+      triggerModificationRangeBlink();
+      return;
+    }
+
+    applyHotbarItemToTile(hit.tile, selectedItem);
   } else if (currentState == "SETTINGS") {
-    backButton.checkClick();
+    backButtonGame.checkClick();
+    backButtonSettings.checkClick();
   }
+
+  if (currentState == "SETTINGS") {
+    backButtonGame.checkClick();
+    return;
+  }
+
+  if (currentState != "GAME") return;
+
+  // UI back button first
+  if (backButtonGame.isHovered()) {
+    backButtonGame.checkClick();
+    return;
+  }
+
+  placeSelectedEntityAtMouse();
+}
+
+function placeSelectedEntityAtMouse() {
+  if (!drawGame.state) return;
+  if (selectedHotbarSlot < 0) return;
+
+  const { config, map, entities, player } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+
+  const cameraX = player.x - width / 2;
+  const cameraY = player.y - height / 2;
+
+  const worldMouseX = mouseX + cameraX;
+  const worldMouseY = mouseY + cameraY;
+
+  const tileX = floor((worldMouseX - mapOriginX) / tileSize);
+  const tileY = floor((worldMouseY - mapOriginY) / tileSize);
+
+  if (tileX < 0 || tileX >= mapCols || tileY < 0 || tileY >= mapRows) return;
+
+  const tile = map.tiles[tileY][tileX];
+  if (tile.entityId !== null) return;
+
+  const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
+  const options = getPlacementOptionsForTile(type, tile);
+
+  const newEntity = createEntity(type, tileX, tileY, options);
+
+  // Minimal testing behavior:
+  // place most buildings broken first if you want to test repair flow,
+  // but leave tubes on by default.
+  if (
+    type === ENTITY_TYPES.MINER ||
+    type === ENTITY_TYPES.SMELTER ||
+    type === ENTITY_TYPES.CONSTRUCTOR ||
+    type === ENTITY_TYPES.EXTRACTOR
+  ) {
+    newEntity.state.isBroken = false;
+    newEntity.state.isOn = true;
+  }
+
+  entities.push(newEntity);
+  tile.entityId = newEntity.id;
+  tile.item = type;
+
+  refreshEntityConnectionStates(entities);
+
+  console.log("Placed entity:", newEntity);
+}
+
+function getPlacementOptionsForTile(type, tile) {
+  if (type === ENTITY_TYPES.MINER) {
+    if (tile.type === "copper") {
+      return { resourceType: "copperOre", tier: 1 };
+    }
+    return { resourceType: "ironOre", tier: 1 };
+  }
+
+  if (type === ENTITY_TYPES.EXTRACTOR) {
+    return { resourceType: "helium3" };
+  }
+
+  if (type === ENTITY_TYPES.CONSTRUCTOR) {
+    return { chosenOutput: "ironPlate" };
+  }
+
+  return {};
 }
 
 function keyPressed() {
@@ -367,62 +777,119 @@ function keyPressed() {
   }
 
   if (key >= '1' && key <= '9') {
-  let slot = int(key) - 1;
+    let slot = int(key) - 1;
 
-  if (selectedHotbarSlot === slot) {
-    selectedHotbarSlot = -1; // deselect
-  } else {
-    selectedHotbarSlot = slot; // select new slot
-  }
-  } else if (keyCode === LEFT_ARROW) {
-    selectedHotbarSlot--;
-    if (selectedHotbarSlot < 0) {
-      selectedHotbarSlot = hotbarSlots - 1;
+    if (selectedHotbarSlot === slot) {
+      selectedHotbarSlot = -1;
+    } else {
+      selectedHotbarSlot = slot;
     }
-  } else if (keyCode === RIGHT_ARROW) {
-    selectedHotbarSlot++;
-    if (selectedHotbarSlot >= hotbarSlots) {
-      selectedHotbarSlot = 0;
-    }
+  } else if (key === 'r' || key === 'R') {
+    repairEntityUnderMouse();
+  } else if (key === 'i' || key === 'I') {
+    inspectEntityUnderMouse();
+  } else if (key === 'o' || key === 'O') {
+    toggleEntityUnderMouse();
   }
+}
+
+function repairEntityUnderMouse() {
+  const entity = getEntityUnderMouse();
+  if (!entity) return;
+
+  entity.state.isBroken = false;
+  entity.state.isOn = true;
+  console.log("Repaired entity:", entity);
+}
+
+function toggleEntityUnderMouse() {
+  const entity = getEntityUnderMouse();
+  if (!entity) return;
+
+  entity.state.isOn = !entity.state.isOn;
+  console.log("Toggled entity:", entity);
+}
+
+function inspectEntityUnderMouse() {
+  const entity = getEntityUnderMouse();
+  if (!entity) return;
+
+  console.log("Inspect entity:", entity);
+}
+
+function getEntityUnderMouse() {
+  if (!drawGame.state) return null;
+
+  const { config, map, player, entities } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+
+  const cameraX = player.x - width / 2;
+  const cameraY = player.y - height / 2;
+
+  const worldMouseX = mouseX + cameraX;
+  const worldMouseY = mouseY + cameraY;
+
+  const tileX = floor((worldMouseX - mapOriginX) / tileSize);
+  const tileY = floor((worldMouseY - mapOriginY) / tileSize);
+
+  if (tileX < 0 || tileX >= mapCols || tileY < 0 || tileY >= mapRows) return null;
+
+  const tile = map.tiles[tileY][tileX];
+  if (tile.entityId === null) return null;
+
+  return getEntityById(entities, tile.entityId);
 }
 
 class Button {
   constructor(x, y, w, h, label, onClick) {
+    // Position and size
     this.x = x;
     this.y = y;
     this.w = w;
     this.h = h;
+
+    // Button text and click behavior
     this.label = label;
     this.onClick = onClick;
   }
 
   isHovered() {
+    // Check if mouse is inside button area
     return mouseX > this.x && mouseX < this.x + this.w &&
            mouseY > this.y && mouseY < this.y + this.h;
   }
+
   draw() {
+    push();
+
+    // Change appearance when hovered
     if (this.isHovered()) {
-      fill(220, 220, 250);
+      fill(170, 170, 175); 
+      stroke(80, 80, 85);
+      strokeWeight(2);
       cursor('pointer');
     } else {
-      fill(255);
+      fill(200, 200, 215);
+      stroke(100);
+      strokeWeight(1);
     }
-    rect(this.x, this.y, this.w, this.h, 10);
 
-    fill(30, 30, 50);
-    textSize(24);
+    // Draw button rectangle
+    rect(this.x, this.y, this.w, this.h, 4);
+
+    // Draw button label
+    fill(30, 30, 30);
+    noStroke();
+    textSize(20);
     textStyle(NORMAL);
+    textAlign(CENTER, CENTER);
     text(this.label, this.x + this.w / 2, this.y + this.h / 2);
 
-    if (!this.isHovered() && currentState != "MENU" && !backButton.isHovered()) {
-      cursor('default');
-    } else if (!this.isHovered() && currentState == "MENU" && !startButton.isHovered() && !settingsButton.isHovered()) {
-      cursor('default');
-    }
+    pop();
   }
 
   checkClick() {
+    // Run the assigned function if button is clicked
     if (this.isHovered()) {
       this.onClick();
     }
