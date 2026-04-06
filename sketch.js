@@ -313,6 +313,7 @@ function drawMiniMap(map, player, config, feedback) {
   rect(miniX - 4, miniY - 4, miniWidth + 8, miniHeight + 8, 6);
 
   stroke(210);
+  strokeWeight(1);
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
