@@ -1,5 +1,5 @@
 let currentState = "MENU";
-let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton;
+let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton, debugButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 9;
@@ -171,6 +171,8 @@ function drawGame() {
         mapRows,
         mapOriginX: 0,
         mapOriginY: 0,
+        margin: 0,
+        topMargin: 80,
         modificationRadiusTiles: 5
       },
       map: { tiles },
@@ -361,10 +363,10 @@ function drawSettings() {
 
 function drawSideBar() {
   // Ensure config is initialized before drawing sidebar
-  if (!drawGame.config) return;
+  if (!drawGame.state) return;
 
   // Get map dimensions and position from config
-  const { tileSize, mapCols, mapRows, margin, topMargin } = drawGame.config;
+  const { tileSize, mapCols, mapRows, margin, topMargin } = drawGame.state.config;
   let mapX = margin;
   let mapY = topMargin;
   let mapW = mapCols * tileSize;
@@ -655,8 +657,10 @@ function mousePressed() {
       return;
     }
 
+    if (isSidebarOpen) {
+      debugButton.checkClick();
+    }
     backButtonGame.checkClick();
-    debugButton.checkClick();
     if (backButtonGame.isHovered()) {
       backButtonGame.checkClick();
       return;
