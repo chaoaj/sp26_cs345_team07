@@ -3,6 +3,7 @@ let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButto
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 9;
+let canvas;
 let isSidebarOpen = false; 
 let sidebarX = 20 - 80; // start hidden to the left
 let sidebarWidth = 70; 
@@ -37,7 +38,8 @@ const HOTBAR_ENTITY_TYPES = [
 ];
 
 function setup() {
-  createCanvas(500, 500);
+  canvas = createCanvas(600, 600);
+  centerCanvas();
   textAlign(CENTER, CENTER);
   startButton = new Button (65, 300, 150, 50, "Start", () => {
     currentState = "GAME";
@@ -66,6 +68,19 @@ function preload() {
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
   
+}
+
+function centerCanvas() {
+  if (!canvas) {
+    return;
+  }
+  const x = max(0, (windowWidth - width) / 2);
+  const y = max(0, (windowHeight - height) / 2);
+  canvas.position(x, y);
+}
+
+function windowResized() {
+  centerCanvas();
 }
 
 function draw() {
