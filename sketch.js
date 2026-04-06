@@ -83,7 +83,9 @@ function drawGame() {
         mapCols,
         mapRows,
         mapOriginX: 0,
-        mapOriginY: 0
+        mapOriginY: 0,
+        margin: 0,
+        topMargin: 80 
       },
       map: { tiles },
       player: {
@@ -203,10 +205,10 @@ function drawSettings() {
 
 function drawSideBar() {
   // Ensure config is initialized before drawing sidebar
-  if (!drawGame.config) return;
+  if (!drawGame.state) return;
 
   // Get map dimensions and position from config
-  const { tileSize, mapCols, mapRows, margin, topMargin } = drawGame.config;
+  const { tileSize, mapCols, mapRows, margin, topMargin } = drawGame.state.config;
   let mapX = margin;
   let mapY = topMargin;
   let mapW = mapCols * tileSize;
@@ -351,7 +353,9 @@ function mousePressed() {
     }
 
     backButton.checkClick();
-    debugButton.checkClick();
+    if (isSidebarOpen) {
+      debugButton.checkClick();
+    }
   } else if (currentState == "SETTINGS") {
     backButton.checkClick();
   }
