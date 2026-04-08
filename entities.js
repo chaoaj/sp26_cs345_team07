@@ -10,7 +10,8 @@ const ENTITY_TYPES = {
   SHUTTLE: "shuttle",
   ROCKET_SITE: "rocketConstructionSite",
   SPLITTER: "splitter",
-  MERGER: "merger"
+  MERGER: "merger",
+  EXTRACTOR: "extractor"
 };
 
 // Resource identifiers used in recipes, miners, and buffers.
@@ -114,6 +115,9 @@ const ENTITY_PORT_DEFS = {
   ],
   [ENTITY_TYPES.ROCKET_SITE]: [
     { name: "input", kind: "input", offset: { x: -1, y: 0 } }
+  ],
+  [ENTITY_TYPES.EXTRACTOR]: [
+    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
   ]
 };
 
@@ -339,11 +343,10 @@ class TubeState extends EntityState {
   /**
    * Initialize tube geometry, facing, and carried item display.
    * @param {string} shape - Tube shape identifier.
+   * @param {string} facing - Cardinal direction (E/N/W/S).
    * @returns {void}
    */
-  constructor(
-    shape = TUBE_SHAPES.STRAIGHT
-  ) {
+  constructor(shape = TUBE_SHAPES.STRAIGHT, facing = "E") {
     super();
     this.isActive = true;
     // shape/facing define geometry; carriedItem is for display.
@@ -646,12 +649,7 @@ function createEntityState(type, options = {}) {
       return new ConstructorState();
 
     case ENTITY_TYPES.TUBE:
-      return new TubeState(
-        options.fromEntityId,
-        options.toEntityId,
-        options.shape,
-        options.facing
-      );
+      return new TubeState(options.shape, options.facing);
 
     case ENTITY_TYPES.SHUTTLE:
       return new ShuttleState();
@@ -664,6 +662,9 @@ function createEntityState(type, options = {}) {
 
     case ENTITY_TYPES.MERGER:
       return new MergerState();
+
+    case ENTITY_TYPES.EXTRACTOR:
+      return new MinerState(options.resourceType, options.isActive);
 
     default:
       return new EntityState();
