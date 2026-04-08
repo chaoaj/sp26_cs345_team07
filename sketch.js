@@ -7,10 +7,16 @@ let canvas;
 let isSidebarOpen = false; 
 let sidebarX = 20 - 80; // start hidden to the left
 let sidebarWidth = 70; 
+let ironOreImg, ironBarImg, ironPlateImg;
+let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
+let heliumImg, modularComponentImg;
+let sideBarFrameImg;
 
-let iron = 0;
-let copper = 0;
-let helium = 0;
+
+let ironOre = 0, ironBar = 0, ironPlate = 0;
+let copperOre = 0, copperBar = 0, copperPlate = 0, copperWire = 0;
+let helium = 0, rocketFuel = 0;
+let modularComponent = 0, shipAlloy = 0;
 
 function getEntityFillRgb(entityType) {
   if (entityType === ENTITY_TYPES.MINER) return [90, 170, 90];
@@ -66,9 +72,9 @@ function setup() {
     currentState = "GAME";
   });
   debugButton = new Button (175, 25, 100, 50, "Debug", () => {
-      iron += 1;
-      copper += 1;
-      helium += 1;
+      ironOre += 100;
+      copperOre += 1000;
+      helium += 10000;
   });
   settingsButton = new Button(65, 350, 150, 50, "Settings", () => {
     currentState = "SETTINGS";
@@ -88,7 +94,15 @@ function setup() {
 function preload() {
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
-  
+  ironOreImg = loadImage('resources/resourceIcons/ironOreIcon.png');
+  ironBarImg = loadImage('resources/resourceIcons/ironBarIcon.png');
+  ironPlateImg = loadImage('resources/resourceIcons/ironPlateIcon.png');
+  copperOreImg = loadImage('resources/resourceIcons/copperOreIcon.png');
+  copperBarImg = loadImage('resources/resourceIcons/copperBarIcon.png');
+  copperPlateImg = loadImage('resources/resourceIcons/copperPlateIcon.png');
+  copperWireImg = loadImage('resources/resourceIcons/wireIcon.png');
+  heliumImg = loadImage('resources/resourceIcons/heliumThreeIcon.png');
+  sideBarFrameImg = loadImage('resources/UI/sideBarFrame.png');
 }
 
 function centerCanvas() {
@@ -446,6 +460,17 @@ function drawSettings() {
   drawSettingsUI();
 }
 
+function sideBarText(resource) {
+  let digits = Math.floor(resource).toString().length;
+  
+  if (digits >= 5) {
+    let newSize = 12 - ((digits - 4) * 1.35);
+    textSize(Math.max(4, newSize)); 
+  } else {
+    textSize(12);
+  }
+}
+
 function drawSideBar() {
   // Ensure config is initialized before drawing sidebar
   if (!drawGame.state) return;
@@ -461,6 +486,8 @@ function drawSideBar() {
   let target = isSidebarOpen ? mapX : mapX - sidebarWidth;
   sidebarX = lerp(sidebarX, target, 0.15);
 
+  image(sideBarFrameImg, sidebarX, mapY, sidebarWidth + 7, 425);
+
   // Clip to map area so sidebar doesn't draw over hotbar or back button
   drawingContext.save();
   drawingContext.beginPath();
@@ -471,41 +498,74 @@ function drawSideBar() {
   fill (240, 240, 245, 240);
   stroke(180);
   strokeWeight(2);
-  rect(sidebarX, mapY, sidebarWidth, 400);
-  
+  //rect(sidebarX, mapY, sidebarWidth, 425);
   // Sidebar items
   fill(255, 200, 100);
   noStroke();
   let h = mapY + 20;
-  let ironName = 0;
-  let copperName = 1;
-  let heliumName = 2;
-  // Loop through 3 items and draw them in the sidebar
-  for (let i = 0; i < 3; i++) {
+  let ironOreName = 0;
+  let ironBarName = 1;
+  let ironPlateName = 2;
+  let copperOreName = 3;
+  let copperBarName = 4;
+  let copperPlateName = 5;
+  let copperWireName = 6;
+  let heliumName = 7;
+  // Loop through 8 items and draw them in the sidebar
+  for (let i = 0; i < 8; i++) {
     let rX = sidebarX + 17.5;
     let rY = h;
     let rSize = 37.5;
-    if (ironName == i) {
-      fill(67, 67, 65);
-    } else if (copperName == i) {
-      fill(255, 215, 0);
+    if (ironOreName == i) {
+      image(ironOreImg, rX, rY, rSize, rSize);
+    } else if (ironBarName == i) {
+      image(ironBarImg, rX, rY, rSize, rSize);
+    } else if (ironPlateName == i) {
+      image(ironPlateImg, rX, rY, rSize, rSize);
+    } else if (copperOreName == i) {
+      image(copperOreImg, rX, rY, rSize, rSize);
+    } else if (copperBarName == i) {
+      image(copperBarImg, rX, rY, rSize, rSize);
+    } else if (copperPlateName == i) {
+      image(copperPlateImg, rX, rY, rSize, rSize);
+    } else if (copperWireName == i) {
+      image(copperWireImg, rX, rY, rSize, rSize);
     } else if (heliumName == i) {
-      fill(0, 200, 255);
+      image(heliumImg, rX, rY, rSize, rSize);
     }
+    //if (ironName != i) {
+      //rect(rX, rY, rSize + 5, rSize, 4);
+    //}
 
-    rect(rX, rY, rSize, rSize, 4);
-
-    fill(255);
+    fill(0);
     textAlign(RIGHT, BOTTOM);
-    textSize(12);
 
     let centerX = rX + (rSize / 2) + 17;
     let centerY = rY + (rSize / 2) + 17;
-    if (ironName == i) {
-      text(iron + "x", centerX, centerY);
-    } else if (copperName == i) {
-      text(copper + "x", centerX, centerY);
+
+    if (ironOreName == i) {
+      sideBarText(ironOre);
+      text(ironOre + "x", centerX, centerY);
+    } else if (ironBarName == i) {
+      sideBarText(ironBar);
+      text(ironBar + "x", centerX, centerY);
+    } else if (ironPlateName == i) {
+      sideBarText(ironPlate);
+      text(ironPlate + "x", centerX, centerY);
+    } else if (copperOreName == i) {
+      sideBarText(copperOre);
+      text(copperOre + "x", centerX, centerY);
+    } else if (copperBarName == i) {
+      sideBarText(copperBar);
+      text(copperBar + "x", centerX, centerY);
+    } else if (copperPlateName == i) {
+      sideBarText(copperPlate);
+      text(copperPlate + "x", centerX, centerY);
+    } else if (copperWireName == i) {
+      sideBarText(copperWire);
+      text(copperWire + "x", centerX, centerY);
     } else if (heliumName == i) {
+      sideBarText(helium);
       text(helium + "x", centerX, centerY);
     }
 
@@ -519,7 +579,7 @@ function drawSideBar() {
   let tabW = 25;
   let tabH = 60;
   let tabX = sidebarX + sidebarWidth;
-  let tabY = 175 / 2;
+  let tabY = 425 / 2 - tabH / 2 + mapY;
   let isTabHovered = mouseX > tabX && mouseX < tabX + tabW &&
                      mouseY > tabY && mouseY < tabY + tabH;
 
@@ -1015,7 +1075,7 @@ function mousePressed() {
     let tabW = 25;
     let tabH = 60;
     let tabX = sidebarX + sidebarWidth;
-    let tabY = 175 / 2;
+    let tabY = 425 / 2 - tabH / 2 + drawGame.state.config.topMargin;
     if (mouseX > tabX && mouseX < tabX + tabW && mouseY > tabY && mouseY < tabY + tabH) {
       isSidebarOpen = !isSidebarOpen;
       return;
