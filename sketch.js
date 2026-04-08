@@ -902,6 +902,68 @@ function updateSmelterInputs(entities) {
   }
 }
 
+function findConstructorRecipeByTypes(types) {
+  if (typeof CONSTRUCTOR_RECIPES === "undefined") return null;
+
+  const normalized = [...types].sort().join("+");
+
+  for (const recipe of CONSTRUCTOR_RECIPES) {
+    const recipeTypes = recipe.inputs.map((input) => input.type).sort().join("+");
+    if (recipeTypes === normalized) {
+      return recipe;
+    }
+  }
+
+  return null;
+}
+
+function updateConstructorInputs(entities) {
+  const tubeSources = getTubeSourcesByTarget(entities);
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.CONSTRUCTOR) continue;
+    const constructorState = entity.state;
+    const sourceIds = tubeSources.get(entity.id) || new Set();
+    const sourceTypes = [];
+
+    for (const sourceId of sourceIds) {
+      const sourceEntity = entities.find((entry) => entry.id === sourceId);
+      const outputType = sourceEntity?.state?.outputType;
+      if (outputType) {
+        sourceTypes.push(outputType);
+      }
+    }
+
+    const uniqueTypes = [...new Set(sourceTypes)].slice(0, 2);
+    const recipe = uniqueTypes.length
+      ? findConstructorRecipeByTypes(uniqueTypes)
+      : null;
+
+    constructorState.inputSlots = [
+      { type: null, count: 0 },
+      { type: null, count: 0 }
+    ];
+
+    if (recipe) {
+      recipe.inputs.forEach((input, index) => {
+        if (index >= constructorState.inputSlots.length) return;
+        constructorState.inputSlots[index] = {
+          type: input.type,
+          count: input.count
+        };
+      });
+    } else {
+      uniqueTypes.forEach((type, index) => {
+        if (index >= constructorState.inputSlots.length) return;
+        constructorState.inputSlots[index] = { type, count: 1 };
+      });
+    }
+
+    constructorState.updateOutputFromInputs();
+    constructorState.isActive = !!constructorState.outputType;
+  }
+}
+
 class Button {
   constructor(x, y, w, h, label, onClick) {
     // Position and size
