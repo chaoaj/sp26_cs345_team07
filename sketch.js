@@ -1162,6 +1162,14 @@ function getTubeSourcesByTarget(entities) {
   return tubeSources;
 }
 
+function updateConnections(entities) {
+  refreshEntityConnectionStates(entities);
+  updateSmelterInputs(entities);
+  updateConstructorInputs(entities);
+  updateSplitterMergerRates(entities);
+  refreshEntityConnectionStates(entities);
+}
+
 function updateSmelterInputs(entities) {
   const tubeSources = getTubeSourcesByTarget(entities);
 
@@ -1253,6 +1261,61 @@ function updateConstructorInputs(entities) {
 
     constructorState.updateOutputFromInputs();
     constructorState.isActive = !!constructorState.outputType;
+  }
+}
+
+function updateSplitterMergerRates(entities) {
+  const incoming = new Map();
+  const outgoingCount = new Map();
+  const connectionKeys = new Set();
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.TUBE) continue;
+    const fromId = entity.state.fromEntityId;
+    const toId = entity.state.toEntityId;
+    if (!fromId || !toId) continue;
+
+    const key = `${fromId}->${toId}`;
+    if (connectionKeys.has(key)) continue;
+    connectionKeys.add(key);
+
+    if (!incoming.has(toId)) {
+      incoming.set(toId, []);
+    }
+    incoming.get(toId).push({
+      rate: entity.state.outputRate || 0,
+      outputType: entity.state.carriedItem || null
+    });
+
+    outgoingCount.set(fromId, (outgoingCount.get(fromId) || 0) + 1);
+  }
+
+  for (const entity of entities) {
+    if (
+      entity.type !== ENTITY_TYPES.SPLITTER &&
+      entity.type !== ENTITY_TYPES.MERGER
+    ) {
+      continue;
+    }
+
+    const inputs = incoming.get(entity.id) || [];
+    const totalRate = inputs.reduce((sum, entry) => sum + entry.rate, 0);
+    const types = inputs.map((entry) => entry.outputType).filter(Boolean);
+    const sharedType = types.length > 0 && types.every((type) => type === types[0])
+      ? types[0]
+      : null;
+
+    if (entity.type === ENTITY_TYPES.SPLITTER) {
+      entity.state.inputRate = totalRate;
+      entity.state.outputRate = totalRate / 2;
+      entity.state.outputType = sharedType;
+      entity.state.isActive = totalRate > 0;
+    } else {
+      entity.state.inputRate = totalRate;
+      entity.state.outputRate = totalRate;
+      entity.state.outputType = sharedType;
+      entity.state.isActive = totalRate > 0;
+    }
   }
 }
 
