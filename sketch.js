@@ -471,7 +471,7 @@ function drawSideBar() {
   fill (240, 240, 245, 240);
   stroke(180);
   strokeWeight(2);
-  rect(sidebarX, mapY, sidebarWidth, 175);
+  rect(sidebarX, mapY, sidebarWidth, 400);
   
   // Sidebar items
   fill(255, 200, 100);
