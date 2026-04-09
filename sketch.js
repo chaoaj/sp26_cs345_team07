@@ -62,32 +62,36 @@ function setup() {
   canvas = createCanvas(600, 600);
   centerCanvas();
   textAlign(CENTER, CENTER);
-  startButton = new Button (65, 300, 150, 50, "Start", () => {
+  startButton = new Button (90, 350, 150, 55, "Start", () => {
     currentState = "GAME";
   });
-  debugButton = new Button (175, 25, 100, 50, "Debug", () => {
-      iron += 1;
-      copper += 1;
-      helium += 1;
-  });
-  settingsButton = new Button(65, 350, 150, 50, "Settings", () => {
+  settingsButton = new Button(90, 405, 150, 55, "Settings", () => {
     currentState = "SETTINGS";
   });
+  escapeButton = new Button(90, 460, 150, 55, "Quit", () => {
+    window.close();
+  });
+
   backButtonGame = new Button(30, 20, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
-  backButtonSettings = new Button(280, 390, 100, 40, "<- Return", () => {
+  backButtonSettings = new Button(250, 430, 100, 40, "<- Return", () => {
     currentState = "MENU";
   });
-  escapeButton = new Button(65, 400, 150, 50, "Quit", () => {
-    window.close();
+
+  debugButton = new Button (175, 25, 100, 50, "Debug", () => {
+    iron += 1;
+    copper += 1;
+    helium += 1;
   });
+  
   setupSettings();
 }
 
 function preload() {
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
+  settingsBG = loadImage('resources/settingsBG.png');
   
 }
 
@@ -147,12 +151,11 @@ function drawMenu() {
   );
 
   // Draw a separate rectangle around the settings button
-  // -------- May want to change this later --------
   rect(
     settingsButton.x,
     settingsButton.y,
     settingsButton.w,
-    50,
+    55,
     2
   );
 
@@ -434,12 +437,12 @@ function drawMiniMap(map, player, config, feedback) {
 function drawSettings() {
   if (settingsPage) {
     image(settingsPage, 0, 0, width, height);
+    image(settingsBG, width / 4, 190, width / 2, height / 2);
   }
   push();
   fill("#445072");
   stroke(0);
   strokeWeight(2);
-  rect(width/2 - 135, height/2 - 85, 270, 270);
   pop();
   backButtonSettings.draw();
   drawSettingsUI();
