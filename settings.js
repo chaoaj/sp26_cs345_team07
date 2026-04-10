@@ -24,45 +24,34 @@ function setupSettings() {
 }
 
 function drawSettingsUI() {
-  // Only draw if sliders exist
+
   if (musicSlider && sfxSlider) {
+    let sliderWidth = 240;
+    let centerX = width / 2;
 
-    // Show and position music slider
+    // Get canvas position on the page so sliders align correctly
+    let canvasPos = canvas.position();
+
+    // MUSIC slider
     musicSlider.show();
-    musicSlider.position(125, 200);
-    musicSlider.style('width', '250px');
-    musicSlider.style('height', '20px');
+    musicSlider.style('width', sliderWidth + 'px');
+    musicSlider.position(canvasPos.x + centerX - sliderWidth / 2, canvasPos.y + 260);
 
-    // Show and position SFX slider
+    // SFX slider
     sfxSlider.show();
-    sfxSlider.position(125, 270);
-    sfxSlider.style('width', '250px');
-    sfxSlider.style('height', '20px');
+    sfxSlider.style('width', sliderWidth + 'px');
+    sfxSlider.position(canvasPos.x + centerX - sliderWidth / 2, canvasPos.y + 360);
 
-    // Set text style
     fill(0);
     noStroke();
-    textSize(16);
+    textSize(18);
+    textAlign(CENTER);
 
-    // Label for music
-    text("Music Volume", 200, 195);
+    text("Music Volume", centerX, 245);
+    text(`${(musicVolume * 100).toFixed(0)}%`, centerX, 295);
 
-    // Show music volume as percentage below slider
-    text(
-      `${(musicVolume * 100).toFixed(0)}%`,
-      musicSlider.x + musicSlider.width / 2,
-      musicSlider.y + 30
-    );
-
-    // Label for SFX
-    text("SFX Volume", 200, 265);
-
-    // Show SFX volume as percentage below slider
-    text(
-      `${(sfxVolume * 100).toFixed(0)}%`,
-      sfxSlider.x + sfxSlider.width / 2,
-      sfxSlider.y + 30
-    );
+    text("SFX Volume", centerX, 345);
+    text(`${(sfxVolume * 100).toFixed(0)}%`, centerX, 395);
   }
   
 }
