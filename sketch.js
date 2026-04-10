@@ -12,11 +12,10 @@ let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
 let heliumImg, modularComponentImg;
 let sideBarFrameImg;
 
-
 let ironOre = 0, ironBar = 0, ironPlate = 0;
 let copperOre = 0, copperBar = 0, copperPlate = 0, copperWire = 0;
 let helium = 0, rocketFuel = 0;
-let modularComponent = 0, shipAlloy = 0;
+let modularComponent = 0, shipAlloy = 0, electronics = 0;
 
 function getEntityFillRgb(entityType) {
   if (entityType === ENTITY_TYPES.MINER) return [90, 170, 90];
@@ -102,6 +101,8 @@ function preload() {
   copperPlateImg = loadImage('resources/resourceIcons/copperPlateIcon.png');
   copperWireImg = loadImage('resources/resourceIcons/wireIcon.png');
   heliumImg = loadImage('resources/resourceIcons/heliumThreeIcon.png');
+  modularComponentImg = loadImage('resources/resourceIcons/modularComponentIcon.png');
+  electronicsImg = loadImage('resources/resourceIcons/electronicsIcon.png');
   sideBarFrameImg = loadImage('resources/UI/sideBarFrame.png');
 }
 
@@ -486,7 +487,7 @@ function drawSideBar() {
   let target = isSidebarOpen ? mapX : mapX - sidebarWidth;
   sidebarX = lerp(sidebarX, target, 0.15);
 
-  image(sideBarFrameImg, sidebarX, mapY, sidebarWidth + 7, 425);
+  image(sideBarFrameImg, sidebarX, mapY, sidebarWidth + 7, 435);
 
   // Clip to map area so sidebar doesn't draw over hotbar or back button
   drawingContext.save();
@@ -494,11 +495,6 @@ function drawSideBar() {
   drawingContext.rect(mapX, mapY, mapW, mapH);
   drawingContext.clip();
 
-  // Sidebar background
-  fill (240, 240, 245, 240);
-  stroke(180);
-  strokeWeight(2);
-  //rect(sidebarX, mapY, sidebarWidth, 425);
   // Sidebar items
   fill(255, 200, 100);
   noStroke();
@@ -511,11 +507,13 @@ function drawSideBar() {
   let copperPlateName = 5;
   let copperWireName = 6;
   let heliumName = 7;
-  // Loop through 8 items and draw them in the sidebar
-  for (let i = 0; i < 8; i++) {
+  let electronicsName = 8;
+  let modularComponentName = 9;
+  // Loop through 10 items and draw them in the sidebar
+  for (let i = 0; i < 10; i++) {
     let rX = sidebarX + 17.5;
     let rY = h;
-    let rSize = 37.5;
+    let rSize = 35;
     if (ironOreName == i) {
       image(ironOreImg, rX, rY, rSize, rSize);
     } else if (ironBarName == i) {
@@ -532,10 +530,11 @@ function drawSideBar() {
       image(copperWireImg, rX, rY, rSize, rSize);
     } else if (heliumName == i) {
       image(heliumImg, rX, rY, rSize, rSize);
+    } else if (electronicsName == i) {
+      image(electronicsImg, rX, rY, rSize, rSize);
+    } else if (modularComponentName == i) {
+      image(modularComponentImg, rX, rY, rSize, rSize);
     }
-    //if (ironName != i) {
-      //rect(rX, rY, rSize + 5, rSize, 4);
-    //}
 
     fill(0);
     textAlign(RIGHT, BOTTOM);
@@ -567,10 +566,17 @@ function drawSideBar() {
     } else if (heliumName == i) {
       sideBarText(helium);
       text(helium + "x", centerX, centerY);
+    } else if (electronicsName == i) {
+      sideBarText(electronics);
+      text(electronics + "x", centerX, centerY);
+    } else if (modularComponentName == i) {
+      sideBarText(modularComponent);
+      text(modularComponent + "x", centerX, centerY);
     }
 
+
     fill(255, 200, 100);
-    h += 50;
+    h += 40;
   }
 
   drawingContext.restore();
