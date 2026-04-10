@@ -3,7 +3,7 @@ let currentState = "MENU";
 let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton, debugButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
-const hotbarSlots = 9;
+const hotbarSlots = 6;
 let canvas;
 let isSidebarOpen = false; 
 let sidebarX = 20 - 80;
@@ -32,11 +32,8 @@ const HOTBAR_ENTITY_TYPES = [
   ENTITY_TYPES.SMELTER,
   ENTITY_TYPES.CONSTRUCTOR,
   ENTITY_TYPES.TUBE,
-  ENTITY_TYPES.SHUTTLE,
-  ENTITY_TYPES.ROCKET_SITE,
   ENTITY_TYPES.SPLITTER,
   ENTITY_TYPES.MERGER,
-  ENTITY_TYPES.EXTRACTOR
 ];
 
 const HOTBAR_BUILDING_NAMES = [
@@ -44,11 +41,8 @@ const HOTBAR_BUILDING_NAMES = [
   "Smelter",
   "Constructor",
   "Tube",
-  "Shuttle",
-  "Rocket site",
   "Splitter",
   "Merger",
-  "Extractor"
 ];
 
 const hotbarItems = HOTBAR_ENTITY_TYPES.map((entityType, i) => ({
@@ -337,13 +331,19 @@ function drawGame() {
     if (holoHit && !isResourceNodeTile(holoHit.tile)) {
       const hpx = holoHit.col * tileSize;
       const hpy = holoHit.row * tileSize;
+      const previewOptions = getPlacementOptionsForEntity(
+        item.entityType,
+        holoHit.tile
+      );
       drawBuildingPlacementHologram(
         hpx,
         hpy,
         tileSize,
         item.color,
         hotbarItemLabel(item),
-        drawGame.state.placementFacing || "E"
+        drawGame.state.placementFacing || "E",
+        item.entityType,
+        previewOptions
       );
     }
   }
@@ -730,7 +730,52 @@ function drawPlacedBuildingLetter(px, py, tileSize, building) {
   textStyle(NORMAL);
 }
 
-function drawBuildingPlacementHologram(px, py, tileSize, colorRgb, label, facing) {
+function getPlacementPreviewPorts(entityType, options = {}) {
+  if (!entityType) {
+    return [];
+  }
+  if (entityType === ENTITY_TYPES.TUBE) {
+    const shape = options.shape || TUBE_SHAPES.STRAIGHT;
+    const def = TUBE_PORT_DEFS[shape] || TUBE_PORT_DEFS[TUBE_SHAPES.STRAIGHT];
+    return [
+      { kind: "input", offset: def.input },
+      { kind: "output", offset: def.output }
+    ];
+  }
+  const defs = ENTITY_PORT_DEFS[entityType];
+  if (!defs) {
+    return [];
+  }
+  return defs.map((port) => ({ kind: port.kind, offset: port.offset }));
+}
+
+function drawPlacementPorts(ports, tileSize) {
+  for (const port of ports) {
+    const portPx = port.offset.x * tileSize;
+    const portPy = port.offset.y * tileSize;
+
+    noStroke();
+    if (port.kind === "output") {
+      fill(0, 200, 0, 180);
+    } else if (port.kind === "input") {
+      fill(255, 165, 0, 180);
+    } else {
+      fill(60, 190, 190, 180);
+    }
+    circle(portPx, portPy, 10);
+  }
+}
+
+function drawBuildingPlacementHologram(
+  px,
+  py,
+  tileSize,
+  colorRgb,
+  label,
+  facing,
+  entityType,
+  options
+) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
   push();
@@ -746,6 +791,11 @@ function drawBuildingPlacementHologram(px, py, tileSize, colorRgb, label, facing
   textStyle(BOLD);
   textAlign(CENTER, CENTER);
   text(label, 0, 0);
+
+  const ports = getPlacementPreviewPorts(entityType, options);
+  if (ports.length) {
+    drawPlacementPorts(ports, tileSize);
+  }
   pop();
   textStyle(NORMAL);
 }
@@ -1103,6 +1153,7 @@ function drawModificationRangeIndicator(config, feedback) {
 }
 
 function drawHotbar() {
+  push();
   let slotSize = 42;
   let gap = 8;
   let totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
@@ -1160,6 +1211,7 @@ function drawHotbar() {
       text(getEntityShortLabel(HOTBAR_ENTITY_TYPES[i]), x + slotSize / 2, y - 6);
     }
   }
+  pop();
 }
 
 function mousePressed() {
@@ -1235,6 +1287,7 @@ function placeSelectedEntityAtMouse() {
   const options = getPlacementOptionsForTile(type, tile);
 
   const newEntity = createEntity(type, tileX, tileY, options);
+  newEntity.state.facing = drawGame.state.placementFacing || "E";
 
   entities.push(newEntity);
   tile.entityId = newEntity.id;
@@ -1264,9 +1317,9 @@ function getPlacementOptionsForTile(type, tile) {
     };
   }
 
-    placeBuildingFromHotbar(hit.tile, selectedItem, hit.row, hit.col);
-  }
+  return getPlacementOptionsForEntity(type, tile);
 }
+
 
 function keyPressed() {
   if (currentState != "GAME") {
@@ -1493,6 +1546,7 @@ function updateSmelterInputs(entities) {
     smelterState.inputType = inputType;
     smelterState.currentRecipe = inputType;
     smelterState.isActive = !!inputType;
+    smelterState.isOn = !!inputType;
     smelterState.outputType = smelterState.recipes?.get(inputType) || null;
     smelterState.inputRate = inputType ? 1 : 0;
     smelterState.outputRate = smelterState.outputType ? 1 : 0;
@@ -1569,17 +1623,28 @@ function updateConstructorInputs(entities) {
 function updateSplitterMergerRates(entities) {
   const incoming = new Map();
   const outgoingCount = new Map();
-  const connectionKeys = new Set();
+  const incomingKeys = new Set();
+  const outgoingKeys = new Set();
 
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.TUBE) continue;
     const fromId = entity.state.fromEntityId;
     const toId = entity.state.toEntityId;
-    if (!fromId || !toId) continue;
+    const componentId = entity.state.componentId;
+    const componentKey = componentId != null ? `c:${componentId}` : `t:${entity.id}`;
 
-    const key = `${fromId}->${toId}`;
-    if (connectionKeys.has(key)) continue;
-    connectionKeys.add(key);
+    if (fromId) {
+      const outKey = `${fromId}|${componentKey}`;
+      if (!outgoingKeys.has(outKey)) {
+        outgoingKeys.add(outKey);
+        outgoingCount.set(fromId, (outgoingCount.get(fromId) || 0) + 1);
+      }
+    }
+
+    if (!fromId || !toId) continue;
+    const inKey = `${toId}|${componentKey}`;
+    if (incomingKeys.has(inKey)) continue;
+    incomingKeys.add(inKey);
 
     if (!incoming.has(toId)) {
       incoming.set(toId, []);
@@ -1608,15 +1673,17 @@ function updateSplitterMergerRates(entities) {
       : null;
 
     if (entity.type === ENTITY_TYPES.SPLITTER) {
+      const outputCount = outgoingCount.get(entity.id) || 0;
+      const perOutputRate = outputCount > 0 ? totalRate / outputCount : 0;
       entity.state.inputRate = totalRate;
-      entity.state.outputRate = totalRate / 2;
+      entity.state.outputRate = sharedType ? perOutputRate : 0;
       entity.state.outputType = sharedType;
-      entity.state.isActive = totalRate > 0;
+      entity.state.isActive = !!sharedType && totalRate > 0;
     } else {
       entity.state.inputRate = totalRate;
-      entity.state.outputRate = totalRate;
+      entity.state.outputRate = sharedType ? totalRate : 0;
       entity.state.outputType = sharedType;
-      entity.state.isActive = totalRate > 0;
+      entity.state.isActive = !!sharedType && totalRate > 0;
     }
   }
 }
