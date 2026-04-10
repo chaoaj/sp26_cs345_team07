@@ -5,7 +5,7 @@ let selectedHotbarSlot = 0;
 const hotbarSlots = 9;
 let canvas;
 let isSidebarOpen = false; 
-let sidebarX = 20 - 80; // start hidden to the left
+let sidebarX = -70; // start hidden to the left
 let sidebarWidth = 70; 
 let ironOreImg, ironBarImg, ironPlateImg;
 let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
