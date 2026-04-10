@@ -27,9 +27,18 @@ const RESOURCE_TYPES = {
   GEAR: "gear",
   SHIP_ALLOY: "shipAlloy",
   ELECTRONICS: "electronics",
-  // helium3 -> rocketFuel through constructor
   HELIUM3: "helium3",
   ROCKET_FUEL: "rocketFuel",
+};
+
+// Tile types that count as mineable resource nodes
+const MINEABLE_TILE_TYPES = new Set(["iron", "copper", "helium3"]);
+
+// Map tile type -> resource output type for miners
+const TILE_TO_RESOURCE = {
+  iron: RESOURCE_TYPES.IRON_ORE,
+  copper: RESOURCE_TYPES.COPPER_ORE,
+  helium3: RESOURCE_TYPES.HELIUM3
 };
 
 // Tube geometry options for straight and corner placement.
@@ -133,34 +142,34 @@ const ROTATE_FROM_EAST = {
 let nextEntityId = 1;
 
 class EntityState {
-  /**
-   * Initialize base fields for directional, rate-based entities.
-   * @returns {void}
-   */
   constructor() {
-    this.isActive = false;          // on/off (actively processing things)
-    this.facing = "E";    // for buildings with directionality, default east (right)  
-    this.inputType = null;       // current input item or null
-    this.outputType = null;   // output type
-    this.inputRate = 0;      // items/sec or null
-    this.outputRate = 0;     // items/sec or null
+    this.isOn = false;
+    this.isActive = false;
+    this.isBroken = false;
+    this.facing = "E";
+    this.inputType = null;
+    this.outputType = null;
+    this.inputRate = 0;
+    this.outputRate = 0;
+    this.isConnected = false;
   }
 }
 
 // produce 2 ore/sec
-// integration requirements: 
-// * pass outputType to constructor based on placement
-// * pass isActive to constructor based on placement.
 class MinerState extends EntityState {
   /**
    * Initialize miner output type/activity and compute initial rates.
    * @param {string|null} outputType - Resource type to emit or null.
-   * @param {boolean} isActive - Whether the miner starts active.
+   * @param {boolean} isOnResourceNode - Whether the miner is placed on a resource node.
    * @returns {void}
    */
-  constructor(outputType = null, isActive = false) {
+  constructor(outputType = null, isOnResourceNode = false) {
     super();
-    this.isActive = !!isActive;
+
+    // Miner is ON only when placed on a valid resource node
+    this.isOn = !!isOnResourceNode;
+    this.isActive = this.isOn;
+
     // valid OUTPUTS
     const validOutputs = new Set([
       RESOURCE_TYPES.IRON_ORE,
@@ -173,70 +182,72 @@ class MinerState extends EntityState {
       ? outputType
       : null;
 
-    this.outputRate = 0; // item/sec
+    // If not on a resource node, force outputType to null
+    if (!this.isOn) {
+      this.outputType = null;
+    }
+
+    this.outputRate = 0;
+    this.harvestAccumulator = 0; // accumulates fractional harvest ticks
     this.updateOutputRate();
   }
 
   /**
-   * Recompute outputRate from isActive and outputType.
+   * Recompute outputRate from isOn, isActive and outputType.
    * @returns {void}
    */
   updateOutputRate() {
-    this.outputRate = this.isActive && this.outputType ? 2 : 0;
+    this.outputRate = (this.isOn && this.isActive && this.outputType) ? 2 : 0;
+  }
+
+  /**
+   * Called each frame with deltaTime to accumulate harvested resources.
+   * Returns the number of whole items harvested this tick.
+   * @param {number} dt - Delta time in seconds.
+   * @returns {number} Number of items produced this tick.
+   */
+  harvest(dt) {
+    if (!this.isOn || !this.isActive || !this.outputType) return 0;
+
+    this.harvestAccumulator += this.outputRate * dt;
+    const produced = Math.floor(this.harvestAccumulator);
+    this.harvestAccumulator -= produced;
+    return produced;
   }
 }
 
-// produce 1 bar/sec and consume 1 ore/sec
-// integration requirements: 
-// * updateSmelterInputs() exist to update inputType for smelters
 class SmelterState extends EntityState {
-  /**
-   * Initialize smelter inputs, recipe mapping, and buffers.
-   * @param {string|null} inputType - Initial ore input type or null.
-   * @returns {void}
-   */
   constructor(inputType = null) {
     super();
-    // valid inputs
     this.acceptedInputs = [
       RESOURCE_TYPES.IRON_ORE,
       RESOURCE_TYPES.COPPER_ORE
     ];
     const validInputs = new Set(this.acceptedInputs);
 
-    // map inputs to outputs
     this.recipes = new Map([
       [RESOURCE_TYPES.IRON_ORE, RESOURCE_TYPES.IRON_BAR],
       [RESOURCE_TYPES.COPPER_ORE, RESOURCE_TYPES.COPPER_BAR]
     ]);
 
-    // must be a valid inputType
     this.inputType = validInputs.has(inputType)
       ? inputType
       : null;
-    this.inputRate = this.inputType ? 1 : 0; // ore/sec
+    this.inputRate = this.inputType ? 1 : 0;
     this.storedInput = 0;
     this.currentRecipe = this.inputType ? this.inputType : null;
 
     this.outputType = this.recipes.get(this.inputType);
-    this.outputRate = this.outputType ? 1 : 0; // bar/sec
+    this.outputRate = this.outputType ? 1 : 0;
     this.outputBuffer = 0;
   }
 
-  /**
-   * Returns true if there is enough stored input to craft once.
-   * @returns {boolean} True when a craft can occur.
-   */
   canCraft() {
     return this.isActive &&
       this.currentRecipe &&
       this.storedInput >= 2;
   }
 
-  /**
-   * Consumes 2 ore and adds 1 bar to the output buffer.
-   * @returns {boolean} True when a craft was performed.
-   */
   craftOnce() {
     if (!this.canCraft()) return false;
 
@@ -250,17 +261,11 @@ class SmelterState extends EntityState {
   }
 }
 
-// produce RECIPE outputs/sec based on inputs (see recipes.js)
-// integration requirements:
-// * updateConstructorInputs() exist to update constructor states
 class ConstructorState extends EntityState {
-  /**
-   * Initialize constructor slots, buffers, and rate fields.
-   * @returns {void}
-   */
   constructor() {
     super();
     this.isActive = true;
+    this.isOn = true;
     this.inputSlots = [
       { type: null, count: 0 },
       { type: null, count: 0 }
@@ -273,10 +278,6 @@ class ConstructorState extends EntityState {
     this.outputRate = 0;
   }
 
-  /**
-   * Update output fields and rates based on inputSlots.
-   * @returns {object|null} Matching recipe or null if none match.
-   */
   updateOutputFromInputs() {
     const recipe = getConstructorRecipeForInputs(this.inputSlots);
 
@@ -290,10 +291,6 @@ class ConstructorState extends EntityState {
     return recipe;
   }
 
-  /**
-   * Returns true if inputSlots satisfy a recipe.
-   * @returns {boolean} True when a recipe can be crafted.
-   */
   canCraft() {
     const recipe = getConstructorRecipeForInputs(this.inputSlots);
     if (!recipe || !this.isActive) return false;
@@ -304,10 +301,6 @@ class ConstructorState extends EntityState {
     });
   }
 
-  /**
-   * Consume recipe inputs and add outputs to the buffer.
-   * @returns {boolean} True when inputs were consumed.
-   */
   consumeInputs() {
     const recipe = getConstructorRecipeForInputs(this.inputSlots);
     if (!recipe || !this.isActive) return false;
@@ -335,10 +328,6 @@ class ConstructorState extends EntityState {
   }
 }
 
-// move materials around
-// integration requirements:
-// * some logic to allow rotating tubes
-// * some logic to allow corner tubes to be placed.
 class TubeState extends EntityState {
   /**
    * Initialize tube geometry, facing, and carried item display.
@@ -348,27 +337,19 @@ class TubeState extends EntityState {
    */
   constructor(shape = TUBE_SHAPES.STRAIGHT, facing = "E") {
     super();
+    this.isOn = true;
     this.isActive = true;
-    // shape/facing define geometry; carriedItem is for display.
     this.shape = shape === TUBE_SHAPES.CORNER ? shape : TUBE_SHAPES.STRAIGHT;
-    const facingValue = typeof facing === "string" ? facing : "E";
-    this.facing = ROTATE_FROM_EAST[facingValue] ? facingValue : "E";
+    this.facing = "E";
     this.carriedItem = null;
     this.isConnected = false;
   }
 }
 
 class ShuttleState extends EntityState {
-  /**
-   * Initialize shuttle inventory and input defaults.
-   * @returns {void}
-   */
-  // integration requirements:
-  // * updateShuttleInputs() to assign inputType/outputType from connected tubes.
-  // * updateShuttleActivity() to set isActive based on connectivity or task state.
-  // * consumeInputs()/produceOutputs() to move items into/out of buffers.
   constructor() {
     super();
+    this.isOn = true;
     this.isActive = true;
     this.inventory = {
       ironPlate: 10,
@@ -387,16 +368,9 @@ class ShuttleState extends EntityState {
 }
 
 class RocketConstructionSiteState extends EntityState {
-  /**
-   * Initialize construction requirements and progress state.
-   * @returns {void}
-   */
-  // integration requirements:
-  // * updateRocketSiteInputs() to assign inputType from connected tubes.
-  // * updateRocketSiteActivity() to set isActive when receiving valid inputs.
-  // * consumeInputs() to increment delivered counts and drive buildProgress.
   constructor() {
     super();
+    this.isOn = false;
     this.isActive = false;
     this.required = {
       rocketFuel: 20,
@@ -421,50 +395,39 @@ class RocketConstructionSiteState extends EntityState {
   }
 }
 
-// split input tube into to tubes (divided by two)
-// integration requirements:
-// * updateSplitterMergerRates() to update rates based on tube connections
 class SplitterState extends EntityState {
-  /**
-   * Initialize splitter rates and output selection.
-   * @returns {void}
-   */
   constructor() {
     super();
+    this.isOn = true;
     this.isActive = true;
-
     this.chosenOutput = null;
     this.inputRate = 1;
     this.outputRate = 1;
   }
 }
 
-// combine two input tubes into one output tube (sum the tubes)
-// integration requirements:
-// * updateSplitterMergerRates() to update rates based on tube connections
 class MergerState extends EntityState {
-  /**
-   * Initialize merger rates and output selection.
-   * @returns {void}
-   */
   constructor() {
     super();
+    this.isOn = true;
     this.isActive = true;
-
     this.chosenOutput = null;
     this.inputRate = 2;
     this.outputRate = 1;
   }
 }
+
+class ExtractorState extends EntityState {
+  constructor(resourceType = null) {
+    super();
+    this.isOn = true;
+    this.isActive = true;
+    this.outputType = resourceType || RESOURCE_TYPES.HELIUM3;
+    this.outputRate = 1;
+  }
+}
+
 class Entity {
-  /**
-   * Create a world entity with unique ID, location, and state.
-   * @param {string} type - Entity type identifier.
-   * @param {number} tileX - Tile X position.
-   * @param {number} tileY - Tile Y position.
-   * @param {EntityState} state - State instance for this entity.
-   * @returns {void}
-   */
   constructor(type, tileX, tileY, state) {
     this.id = nextEntityId++;
     this.type = type;
@@ -476,9 +439,6 @@ class Entity {
 
 /**
  * Rotate a tile offset from east-facing orientation to the given facing.
- * @param {{x: number, y: number}} offset - Offset in east-facing space.
- * @param {string} facing - Cardinal direction (E/N/W/S).
- * @returns {{x: number, y: number}} Rotated offset.
  */
 function rotateOffsetFromEast(offset, facing) {
   const rotate = ROTATE_FROM_EAST[facing] || ROTATE_FROM_EAST.E;
@@ -486,10 +446,23 @@ function rotateOffsetFromEast(offset, facing) {
 }
 
 /**
- * Get tube input/output offsets based on shape and facing.
- * @param {Entity} tube - Tube entity.
- * @returns {{input: {x: number, y: number}, output: {x: number, y: number}}} Port offsets.
+ * Check if a tile type is a mineable resource node.
+ * @param {string} tileType - The tile type string.
+ * @returns {boolean} True if the tile is a resource node.
  */
+function isMineableTile(tileType) {
+  return MINEABLE_TILE_TYPES.has(tileType);
+}
+
+/**
+ * Get the resource type produced by mining a given tile type.
+ * @param {string} tileType - The tile type string.
+ * @returns {string|null} Resource type or null if not mineable.
+ */
+function getResourceForTileType(tileType) {
+  return TILE_TO_RESOURCE[tileType] || null;
+}
+
 function getTubePortOffsets(tube) {
   const shape = tube.state?.shape || TUBE_SHAPES.STRAIGHT;
   const facing = tube.state?.facing || "E";
@@ -501,11 +474,6 @@ function getTubePortOffsets(tube) {
   };
 }
 
-/**
- * Get world coordinates for tube ports (input/output or both for corners).
- * @param {Entity} tube - Tube entity.
- * @returns {Array<{kind: string, worldX: number, worldY: number}>} Port tiles.
- */
 function getTubePortTiles(tube) {
   const offsets = getTubePortOffsets(tube);
   const isCorner = tube.state?.shape === TUBE_SHAPES.CORNER;
@@ -526,22 +494,11 @@ function getTubePortTiles(tube) {
   ];
 }
 
-/**
- * Get offsets used for tube adjacency checks.
- * @param {Entity} tube - Tube entity.
- * @returns {Array<{x: number, y: number}>} Offsets for neighbor checks.
- */
 function getTubeConnectionOffsets(tube) {
   const offsets = getTubePortOffsets(tube);
   return [offsets.input, offsets.output];
 }
 
-/**
- * Find entity ports that connect to this tube based on offsets.
- * @param {Array<Entity>} entities - All entities in the world.
- * @param {Entity} tube - Tube entity to test.
- * @returns {Array<{kind: string, entityId: number}>} Matching port connections.
- */
 function getTubePortConnections(entities, tube) {
   const offsets = getTubeConnectionOffsets(tube);
   const offsetKeys = new Set(offsets.map((offset) => `${offset.x},${offset.y}`));
@@ -559,12 +516,6 @@ function getTubePortConnections(entities, tube) {
   return connections;
 }
 
-/**
- * Return a set of offset keys where the tube touches entity ports.
- * @param {Array<Entity>} entities - All entities in the world.
- * @param {Entity} tube - Tube entity to test.
- * @returns {Set<string>} Set of offset keys ("dx,dy") for entity port contacts.
- */
 function getTubeEntityOffsetConnections(entities, tube) {
   const portMatches = getPortsAtTile(entities, tube.tileX, tube.tileY);
   const offsets = new Set();
@@ -578,11 +529,6 @@ function getTubeEntityOffsetConnections(entities, tube) {
   return offsets;
 }
 
-/**
- * Return world-space ports for an entity, rotated by facing.
- * @param {Entity} entity - Entity to compute ports for.
- * @returns {Array<{name: string, kind: string, offset: {x: number, y: number}, worldX: number, worldY: number}>} Ports.
- */
 function getEntityConnectionPorts(entity) {
   const portDefs = ENTITY_PORT_DEFS[entity.type];
   if (!portDefs) return [];
@@ -599,13 +545,6 @@ function getEntityConnectionPorts(entity) {
   });
 }
 
-/**
- * Find all entity ports located on a specific tile.
- * @param {Array<Entity>} entities - All entities in the world.
- * @param {number} tileX - Tile X coordinate to query.
- * @param {number} tileY - Tile Y coordinate to query.
- * @returns {Array<{entity: Entity, port: object}>} Entities/ports on that tile.
- */
 function getPortsAtTile(entities, tileX, tileY) {
   const matches = [];
 
@@ -621,26 +560,14 @@ function getPortsAtTile(entities, tileX, tileY) {
   return matches;
 }
 
-/**
- * Find a single entity by ID.
- * @param {Array<Entity>} entities - All entities in the world.
- * @param {number} id - Entity ID to search for.
- * @returns {Entity|null} Matching entity or null when not found.
- */
 function getEntityById(entities, id) {
   return entities.find((entity) => entity.id === id) || null;
 }
 
-/**
- * Factory: create a state object for a given entity type.
- * @param {string} type - Entity type identifier.
- * @param {object} options - Optional creation options.
- * @returns {EntityState} New state instance.
- */
 function createEntityState(type, options = {}) {
   switch (type) {
     case ENTITY_TYPES.MINER:
-      return new MinerState(options.resourceType, options.isActive);
+      return new MinerState(options.resourceType, options.isOnResourceNode);
 
     case ENTITY_TYPES.SMELTER:
       return new SmelterState();
@@ -671,24 +598,10 @@ function createEntityState(type, options = {}) {
   }
 }
 
-/**
- * Factory: create an entity with an ID and state.
- * @param {string} type - Entity type identifier.
- * @param {number} tileX - Tile X position.
- * @param {number} tileY - Tile Y position.
- * @param {object} options - Optional creation options.
- * @returns {Entity} New entity instance.
- */
 function createEntity(type, tileX, tileY, options = {}) {
   return new Entity(type, tileX, tileY, createEntityState(type, options));
 }
 
-
-/**
- * Recompute tube networks, rates, carried items, and attached entity flags.
- * @param {Array<Entity>} entities - All entities in the world.
- * @returns {void}
- */
 function refreshEntityConnectionStates(entities) {
   const attachedIds = new Set();
   const tubeById = new Map();
