@@ -1,3 +1,4 @@
+// sketch.js
 let currentState = "MENU";
 let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton, debugButton;
 let titlePage, settingsPage;
@@ -5,12 +6,17 @@ let selectedHotbarSlot = 0;
 const hotbarSlots = 9;
 let canvas;
 let isSidebarOpen = false; 
-let sidebarX = 20 - 80; // start hidden to the left
+let sidebarX = -70; // start hidden to the left
 let sidebarWidth = 70; 
+let ironOreImg, ironBarImg, ironPlateImg;
+let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
+let heliumImg, modularComponentImg;
+let sideBarFrameImg;
 
-let iron = 0;
-let copper = 0;
-let helium = 0;
+let ironOre = 0, ironBar = 0, ironPlate = 0;
+let copperOre = 0, copperBar = 0, copperPlate = 0, copperWire = 0;
+let helium = 0, rocketFuel = 0;
+let modularComponent = 0, shipAlloy = 0, electronics = 0;
 
 function getEntityFillRgb(entityType) {
   if (entityType === ENTITY_TYPES.MINER) return [90, 170, 90];
@@ -68,6 +74,11 @@ function setup() {
   settingsButton = new Button(90, 405, 150, 55, "Settings", () => {
     currentState = "SETTINGS";
   });
+  debugButton = new Button (175, 25, 100, 50, "Debug", () => {
+      ironOre += 100;
+      copperOre += 1000;
+      helium += 10000;
+  });
   escapeButton = new Button(90, 460, 150, 55, "Quit", () => {
     window.close();
   });
@@ -78,21 +89,24 @@ function setup() {
   backButtonSettings = new Button(250, 430, 100, 40, "<- Return", () => {
     currentState = "MENU";
   });
-
-  debugButton = new Button (175, 25, 100, 50, "Debug", () => {
-    iron += 1;
-    copper += 1;
-    helium += 1;
-  });
-  
   setupSettings();
-}
+};
 
 function preload() {
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
   settingsBG = loadImage('resources/settingsBG.png');
-  
+  ironOreImg = loadImage('resources/resourceIcons/ironOreIcon.png');
+  ironBarImg = loadImage('resources/resourceIcons/ironBarIcon.png');
+  ironPlateImg = loadImage('resources/resourceIcons/ironPlateIcon.png');
+  copperOreImg = loadImage('resources/resourceIcons/copperOreIcon.png');
+  copperBarImg = loadImage('resources/resourceIcons/copperBarIcon.png');
+  copperPlateImg = loadImage('resources/resourceIcons/copperPlateIcon.png');
+  copperWireImg = loadImage('resources/resourceIcons/wireIcon.png');
+  heliumImg = loadImage('resources/resourceIcons/heliumThreeIcon.png');
+  modularComponentImg = loadImage('resources/resourceIcons/modularComponentIcon.png');
+  electronicsImg = loadImage('resources/resourceIcons/electronicsIcon.png');
+  sideBarFrameImg = loadImage('resources/UI/sideBarFrame.png');
 }
 
 function centerCanvas() {
@@ -123,25 +137,19 @@ function draw() {
 }
 
 function drawMenu() {
-
-  // Draw the background image
   if (titlePage) {
     image(titlePage, 0, 0, width, height);
   }
 
-  push(); // Save current drawing style
-
-  // Set style for button outlines
+  push();
   noFill();
   stroke(0);
   strokeWeight(3);
 
-  // Draw buttons
   startButton.draw();
   settingsButton.draw();
   escapeButton.draw();
 
-  // Draw a rectangle around all buttons (from start to escape)
   rect(
     startButton.x,
     startButton.y,
@@ -150,7 +158,6 @@ function drawMenu() {
     2
   );
 
-  // Draw a separate rectangle around the settings button
   rect(
     settingsButton.x,
     settingsButton.y,
@@ -184,6 +191,15 @@ function drawGame() {
       tiles.push(row);
     }
 
+    // Resource patches for testing
+    tiles[6][6].type = "iron";
+    tiles[6][7].type = "iron";
+    tiles[10][12].type = "copper";
+    tiles[11][12].type = "copper";
+    tiles[18][17].type = "helium3";
+    tiles[18][18].type = "helium3";
+    tiles[19][17].type = "helium3";
+    tiles[19][18].type = "helium3";
     // Existing terrain
     for (let x = 4; x < 11; x++) {
       tiles[6][x].type = "dirt";
@@ -282,13 +298,16 @@ function drawGame() {
   player.x = constrain(player.x, mapOriginX + halfPlayer, mapOriginX + mapWidth - halfPlayer);
   player.y = constrain(player.y, mapOriginY + halfPlayer, mapOriginY + mapHeight - halfPlayer);
 
+  // --- Miner harvesting tick ---
+  updateMinerHarvesting(entities, dt);
+
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
 
   push();
   translate(-cameraX, -cameraY);
 
-
+  // Draw tiles
   push();
   stroke(200);
   strokeWeight(1);
@@ -336,7 +355,52 @@ function drawGame() {
   drawResourceHoverTooltip();
 }
 
-function drawEntities(entities, tileSize) {
+/**
+ * Draw a small colored dot in the top-left corner of resource tiles.
+ * Green if a miner is placed on it, red otherwise.
+ */
+function drawResourceNodeIndicator(tileX, tileY, tile, tileSize) {
+  const px = tileX * tileSize;
+  const py = tileY * tileSize;
+
+  const hasMiner = tile.entityId !== null && tile.entity !== null;
+
+  noStroke();
+  if (hasMiner) {
+    fill(0, 220, 0); // green = miner placed, ON
+  } else {
+    fill(220, 0, 0); // red = no miner, available node
+  }
+  circle(px + 6, py + 6, 8);
+}
+
+/**
+ * Update all miners: accumulate harvested resources into global counters.
+ */
+function updateMinerHarvesting(entities, dt) {
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.MINER) continue;
+    if (!entity.state.isOn) continue;
+
+    const produced = entity.state.harvest(dt);
+    if (produced <= 0) continue;
+
+    // Add to global resource counters
+    switch (entity.state.outputType) {
+      case RESOURCE_TYPES.IRON_ORE:
+        ironOre += produced;
+        break;
+      case RESOURCE_TYPES.COPPER_ORE:
+        copperOre += produced;
+        break;
+      case RESOURCE_TYPES.HELIUM3:
+        helium += produced;
+        break;
+    }
+  }
+}
+
+function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
 
@@ -345,6 +409,18 @@ function drawEntities(entities, tileSize) {
     const py = entity.tileY * tileSize;
 
     stroke(50);
+    strokeWeight(1);
+
+    if (entity.type === ENTITY_TYPES.MINER) fill(90, 170, 90);
+    else if (entity.type === ENTITY_TYPES.SMELTER) fill(200, 120, 80);
+    else if (entity.type === ENTITY_TYPES.CONSTRUCTOR) fill(90, 140, 220);
+    else if (entity.type === ENTITY_TYPES.TUBE) fill(120, 120, 120);
+    else if (entity.type === ENTITY_TYPES.SHUTTLE) fill(230, 230, 120);
+    else if (entity.type === ENTITY_TYPES.ROCKET_SITE) fill(180, 180, 255);
+    else if (entity.type === ENTITY_TYPES.SPLITTER) fill(180, 120, 220);
+    else if (entity.type === ENTITY_TYPES.MERGER) fill(120, 220, 180);
+    else if (entity.type === ENTITY_TYPES.EXTRACTOR) fill(120, 255, 255);
+    else fill(200);
     const rgb = getEntityFillRgb(entity.type);
     fill(rgb[0], rgb[1], rgb[2]);
 
@@ -358,15 +434,54 @@ function drawEntities(entities, tileSize) {
       strokeWeight(1);
     }
 
+    // Small on/off indicator (top-right corner)
     noStroke();
     const powerOn =
       entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
     fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
     circle(px + tileSize - 8, py + 8, 8);
 
+    // Draw output port indicators (green circles at port positions)
+    drawEntityPorts(entity, tileSize);
+
+    // Draw label
     fill(20);
     noStroke();
     text(getEntityShortLabel(entity.type), px + tileSize / 2, py + tileSize / 2);
+  }
+}
+
+/**
+ * Draw port indicators for an entity.
+ * Output ports are shown as green circles, input ports as orange circles.
+ * These appear on the adjacent tile where a tube should connect.
+ */
+function drawEntityPorts(entity, tileSize) {
+  const ports = getEntityConnectionPorts(entity);
+
+  for (const port of ports) {
+    const portPx = port.worldX * tileSize + tileSize / 2;
+    const portPy = port.worldY * tileSize + tileSize / 2;
+
+    noStroke();
+    if (port.kind === "output") {
+      // Green circle for output port
+      fill(0, 200, 0, 180);
+    } else {
+      // Orange circle for input port
+      fill(255, 165, 0, 180);
+    }
+    circle(portPx, portPy, 10);
+
+    // Small direction arrow or letter
+    fill(255);
+    textSize(7);
+    if (port.kind === "output") {
+      text("O", portPx, portPy);
+    } else {
+      text("I", portPx, portPy);
+    }
+    textSize(10);
   }
 }
 
@@ -400,6 +515,7 @@ function drawMiniMap(map, player, config, feedback) {
   rect(miniX - 4, miniY - 4, miniWidth + 8, miniHeight + 8, 6);
 
   stroke(210);
+  strokeWeight(1);
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
@@ -448,20 +564,34 @@ function drawSettings() {
   drawSettingsUI();
 }
 
+function sideBarText(resource) {
+  let digits = Math.floor(resource).toString().length;
+    // Make the UI numbers pop and readable over ANY background icon
+  fill(255);
+  stroke(30, 30, 35);
+  strokeWeight(2.5);
+  textStyle(BOLD);
+  if (digits >= 5) {
+    let newSize = 12 - ((digits - 4) * 1.35);
+    textSize(Math.max(4, newSize)); 
+  } else {
+    textSize(12);
+  }
+}
+
 function drawSideBar() {
-  // Ensure config is initialized before drawing sidebar
   if (!drawGame.state) return;
 
-  // Get map dimensions and position from config
   const { tileSize, mapCols, mapRows, margin, topMargin } = drawGame.state.config;
   let mapX = margin;
   let mapY = topMargin;
   let mapW = mapCols * tileSize;
   let mapH = mapRows * tileSize;
 
-  // Sidebar animation when opening/closing
   let target = isSidebarOpen ? mapX : mapX - sidebarWidth;
   sidebarX = lerp(sidebarX, target, 0.15);
+
+  image(sideBarFrameImg, sidebarX, mapY, sidebarWidth + 7, 435);
 
   // Clip to map area so sidebar doesn't draw over hotbar or back button
   drawingContext.save();
@@ -469,50 +599,89 @@ function drawSideBar() {
   drawingContext.rect(mapX, mapY, mapW, mapH);
   drawingContext.clip();
 
-  // Sidebar background
-  fill (240, 240, 245, 240);
-  stroke(180);
-  strokeWeight(2);
-  rect(sidebarX, mapY, sidebarWidth, 175);
-  
   // Sidebar items
   fill(255, 200, 100);
   noStroke();
   let h = mapY + 20;
-  let ironName = 0;
-  let copperName = 1;
-  let heliumName = 2;
-  // Loop through 3 items and draw them in the sidebar
-  for (let i = 0; i < 3; i++) {
+  let ironOreName = 0;
+  let ironBarName = 1;
+  let ironPlateName = 2;
+  let copperOreName = 3;
+  let copperBarName = 4;
+  let copperPlateName = 5;
+  let copperWireName = 6;
+  let heliumName = 7;
+  let electronicsName = 8;
+  let modularComponentName = 9;
+  // Loop through 10 items and draw them in the sidebar
+  for (let i = 0; i < 10; i++) {
     let rX = sidebarX + 17.5;
     let rY = h;
-    let rSize = 37.5;
-    if (ironName == i) {
-      fill(67, 67, 65);
-    } else if (copperName == i) {
-      fill(255, 215, 0);
+    let rSize = 35;
+    if (ironOreName == i) {
+      image(ironOreImg, rX, rY, rSize, rSize);
+    } else if (ironBarName == i) {
+      image(ironBarImg, rX, rY, rSize, rSize);
+    } else if (ironPlateName == i) {
+      image(ironPlateImg, rX, rY, rSize, rSize);
+    } else if (copperOreName == i) {
+      image(copperOreImg, rX, rY, rSize, rSize);
+    } else if (copperBarName == i) {
+      image(copperBarImg, rX, rY, rSize, rSize);
+    } else if (copperPlateName == i) {
+      image(copperPlateImg, rX, rY, rSize, rSize);
+    } else if (copperWireName == i) {
+      image(copperWireImg, rX, rY, rSize, rSize);
     } else if (heliumName == i) {
-      fill(0, 200, 255);
+      image(heliumImg, rX, rY, rSize, rSize);
+    } else if (electronicsName == i) {
+      image(electronicsImg, rX, rY, rSize, rSize);
+    } else if (modularComponentName == i) {
+      image(modularComponentImg, rX, rY, rSize, rSize);
     }
 
-    rect(rX, rY, rSize, rSize, 4);
-
-    fill(255);
+    fill(0);
     textAlign(RIGHT, BOTTOM);
-    textSize(12);
 
     let centerX = rX + (rSize / 2) + 17;
     let centerY = rY + (rSize / 2) + 17;
-    if (ironName == i) {
-      text(iron + "x", centerX, centerY);
-    } else if (copperName == i) {
-      text(copper + "x", centerX, centerY);
+
+    if (ironOreName == i) {
+      sideBarText(ironOre);
+      text(ironOre, centerX, centerY);
+    } else if (ironBarName == i) {
+      sideBarText(ironBar);
+      text(ironBar, centerX, centerY);
+    } else if (ironPlateName == i) {
+      sideBarText(ironPlate);
+      text(ironPlate, centerX, centerY);
+    } else if (copperOreName == i) {
+      sideBarText(copperOre);
+      text(copperOre, centerX, centerY);
+    } else if (copperBarName == i) {
+      sideBarText(copperBar);
+      text(copperBar, centerX, centerY);
+    } else if (copperPlateName == i) {
+      sideBarText(copperPlate);
+      text(copperPlate, centerX, centerY);
+    } else if (copperWireName == i) {
+      sideBarText(copperWire);
+      text(copperWire, centerX, centerY);
     } else if (heliumName == i) {
-      text(helium + "x", centerX, centerY);
+      sideBarText(helium);
+      text(helium, centerX, centerY);
+    } else if (electronicsName == i) {
+      sideBarText(electronics);
+      text(electronics, centerX, centerY);
+    } else if (modularComponentName == i) {
+      sideBarText(modularComponent);
+      text(modularComponent, centerX, centerY);
     }
 
+    noStroke();
+    textStyle(NORMAL);
     fill(255, 200, 100);
-    h += 50;
+    h += 40;
   }
 
   drawingContext.restore();
@@ -521,7 +690,7 @@ function drawSideBar() {
   let tabW = 25;
   let tabH = 60;
   let tabX = sidebarX + sidebarWidth;
-  let tabY = 175 / 2;
+  let tabY = 425 / 2 - tabH / 2 + mapY;
   let isTabHovered = mouseX > tabX && mouseX < tabX + tabW &&
                      mouseY > tabY && mouseY < tabY + tabH;
 
@@ -535,12 +704,10 @@ function drawSideBar() {
     }
   }
 
-  // Draw the tab to open/close the sidebar
   stroke(180);
   strokeWeight(2);
   rect(tabX, tabY, tabW, tabH, 0, 10, 10, 0);
 
-  // Draw the arrow on the tab
   fill(50);
   noStroke();
   textSize(18);
@@ -694,8 +861,26 @@ function drawSelectedBuildingHighlight(map, tileSize) {
 }
 
 function getTileBaseColor(tile) {
-  if (tile.type === "dirt") {
-    return [150, 120, 80];
+  switch (tile.type) {
+    case "dirt":
+      return [150, 120, 80];
+    case "iron":
+      return [67, 67, 65];
+    case "copper":
+      return [184, 135, 60];
+    case "helium3":
+      return [0, 180, 220];
+    default:
+      return [240, 240, 245];
+  }
+  if (tile.type === "iron") {
+    return [196, 198, 206];
+  }
+  if (tile.type === "copper") {
+    return [201, 125, 55];
+  }
+  if (tile.type === "helium3") {
+    return [130, 245, 255];
   }
   if (tile.type === "iron") {
     return [196, 198, 206];
@@ -993,11 +1178,19 @@ function drawHotbar() {
       }
     }
 
+    // Draw hotbar slot number
     fill(30);
     noStroke();
     textSize(12);
     textStyle(NORMAL);
     text(i + 1, x + slotSize / 2, y + slotSize - 8);
+
+    // Draw entity type label below slot number
+    if (HOTBAR_ENTITY_TYPES[i]) {
+      fill(80);
+      textSize(7);
+      text(getEntityShortLabel(HOTBAR_ENTITY_TYPES[i]), x + slotSize / 2, y - 6);
+    }
   }
 }
 
@@ -1005,75 +1198,118 @@ function mousePressed() {
   if (currentState == "MENU") {
     startButton.checkClick();
     settingsButton.checkClick();
+    escapeButton.checkClick();
     return;
-  }
-
-  if (currentState == "SETTINGS") {
+  } else if (currentState == "SETTINGS") {
     backButtonSettings.checkClick();
     return;
   }
 
-  if (currentState == "GAME") {
-    let tabW = 25;
-    let tabH = 60;
-    let tabX = sidebarX + sidebarWidth;
-    let tabY = 175 / 2;
-    if (mouseX > tabX && mouseX < tabX + tabW && mouseY > tabY && mouseY < tabY + tabH) {
-      isSidebarOpen = !isSidebarOpen;
-      return;
-    }
+  if (currentState != "GAME") return;
 
-    if (isSidebarOpen) {
-      debugButton.checkClick();
-    }
-    backButtonGame.checkClick();
-    if (backButtonGame.isHovered()) {
-      backButtonGame.checkClick();
-      return;
-    }
-
-    if (isMouseOverHotbarArea()) {
-      return;
-    }
-
-    if (isPointerOverMinimap()) {
-      return;
-    }
-
-    const selectedItem = getSelectedHotbarItem();
-    const hit = getTileAtScreenPosition(mouseX, mouseY);
-
-    if (!selectedItem) {
-      if (!drawGame.state) {
-        return;
-      }
-      if (!hit) {
-        drawGame.state.selectedBuilding = null;
-        return;
-      }
-      const sel = drawGame.state.selectedBuilding;
-      if (sel && (hit.row !== sel.row || hit.col !== sel.col)) {
-        drawGame.state.selectedBuilding = null;
-      }
-      return;
-    }
-
-    if (!hit) {
-      return;
-    }
-
-    if (!isTileWithinModificationRange(hit.row, hit.col)) {
-      triggerModificationRangeBlink();
-      return;
-    }
-
-    if (isResourceNodeTile(hit.tile)) {
-      triggerModificationRangeBlink();
-      return;
-    }
-
-    placeBuildingFromHotbar(hit.tile, selectedItem, hit.row, hit.col);
+  // Sidebar tab
+  let tabW = 25;
+  let tabH = 60;
+  let tabX = sidebarX + sidebarWidth;
+  
+  // Sidebar fix
+  let mapY = drawGame.state ? drawGame.state.config.topMargin : 80;
+  let tabY = 425 / 2 - tabH / 2 + mapY;
+  
+  if (mouseX > tabX && mouseX < tabX + tabW && mouseY > tabY && mouseY < tabY + tabH) {
+    isSidebarOpen = !isSidebarOpen;
+    return;
   }
+
+  if (isSidebarOpen) {
+    debugButton.checkClick();
+  }
+
+  // UI back button
+  if (backButtonGame.isHovered()) {
+    backButtonGame.checkClick();
+    return;
+  }
+
+  // Prevent accidentally placing buildings when clicking the hotbar/minimap
+  if (isMouseOverHotbarArea() || isPointerOverMinimap()) {
+    return;
+  }
+
+  // Try to place an entity
+  placeSelectedEntityAtMouse();
+}
+
+function placeSelectedEntityAtMouse() {
+  if (!drawGame.state) return;
+  if (selectedHotbarSlot < 0 || selectedHotbarSlot >= HOTBAR_ENTITY_TYPES.length) return;
+
+  const { config, map, entities, player } = drawGame.state;
+  const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
+
+  const cameraX = player.x - width / 2;
+  const cameraY = player.y - height / 2;
+
+  const worldMouseX = mouseX + cameraX;
+  const worldMouseY = mouseY + cameraY;
+
+  const tileX = floor((worldMouseX - mapOriginX) / tileSize);
+  const tileY = floor((worldMouseY - mapOriginY) / tileSize);
+
+  if (tileX < 0 || tileX >= mapCols || tileY < 0 || tileY >= mapRows) return;
+
+  // Check modification range
+  if (!isTileWithinModificationRange(tileY, tileX)) {
+    triggerModificationRangeBlink();
+    return;
+  }
+
+  const tile = map.tiles[tileY][tileX];
+
+  // Don't place on occupied tiles
+  if (tile.entityId !== null) return;
+
+  const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
+  if (!type) return;
+
+  // Build placement options based on entity type and tile
+  const options = getPlacementOptionsForTile(type, tile);
+
+  const newEntity = createEntity(type, tileX, tileY, options);
+
+  entities.push(newEntity);
+  tile.entityId = newEntity.id;
+  tile.entity = newEntity;
+  tile.item = type;
+
+  refreshEntityConnectionStates(entities);
+
+  console.log("Placed entity:", newEntity);
+  if (type === ENTITY_TYPES.MINER) {
+    console.log(
+      `Miner state: isOn=${newEntity.state.isOn}, ` +
+      `outputType=${newEntity.state.outputType}, ` +
+      `outputRate=${newEntity.state.outputRate}, ` +
+      `onResourceNode=${isMineableTile(tile.type)}`
+    );
+  }
+}
+
+function getPlacementOptionsForTile(type, tile) {
+  if (type === ENTITY_TYPES.MINER) {
+    const onNode = isMineableTile(tile.type);
+    const resource = getResourceForTileType(tile.type);
+    return {
+      resourceType: resource,
+      isOnResourceNode: onNode
+    };
+  }
+
+  if (type === ENTITY_TYPES.EXTRACTOR) {
+    return { resourceType: "helium3" };
+  }
+
+  return {};
 }
 
 function keyPressed() {
@@ -1115,7 +1351,26 @@ function toggleEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
 
+  // Miners can only be ON when on a resource node
+  if (entity.type === ENTITY_TYPES.MINER) {
+    if (!entity.state.isOn) {
+      // Check if the tile is a resource node before allowing ON
+      const tile = drawGame.state.map.tiles[entity.tileY][entity.tileX];
+      if (!isMineableTile(tile.type)) {
+        console.log("Cannot turn on miner: not on a resource node.");
+        return;
+      }
+    }
+  }
+
   entity.state.isOn = !entity.state.isOn;
+  entity.state.isActive = entity.state.isOn;
+
+  // Update miner output rate
+  if (entity.type === ENTITY_TYPES.MINER) {
+    entity.state.updateOutputRate();
+  }
+
   console.log("Toggled entity:", entity);
 }
 
@@ -1123,7 +1378,7 @@ function inspectEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
 
-  console.log("Inspect entity:", entity);
+  console.log("Inspect entity:", JSON.parse(JSON.stringify(entity)));
 }
 
 function getEntityUnderMouse() {
@@ -1151,19 +1406,15 @@ function getEntityUnderMouse() {
 
 class Button {
   constructor(x, y, w, h, label, onClick) {
-    // Position and size
     this.x = x;
     this.y = y;
     this.w = w;
     this.h = h;
-
-    // Button text and click behavior
     this.label = label;
     this.onClick = onClick;
   }
 
   isHovered() {
-    // Check if mouse is inside button area
     return mouseX > this.x && mouseX < this.x + this.w &&
            mouseY > this.y && mouseY < this.y + this.h;
   }
@@ -1171,7 +1422,6 @@ class Button {
   draw() {
     push();
 
-    // Change appearance when hovered
     if (this.isHovered()) {
       fill(170, 170, 175); 
       stroke(80, 80, 85);
@@ -1183,10 +1433,8 @@ class Button {
       strokeWeight(1);
     }
 
-    // Draw button rectangle
     rect(this.x, this.y, this.w, this.h, 4);
 
-    // Draw button label
     fill(30, 30, 30);
     noStroke();
     textSize(20);
@@ -1198,7 +1446,6 @@ class Button {
   }
 
   checkClick() {
-    // Run the assigned function if button is clicked
     if (this.isHovered()) {
       this.onClick();
     }
