@@ -3,7 +3,7 @@ let currentState = "MENU";
 let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton, debugButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
-const hotbarSlots = 6;
+const hotbarSlots = 9;
 let canvas;
 let isSidebarOpen = false; 
 let sidebarX = 20 - 80;
@@ -13,17 +13,18 @@ let iron = 0;
 let copper = 0;
 let helium = 0;
 
-const hotbarItems = [
-  { kind: "paint", color: [255, 80, 80], shape: "circle", name: "Red Paint" },
-  { kind: "paint", color: [80, 200, 120], shape: "triangle", name: "Green Paint" },
-  { kind: "paint", color: [80, 140, 255], shape: "square", name: "Blue Paint" },
-  null,
-  null,
-  null,
-  null,
-  null,
-  null
-];
+function getEntityFillRgb(entityType) {
+  if (entityType === ENTITY_TYPES.MINER) return [90, 170, 90];
+  if (entityType === ENTITY_TYPES.SMELTER) return [200, 120, 80];
+  if (entityType === ENTITY_TYPES.CONSTRUCTOR) return [90, 140, 220];
+  if (entityType === ENTITY_TYPES.TUBE) return [120, 120, 120];
+  if (entityType === ENTITY_TYPES.SHUTTLE) return [230, 230, 120];
+  if (entityType === ENTITY_TYPES.ROCKET_SITE) return [180, 180, 255];
+  if (entityType === ENTITY_TYPES.SPLITTER) return [180, 120, 220];
+  if (entityType === ENTITY_TYPES.MERGER) return [120, 220, 180];
+  if (entityType === ENTITY_TYPES.EXTRACTOR) return [120, 255, 255];
+  return [200, 200, 200];
+}
 
 // Slot -> entity type mapping for quick experimentation
 const HOTBAR_ENTITY_TYPES = [
@@ -32,6 +33,25 @@ const HOTBAR_ENTITY_TYPES = [
   ENTITY_TYPES.CONSTRUCTOR,
   ENTITY_TYPES.TUBE,
   ENTITY_TYPES.SPLITTER,
+  ENTITY_TYPES.MERGER,
+];
+
+const HOTBAR_BUILDING_NAMES = [
+  "Miner",
+  "Smelter",
+  "Constructor",
+  "Tube",
+  "Splitter",
+  "Merger",
+];
+
+const hotbarItems = HOTBAR_ENTITY_TYPES.map((entityType, i) => ({
+  kind: "building",
+  entityType,
+  name: HOTBAR_BUILDING_NAMES[i],
+  color: getEntityFillRgb(entityType),
+  shape: "square"
+}));
   ENTITY_TYPES.MERGER
 ];
 
@@ -143,6 +163,7 @@ function drawGame() {
       for (let x = 0; x < mapCols; x++) {
         row.push({
           type: "empty",
+          resource: null,
           item: null,
           colorOverride: null,
           entity: null,
@@ -151,6 +172,31 @@ function drawGame() {
       }
       tiles.push(row);
     }
+
+    // Existing terrain
+    for (let x = 4; x < 11; x++) {
+      tiles[6][x].type = "dirt";
+    }
+    for (let y = 8; y < 15; y++) {
+      tiles[y][12].type = "dirt";
+    }
+    for (let y = 16; y < 22; y++) {
+      for (let x = 15; x < 21; x++) {
+        tiles[y][x].type = "dirt";
+      }
+    }
+
+    const setResourceNode = (col, row, nodeKey) => {
+      const t = tiles[row][col];
+      t.type = nodeKey;
+      if (nodeKey === "iron") {
+        t.resource = RESOURCE_TYPES.IRON_ORE;
+      } else if (nodeKey === "copper") {
+        t.resource = RESOURCE_TYPES.COPPER_ORE;
+      } else if (nodeKey === "helium3") {
+        t.resource = RESOURCE_TYPES.HELIUM3;
+      }
+    };
 
     // Resource patches for testing
     tiles[6][6].type = "iron";
@@ -185,14 +231,22 @@ function drawGame() {
       },
       feedback: {
         rangeBlinkUntil: 0
-      }
+      },
+      placementFacing: "E",
+      selectedBuilding: null
     };
   }
 
   const { config, map, player, feedback, entities } = drawGame.state;
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY, modificationRadiusTiles } = config;
 
-  // --- Movement ---
+  if (drawGame.state.placementFacing == null) {
+    drawGame.state.placementFacing = "E";
+  }
+  if (drawGame.state.selectedBuilding === undefined) {
+    drawGame.state.selectedBuilding = null;
+  }
+
   let moveX = 0;
   let moveY = 0;
   if (keyIsDown(65)) moveX -= 1;
@@ -227,25 +281,82 @@ function drawGame() {
   push();
   stroke(200);
   strokeWeight(1);
+  const portOverlay = new Map();
+  const markPort = (x, y, kind) => {
+    const key = `${x},${y}`;
+    const existing = portOverlay.get(key);
+    const next = kind === "both" || (existing && existing !== kind)
+      ? "both"
+      : kind;
+    portOverlay.set(key, next);
+  };
+
+  for (const entity of entities) {
+    const ports = entity.type === ENTITY_TYPES.TUBE
+      ? getTubePortTiles(entity)
+      : getEntityConnectionPorts(entity);
+    for (const port of ports) {
+      markPort(port.worldX, port.worldY, port.kind);
+    }
+  }
+
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
       const tileColor = getTileRenderColor(tile);
       fill(tileColor[0], tileColor[1], tileColor[2]);
+      const portType = portOverlay.get(`${x},${y}`);
+      if (portType === "output") {
+        fill(70, 200, 90);
+      } else if (portType === "input") {
+        fill(80, 130, 230);
+      } else if (portType === "both") {
+        fill(60, 190, 190);
+      }
       rect(x * tileSize, y * tileSize, tileSize, tileSize);
+      if (tile.building) {
+        const px = x * tileSize;
+        const py = y * tileSize;
+        drawPlacedBuildingLetter(px, py, tileSize, tile.building);
+      }
     
     }
   }
   pop();
 
-  // Draw entities on map
-  drawEntities(entities, tileSize, map);
+  drawSelectedBuildingHighlight(map, tileSize);
+
+  drawEntities(entities, tileSize);
+
+  const item = selectedHotbarSlot >= 0 ? getSelectedHotbarItem() : null;
+  if (item && !isMouseOverHotbarArea()) {
+    const holoHit = getTileAtScreenPosition(mouseX, mouseY);
+    if (holoHit && !isResourceNodeTile(holoHit.tile)) {
+      const hpx = holoHit.col * tileSize;
+      const hpy = holoHit.row * tileSize;
+      const previewOptions = getPlacementOptionsForEntity(
+        item.entityType,
+        holoHit.tile
+      );
+      drawBuildingPlacementHologram(
+        hpx,
+        hpy,
+        tileSize,
+        item.color,
+        hotbarItemLabel(item),
+        drawGame.state.placementFacing || "E",
+        item.entityType,
+        previewOptions
+      );
+    }
+  }
 
   pop();
 
   drawMiniMap(map, player, config, feedback);
   backButtonGame.draw();
   drawHotbar();
+  drawResourceHoverTooltip();
 }
 
 /**
@@ -302,22 +413,11 @@ function drawEntities(entities, tileSize, map) {
     const py = entity.tileY * tileSize;
 
     stroke(50);
-    strokeWeight(1);
-
-    if (entity.type === ENTITY_TYPES.MINER) fill(90, 170, 90);
-    else if (entity.type === ENTITY_TYPES.SMELTER) fill(200, 120, 80);
-    else if (entity.type === ENTITY_TYPES.CONSTRUCTOR) fill(90, 140, 220);
-    else if (entity.type === ENTITY_TYPES.TUBE) fill(120, 120, 120);
-    else if (entity.type === ENTITY_TYPES.SHUTTLE) fill(230, 230, 120);
-    else if (entity.type === ENTITY_TYPES.ROCKET_SITE) fill(180, 180, 255);
-    else if (entity.type === ENTITY_TYPES.SPLITTER) fill(180, 120, 220);
-    else if (entity.type === ENTITY_TYPES.MERGER) fill(120, 220, 180);
-    else if (entity.type === ENTITY_TYPES.EXTRACTOR) fill(120, 255, 255);
-    else fill(200);
+    const rgb = getEntityFillRgb(entity.type);
+    fill(rgb[0], rgb[1], rgb[2]);
 
     rect(px + 4, py + 4, tileSize - 8, tileSize - 8, 4);
 
-    // Broken overlay
     if (entity.state.isBroken) {
       stroke(255, 0, 0);
       strokeWeight(3);
@@ -326,9 +426,10 @@ function drawEntities(entities, tileSize, map) {
       strokeWeight(1);
     }
 
-    // Small on/off indicator (top-right corner)
     noStroke();
-    fill(entity.state.isOn ? color(0, 220, 0) : color(220, 0, 0));
+    const powerOn =
+      entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
+    fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
     circle(px + tileSize - 8, py + 8, 8);
 
     // Draw output port indicators (green circles at port positions)
@@ -556,6 +657,249 @@ function getSelectedHotbarItem() {
   return hotbarItems[selectedHotbarSlot];
 }
 
+function isMouseOverHotbarArea() {
+  const slotSize = 42;
+  const gap = 8;
+  const totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
+  const startX = width / 2 - totalWidth / 2;
+  const y = height - 60;
+  return (
+    mouseY >= y - 4 &&
+    mouseY <= y + slotSize + 8 &&
+    mouseX >= startX - 8 &&
+    mouseX <= startX + totalWidth + 8
+  );
+}
+
+function facingToAngle(facing) {
+  switch (facing) {
+    case "E":
+      return 0;
+    case "S":
+      return HALF_PI;
+    case "W":
+      return PI;
+    case "N":
+      return -HALF_PI;
+    default:
+      return 0;
+  }
+}
+
+function cyclePlacementFacing() {
+  if (!drawGame.state) {
+    return;
+  }
+  const order = ["E", "S", "W", "N"];
+  const cur = drawGame.state.placementFacing || "E";
+  const i = order.indexOf(cur);
+  drawGame.state.placementFacing = order[(i + 1) % order.length];
+}
+
+function hotbarItemLabel(item) {
+  if (!item || !item.name) {
+    return "??";
+  }
+  const t = item.name.trim();
+  if (t.length === 0) {
+    return "??";
+  }
+  if (t.length === 1) {
+    return (t + t).toUpperCase();
+  }
+  return t.substring(0, 2).toUpperCase();
+}
+
+function pickContrastingTextColor(rgb) {
+  const lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+  return lum > 140 ? [24, 24, 32] : [255, 255, 255];
+}
+
+function drawPlacedBuildingLetter(px, py, tileSize, building) {
+  const rgb = building.color;
+  const tc = pickContrastingTextColor(rgb);
+  const cx = px + tileSize / 2;
+  const cy = py + tileSize / 2;
+  push();
+  translate(cx, cy);
+  rotate(facingToAngle(building.facing));
+  fill(tc[0], tc[1], tc[2]);
+  noStroke();
+  textSize(14);
+  textStyle(BOLD);
+  textAlign(CENTER, CENTER);
+  text(building.label || building.letter || "??", 0, 0);
+  pop();
+  textStyle(NORMAL);
+}
+
+function getPlacementPreviewPorts(entityType, options = {}) {
+  if (!entityType) {
+    return [];
+  }
+  if (entityType === ENTITY_TYPES.TUBE) {
+    const shape = options.shape || TUBE_SHAPES.STRAIGHT;
+    const def = TUBE_PORT_DEFS[shape] || TUBE_PORT_DEFS[TUBE_SHAPES.STRAIGHT];
+    return [
+      { kind: "input", offset: def.input },
+      { kind: "output", offset: def.output }
+    ];
+  }
+  const defs = ENTITY_PORT_DEFS[entityType];
+  if (!defs) {
+    return [];
+  }
+  return defs.map((port) => ({ kind: port.kind, offset: port.offset }));
+}
+
+function drawPlacementPorts(ports, tileSize) {
+  for (const port of ports) {
+    const portPx = port.offset.x * tileSize;
+    const portPy = port.offset.y * tileSize;
+
+    noStroke();
+    if (port.kind === "output") {
+      fill(0, 200, 0, 180);
+    } else if (port.kind === "input") {
+      fill(255, 165, 0, 180);
+    } else {
+      fill(60, 190, 190, 180);
+    }
+    circle(portPx, portPy, 10);
+  }
+}
+
+function drawBuildingPlacementHologram(
+  px,
+  py,
+  tileSize,
+  colorRgb,
+  label,
+  facing,
+  entityType,
+  options
+) {
+  const cx = px + tileSize / 2;
+  const cy = py + tileSize / 2;
+  push();
+  translate(cx, cy);
+  rotate(facingToAngle(facing));
+  stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
+  strokeWeight(2);
+  fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
+  rect(-tileSize / 2 + 3, -tileSize / 2 + 3, tileSize - 6, tileSize - 6, 4);
+  fill(35, 35, 42, 200);
+  noStroke();
+  textSize(14);
+  textStyle(BOLD);
+  textAlign(CENTER, CENTER);
+  text(label, 0, 0);
+
+  const ports = getPlacementPreviewPorts(entityType, options);
+  if (ports.length) {
+    drawPlacementPorts(ports, tileSize);
+  }
+  pop();
+  textStyle(NORMAL);
+}
+
+function getResourceTypeForTile(tile) {
+  if (!tile) {
+    return null;
+  }
+  if (tile.resource) {
+    return tile.resource;
+  }
+  if (tile.type === "iron") {
+    return RESOURCE_TYPES.IRON_ORE;
+  }
+  if (tile.type === "copper") {
+    return RESOURCE_TYPES.COPPER_ORE;
+  }
+  if (tile.type === "helium3") {
+    return RESOURCE_TYPES.HELIUM3;
+  }
+  return null;
+}
+
+function getPlacementOptionsForEntity(entityType, tile) {
+  if (entityType === ENTITY_TYPES.TUBE) {
+    return {
+      shape: TUBE_SHAPES.STRAIGHT,
+      facing: (drawGame.state && drawGame.state.placementFacing) || "E"
+    };
+  }
+
+  if (entityType === ENTITY_TYPES.MINER || entityType === ENTITY_TYPES.EXTRACTOR) {
+    let resourceType = getResourceTypeForTile(tile);
+    if (entityType === ENTITY_TYPES.EXTRACTOR && resourceType !== RESOURCE_TYPES.HELIUM3) {
+      resourceType = null;
+    }
+    return {
+      resourceType,
+      isActive: !!resourceType
+    };
+  }
+
+  return {};
+}
+
+function placeBuildingFromHotbar(tile, hotbarItem, row, col) {
+  if (!hotbarItem || !tile || hotbarItem.kind !== "building") {
+    return;
+  }
+  if (isResourceNodeTile(tile)) {
+    return;
+  }
+  if (tile.building || tile.entityId != null) {
+    return;
+  }
+  if (!drawGame.state) {
+    return;
+  }
+  const { entities } = drawGame.state;
+  const entityType = hotbarItem.entityType;
+  const options = getPlacementOptionsForEntity(entityType, tile);
+  const newEntity = createEntity(entityType, col, row, options);
+  newEntity.state.facing = drawGame.state.placementFacing || "E";
+  entities.push(newEntity);
+  tile.entityId = newEntity.id;
+  tile.item = entityType;
+
+  updateConnections(entities);
+
+  tile.building = {
+    color: hotbarItem.color.slice(),
+    label: hotbarItemLabel(hotbarItem),
+    name: hotbarItem.name,
+    entityType: hotbarItem.entityType,
+    facing: newEntity.state.facing,
+    entityId: newEntity.id
+  };
+  tile.colorOverride = null;
+  if (drawGame.state) {
+    drawGame.state.selectedBuilding = { row, col };
+  }
+}
+
+function drawSelectedBuildingHighlight(map, tileSize) {
+  const sel = drawGame.state && drawGame.state.selectedBuilding;
+  if (!sel) {
+    return;
+  }
+  const tile = map.tiles[sel.row] && map.tiles[sel.row][sel.col];
+  if (!tile || !tile.building) {
+    drawGame.state.selectedBuilding = null;
+    return;
+  }
+  const px = sel.col * tileSize;
+  const py = sel.row * tileSize;
+  noFill();
+  stroke(255, 210, 60);
+  strokeWeight(2.5);
+  rect(px - 2, py - 2, tileSize + 4, tileSize + 4, 4);
+}
+
 function getTileBaseColor(tile) {
   switch (tile.type) {
     case "dirt":
@@ -571,7 +915,145 @@ function getTileBaseColor(tile) {
   }
 }
 
+function getPlacedBuildingDisplayName(tile) {
+  if (!tile || !tile.building) {
+    return null;
+  }
+  const b = tile.building;
+  if (b.name) {
+    return b.name;
+  }
+  const et = b.entityType;
+  const idx = HOTBAR_ENTITY_TYPES.indexOf(et);
+  if (idx >= 0) {
+    return HOTBAR_BUILDING_NAMES[idx];
+  }
+  return et != null ? String(et) : null;
+}
+
+function getMapHoverTooltipLabel(tile) {
+  const buildingName = getPlacedBuildingDisplayName(tile);
+  if (buildingName) {
+    return buildingName;
+  }
+  return getResourceDisplayName(tile);
+}
+
+function getResourceDisplayName(tile) {
+  if (!tile) {
+    return null;
+  }
+  if (tile.type === "iron" || tile.resource === RESOURCE_TYPES.IRON_ORE) {
+    return "Iron";
+  }
+  if (tile.type === "copper" || tile.resource === RESOURCE_TYPES.COPPER_ORE) {
+    return "Copper";
+  }
+  if (tile.type === "helium3" || tile.resource === RESOURCE_TYPES.HELIUM3) {
+    return "Helium-3";
+  }
+  return null;
+}
+
+function isResourceNodeTile(tile) {
+  if (!tile) {
+    return false;
+  }
+  if (tile.type === "iron" || tile.type === "copper" || tile.type === "helium3") {
+    return true;
+  }
+  return (
+    tile.resource === RESOURCE_TYPES.IRON_ORE ||
+    tile.resource === RESOURCE_TYPES.COPPER_ORE ||
+    tile.resource === RESOURCE_TYPES.HELIUM3
+  );
+}
+
+function isPointerOverMinimap() {
+  if (!drawGame.state) {
+    return false;
+  }
+  const { mapCols, mapRows } = drawGame.state.config;
+  const miniMaxSize = 140;
+  const miniTile = max(1, floor(miniMaxSize / mapCols));
+  const miniWidth = mapCols * miniTile;
+  const miniHeight = mapRows * miniTile;
+  const miniX = width - miniWidth - 10;
+  const miniY = 10;
+  return (
+    mouseX >= miniX - 4 &&
+    mouseX <= miniX + miniWidth + 8 &&
+    mouseY >= miniY - 4 &&
+    mouseY <= miniY + miniHeight + 8
+  );
+}
+
+function isMouseOverResourceTooltipBlockers() {
+  if (backButtonGame.isHovered() || isPointerOverMinimap()) {
+    return true;
+  }
+  const slotSize = 42;
+  const gap = 8;
+  const totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
+  const startX = width / 2 - totalWidth / 2;
+  const y = height - 60;
+  return (
+    mouseY >= y - 4 &&
+    mouseY <= y + slotSize + 8 &&
+    mouseX >= startX - 8 &&
+    mouseX <= startX + totalWidth + 8
+  );
+}
+
+function drawResourceHoverTooltip() {
+  if (currentState !== "GAME" || !drawGame.state) {
+    return;
+  }
+  if (isMouseOverResourceTooltipBlockers()) {
+    return;
+  }
+
+  const hit = getTileAtScreenPosition(mouseX, mouseY);
+  const label = hit ? getMapHoverTooltipLabel(hit.tile) : null;
+  if (!label) {
+    return;
+  }
+
+  push();
+  textSize(14);
+  textStyle(NORMAL);
+  const pad = 8;
+  textAlign(LEFT, TOP);
+  const tw = textWidth(label);
+  const th = textAscent() + textDescent();
+  const boxW = tw + pad * 2;
+  const boxH = th + pad * 2;
+  let bx = mouseX + 14;
+  let by = mouseY + 14;
+  if (bx + boxW > width - 6) {
+    bx = mouseX - boxW - 14;
+  }
+  if (by + boxH > height - 6) {
+    by = mouseY - boxH - 14;
+  }
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  fill(28, 28, 36);
+  noStroke();
+  text(label, bx + pad, by + pad);
+  pop();
+
+  textAlign(CENTER, CENTER);
+}
+
 function getTileRenderColor(tile) {
+  if (tile.building) {
+    return tile.building.color;
+  }
   if (tile.colorOverride) {
     return tile.colorOverride;
   }
@@ -673,17 +1155,8 @@ function drawModificationRangeIndicator(config, feedback) {
   ellipse(width / 2, height / 2, radius * 2, radius * 2);
 }
 
-function applyHotbarItemToTile(tile, hotbarItem) {
-  if (!hotbarItem || !tile) {
-    return;
-  }
-
-  if (hotbarItem.kind === "paint") {
-    tile.colorOverride = hotbarItem.color.slice();
-  }
-}
-
 function drawHotbar() {
+  push();
   let slotSize = 42;
   let gap = 8;
   let totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
@@ -741,6 +1214,7 @@ function drawHotbar() {
       text(getEntityShortLabel(HOTBAR_ENTITY_TYPES[i]), x + slotSize / 2, y - 6);
     }
   }
+  pop();
 }
 
 function mousePressed() {
@@ -816,6 +1290,7 @@ function placeSelectedEntityAtMouse() {
   const options = getPlacementOptionsForTile(type, tile);
 
   const newEntity = createEntity(type, tileX, tileY, options);
+  newEntity.state.facing = drawGame.state.placementFacing || "E";
 
   entities.push(newEntity);
   tile.entityId = newEntity.id;
@@ -845,21 +1320,16 @@ function getPlacementOptionsForTile(type, tile) {
     };
   }
 
-  if (type === ENTITY_TYPES.EXTRACTOR) {
-    return { resourceType: "helium3" };
-  }
-
-  if (type === ENTITY_TYPES.CONSTRUCTOR) {
-    return { chosenOutput: "ironPlate" };
-  }
-
-  return {};
+  return getPlacementOptionsForEntity(type, tile);
 }
+
 
 function keyPressed() {
   if (currentState != "GAME") {
     return;
   }
+
+  const hoveredEntity = getEntityUnderMouse();
 
   if (key >= '1' && key <= '9') {
     let slot = int(key) - 1;
@@ -869,13 +1339,103 @@ function keyPressed() {
     } else {
       selectedHotbarSlot = slot;
     }
+  } else if (key === 'x' || key === 'X') {
+    deleteEntityUnderMouse();
+  } else if (key === 'c' || key === 'C') {
+    if (hoveredEntity && hoveredEntity.type === ENTITY_TYPES.TUBE) {
+      hoveredEntity.state.shape = hoveredEntity.state.shape === TUBE_SHAPES.CORNER
+        ? TUBE_SHAPES.STRAIGHT
+        : TUBE_SHAPES.CORNER;
+      updateConnections(drawGame.state.entities);
+    }
   } else if (key === 'r' || key === 'R') {
-    repairEntityUnderMouse();
+    if (selectedHotbarSlot >= 0 && getSelectedHotbarItem()) {
+      cyclePlacementFacing();
+    } else if (hoveredEntity && hoveredEntity.type === ENTITY_TYPES.TUBE) {
+      const order = ["E", "S", "W", "N"];
+      const current = hoveredEntity.state.facing || "E";
+      const index = order.indexOf(current);
+      const next = index === -1 ? "E" : order[(index + 1) % order.length];
+      hoveredEntity.state.facing = next;
+      syncTileBuildingFacing(hoveredEntity);
+      updateConnections(drawGame.state.entities);
+    } else if (
+      hoveredEntity &&
+      (hoveredEntity.type === ENTITY_TYPES.MINER ||
+        hoveredEntity.type === ENTITY_TYPES.SMELTER ||
+        hoveredEntity.type === ENTITY_TYPES.CONSTRUCTOR ||
+        hoveredEntity.type === ENTITY_TYPES.MERGER ||
+        hoveredEntity.type === ENTITY_TYPES.SPLITTER)
+    ) {
+      const order = ["E", "S", "W", "N"];
+      const current = hoveredEntity.state.facing || "E";
+      const index = order.indexOf(current);
+      const next = index === -1 ? "E" : order[(index + 1) % order.length];
+      hoveredEntity.state.facing = next;
+      syncTileBuildingFacing(hoveredEntity);
+      updateConnections(drawGame.state.entities);
+    } else {
+      repairEntityUnderMouse();
+    }
   } else if (key === 'i' || key === 'I') {
     inspectEntityUnderMouse();
   } else if (key === 'o' || key === 'O') {
     toggleEntityUnderMouse();
   }
+}
+
+function deleteEntityUnderMouse() {
+  if (!drawGame.state) {
+    return;
+  }
+
+  const hit = getTileAtScreenPosition(mouseX, mouseY);
+  if (!hit) {
+    return;
+  }
+
+  const { entities, map } = drawGame.state;
+  const targetId = hit.tile.entityId;
+
+  if (targetId == null && !hit.tile.building) {
+    return;
+  }
+
+  if (targetId != null) {
+    const index = entities.findIndex((entry) => entry.id === targetId);
+    if (index !== -1) {
+      entities.splice(index, 1);
+    }
+    hit.tile.entityId = null;
+    hit.tile.item = null;
+  }
+
+  if (hit.tile.building) {
+    hit.tile.building = null;
+  }
+
+  if (drawGame.state.selectedBuilding) {
+    const sel = drawGame.state.selectedBuilding;
+    if (map.tiles[sel.row]?.[sel.col] === hit.tile) {
+      drawGame.state.selectedBuilding = null;
+    }
+  }
+
+  updateConnections(entities);
+}
+
+function syncTileBuildingFacing(entity) {
+  if (!drawGame.state || !entity) {
+    return;
+  }
+  const tile = drawGame.state.map.tiles[entity.tileY]?.[entity.tileX];
+  if (!tile || !tile.building) {
+    return;
+  }
+  if (tile.entityId !== entity.id) {
+    return;
+  }
+  tile.building.facing = entity.state.facing || "E";
 }
 
 function repairEntityUnderMouse() {
@@ -939,9 +1499,196 @@ function getEntityUnderMouse() {
   if (tileX < 0 || tileX >= mapCols || tileY < 0 || tileY >= mapRows) return null;
 
   const tile = map.tiles[tileY][tileX];
-  if (tile.entityId === null) return null;
+  if (tile.entityId == null) return null;
 
   return getEntityById(entities, tile.entityId);
+}
+
+function getTubeSourcesByTarget(entities) {
+  const tubeSources = new Map();
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.TUBE) continue;
+    if (!entity.state.fromEntityId || !entity.state.toEntityId) continue;
+
+    if (!tubeSources.has(entity.state.toEntityId)) {
+      tubeSources.set(entity.state.toEntityId, new Set());
+    }
+    tubeSources.get(entity.state.toEntityId).add(entity.state.fromEntityId);
+  }
+
+  return tubeSources;
+}
+
+function updateConnections(entities) {
+  refreshEntityConnectionStates(entities);
+  updateSmelterInputs(entities);
+  updateConstructorInputs(entities);
+  updateSplitterMergerRates(entities);
+  refreshEntityConnectionStates(entities);
+}
+
+function updateSmelterInputs(entities) {
+  const tubeSources = getTubeSourcesByTarget(entities);
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.SMELTER) continue;
+    const smelterState = entity.state;
+    const sourceIds = tubeSources.get(entity.id);
+    const sourceId = sourceIds ? [...sourceIds][0] : null;
+    const sourceEntity = entities.find((entry) => entry.id === sourceId) || null;
+    const outputType = sourceEntity?.state?.outputType || null;
+    const inputType = smelterState.acceptedInputs?.includes(outputType)
+      ? outputType
+      : null;
+
+    if (smelterState.inputType === inputType) {
+      continue;
+    }
+
+    smelterState.inputType = inputType;
+    smelterState.currentRecipe = inputType;
+    smelterState.isActive = !!inputType;
+    smelterState.isOn = !!inputType;
+    smelterState.outputType = smelterState.recipes?.get(inputType) || null;
+    smelterState.inputRate = inputType ? 1 : 0;
+    smelterState.outputRate = smelterState.outputType ? 1 : 0;
+
+    if (!inputType) {
+      smelterState.storedInput = 0;
+      smelterState.outputBuffer = 0;
+    }
+  }
+}
+
+function findConstructorRecipeByTypes(types) {
+  if (typeof CONSTRUCTOR_RECIPES === "undefined") return null;
+
+  const normalized = [...types].sort().join("+");
+
+  for (const recipe of CONSTRUCTOR_RECIPES) {
+    const recipeTypes = recipe.inputs.map((input) => input.type).sort().join("+");
+    if (recipeTypes === normalized) {
+      return recipe;
+    }
+  }
+
+  return null;
+}
+
+function updateConstructorInputs(entities) {
+  const tubeSources = getTubeSourcesByTarget(entities);
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.CONSTRUCTOR) continue;
+    const constructorState = entity.state;
+    const sourceIds = tubeSources.get(entity.id) || new Set();
+    const sourceTypes = [];
+
+    for (const sourceId of sourceIds) {
+      const sourceEntity = entities.find((entry) => entry.id === sourceId);
+      const outputType = sourceEntity?.state?.outputType;
+      if (outputType) {
+        sourceTypes.push(outputType);
+      }
+    }
+
+    const uniqueTypes = [...new Set(sourceTypes)].slice(0, 2);
+    const recipe = uniqueTypes.length
+      ? findConstructorRecipeByTypes(uniqueTypes)
+      : null;
+
+    constructorState.inputSlots = [
+      { type: null, count: 0 },
+      { type: null, count: 0 }
+    ];
+
+    if (recipe) {
+      recipe.inputs.forEach((input, index) => {
+        if (index >= constructorState.inputSlots.length) return;
+        constructorState.inputSlots[index] = {
+          type: input.type,
+          count: input.count
+        };
+      });
+    } else {
+      uniqueTypes.forEach((type, index) => {
+        if (index >= constructorState.inputSlots.length) return;
+        constructorState.inputSlots[index] = { type, count: 1 };
+      });
+    }
+
+    constructorState.updateOutputFromInputs();
+    constructorState.isActive = !!constructorState.outputType;
+  }
+}
+
+function updateSplitterMergerRates(entities) {
+  const incoming = new Map();
+  const outgoingCount = new Map();
+  const incomingKeys = new Set();
+  const outgoingKeys = new Set();
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.TUBE) continue;
+    const fromId = entity.state.fromEntityId;
+    const toId = entity.state.toEntityId;
+    const componentId = entity.state.componentId;
+    const componentKey = componentId != null ? `c:${componentId}` : `t:${entity.id}`;
+
+    if (fromId) {
+      const outKey = `${fromId}|${componentKey}`;
+      if (!outgoingKeys.has(outKey)) {
+        outgoingKeys.add(outKey);
+        outgoingCount.set(fromId, (outgoingCount.get(fromId) || 0) + 1);
+      }
+    }
+
+    if (!fromId || !toId) continue;
+    const inKey = `${toId}|${componentKey}`;
+    if (incomingKeys.has(inKey)) continue;
+    incomingKeys.add(inKey);
+
+    if (!incoming.has(toId)) {
+      incoming.set(toId, []);
+    }
+    incoming.get(toId).push({
+      rate: entity.state.outputRate || 0,
+      outputType: entity.state.carriedItem || null
+    });
+
+    outgoingCount.set(fromId, (outgoingCount.get(fromId) || 0) + 1);
+  }
+
+  for (const entity of entities) {
+    if (
+      entity.type !== ENTITY_TYPES.SPLITTER &&
+      entity.type !== ENTITY_TYPES.MERGER
+    ) {
+      continue;
+    }
+
+    const inputs = incoming.get(entity.id) || [];
+    const totalRate = inputs.reduce((sum, entry) => sum + entry.rate, 0);
+    const types = inputs.map((entry) => entry.outputType).filter(Boolean);
+    const sharedType = types.length > 0 && types.every((type) => type === types[0])
+      ? types[0]
+      : null;
+
+    if (entity.type === ENTITY_TYPES.SPLITTER) {
+      const outputCount = outgoingCount.get(entity.id) || 0;
+      const perOutputRate = outputCount > 0 ? totalRate / outputCount : 0;
+      entity.state.inputRate = totalRate;
+      entity.state.outputRate = sharedType ? perOutputRate : 0;
+      entity.state.outputType = sharedType;
+      entity.state.isActive = !!sharedType && totalRate > 0;
+    } else {
+      entity.state.inputRate = totalRate;
+      entity.state.outputRate = sharedType ? totalRate : 0;
+      entity.state.outputType = sharedType;
+      entity.state.isActive = !!sharedType && totalRate > 0;
+    }
+  }
 }
 
 class Button {
