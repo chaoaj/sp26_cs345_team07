@@ -184,8 +184,6 @@ function drawGame() {
           resource: null,
           item: null,
           colorOverride: null,
-          entity: null,
-          entityId: null,
           entityId: null,
           building: null
         });
@@ -272,7 +270,6 @@ function drawGame() {
   const { config, map, player, feedback, entities } = drawGame.state;
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY, modificationRadiusTiles } = config;
 
-  // --- Movement ---
   if (drawGame.state.placementFacing == null) {
     drawGame.state.placementFacing = "E";
   }
@@ -320,8 +317,6 @@ function drawGame() {
       const tileColor = getTileRenderColor(tile);
       fill(tileColor[0], tileColor[1], tileColor[2]);
       rect(x * tileSize, y * tileSize, tileSize, tileSize);
-
-      // Draw resource node indicator dot in corner
       if (tile.building) {
         const px = x * tileSize;
         const py = y * tileSize;
@@ -331,8 +326,6 @@ function drawGame() {
   }
   pop();
 
-  // Draw entities on map
-  drawEntities(entities, tileSize, map);
   drawSelectedBuildingHighlight(map, tileSize);
 
   drawEntities(entities, tileSize);
@@ -889,6 +882,15 @@ function getTileBaseColor(tile) {
   if (tile.type === "helium3") {
     return [130, 245, 255];
   }
+  if (tile.type === "iron") {
+    return [196, 198, 206];
+  }
+  if (tile.type === "copper") {
+    return [201, 125, 55];
+  }
+  if (tile.type === "helium3") {
+    return [130, 245, 255];
+  }
   return [240, 240, 245];
 }
 
@@ -1209,8 +1211,11 @@ function mousePressed() {
   let tabW = 25;
   let tabH = 60;
   let tabX = sidebarX + sidebarWidth;
+  
+  // Sidebar fix
   let mapY = drawGame.state ? drawGame.state.config.topMargin : 80;
   let tabY = 425 / 2 - tabH / 2 + mapY;
+  
   if (mouseX > tabX && mouseX < tabX + tabW && mouseY > tabY && mouseY < tabY + tabH) {
     isSidebarOpen = !isSidebarOpen;
     return;
@@ -1223,6 +1228,11 @@ function mousePressed() {
   // UI back button
   if (backButtonGame.isHovered()) {
     backButtonGame.checkClick();
+    return;
+  }
+
+  // Prevent accidentally placing buildings when clicking the hotbar/minimap
+  if (isMouseOverHotbarArea() || isPointerOverMinimap()) {
     return;
   }
 
@@ -1298,6 +1308,7 @@ function getPlacementOptionsForTile(type, tile) {
   if (type === ENTITY_TYPES.EXTRACTOR) {
     return { resourceType: "helium3" };
   }
+
   return {};
 }
 
