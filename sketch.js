@@ -573,7 +573,11 @@ function drawSettings() {
 
 function sideBarText(resource) {
   let digits = Math.floor(resource).toString().length;
-  
+    // Make the UI numbers pop and readable over ANY background icon
+  fill(255);
+  stroke(30, 30, 35);
+  strokeWeight(2.5);
+  textStyle(BOLD);
   if (digits >= 5) {
     let newSize = 12 - ((digits - 4) * 1.35);
     textSize(Math.max(4, newSize)); 
@@ -651,37 +655,38 @@ function drawSideBar() {
 
     if (ironOreName == i) {
       sideBarText(ironOre);
-      text(ironOre + "x", centerX, centerY);
+      text(ironOre, centerX, centerY);
     } else if (ironBarName == i) {
       sideBarText(ironBar);
-      text(ironBar + "x", centerX, centerY);
+      text(ironBar, centerX, centerY);
     } else if (ironPlateName == i) {
       sideBarText(ironPlate);
-      text(ironPlate + "x", centerX, centerY);
+      text(ironPlate, centerX, centerY);
     } else if (copperOreName == i) {
       sideBarText(copperOre);
-      text(copperOre + "x", centerX, centerY);
+      text(copperOre, centerX, centerY);
     } else if (copperBarName == i) {
       sideBarText(copperBar);
-      text(copperBar + "x", centerX, centerY);
+      text(copperBar, centerX, centerY);
     } else if (copperPlateName == i) {
       sideBarText(copperPlate);
-      text(copperPlate + "x", centerX, centerY);
+      text(copperPlate, centerX, centerY);
     } else if (copperWireName == i) {
       sideBarText(copperWire);
-      text(copperWire + "x", centerX, centerY);
+      text(copperWire, centerX, centerY);
     } else if (heliumName == i) {
       sideBarText(helium);
-      text(helium + "x", centerX, centerY);
+      text(helium, centerX, centerY);
     } else if (electronicsName == i) {
       sideBarText(electronics);
-      text(electronics + "x", centerX, centerY);
+      text(electronics, centerX, centerY);
     } else if (modularComponentName == i) {
       sideBarText(modularComponent);
-      text(modularComponent + "x", centerX, centerY);
+      text(modularComponent, centerX, centerY);
     }
 
-
+    noStroke();
+    textStyle(NORMAL);
     fill(255, 200, 100);
     h += 40;
   }
