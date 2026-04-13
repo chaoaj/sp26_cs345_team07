@@ -3,7 +3,7 @@ let currentState = "MENU";
 let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton, debugButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
-const hotbarSlots = 9;
+const hotbarSlots = 6;
 let canvas;
 let isSidebarOpen = false; 
 let sidebarX = 20 - 80;
@@ -31,11 +31,8 @@ const HOTBAR_ENTITY_TYPES = [
   ENTITY_TYPES.SMELTER,
   ENTITY_TYPES.CONSTRUCTOR,
   ENTITY_TYPES.TUBE,
-  ENTITY_TYPES.SHUTTLE,
-  ENTITY_TYPES.ROCKET_SITE,
   ENTITY_TYPES.SPLITTER,
-  ENTITY_TYPES.MERGER,
-  ENTITY_TYPES.EXTRACTOR
+  ENTITY_TYPES.MERGER
 ];
 
 function setup() {
@@ -236,8 +233,7 @@ function drawGame() {
       const tileColor = getTileRenderColor(tile);
       fill(tileColor[0], tileColor[1], tileColor[2]);
       rect(x * tileSize, y * tileSize, tileSize, tileSize);
-
-      // Draw resource node indicator dot in corner
+    
     }
   }
   pop();
