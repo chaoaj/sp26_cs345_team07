@@ -72,13 +72,12 @@ function setup() {
     currentState = "GAME";
   });
   settingsButton = new Button(90, 405, 150, 55, "Settings", () => {
+    currentState = "SETTINGS";
+  });
   debugButton = new Button (175, 25, 100, 50, "Debug", () => {
       ironOre += 100;
       copperOre += 1000;
       helium += 10000;
-  });
-  settingsButton = new Button(65, 350, 150, 50, "Settings", () => {
-    currentState = "SETTINGS";
   });
   escapeButton = new Button(90, 460, 150, 55, "Quit", () => {
     window.close();
@@ -90,15 +89,8 @@ function setup() {
   backButtonSettings = new Button(250, 430, 100, 40, "<- Return", () => {
     currentState = "MENU";
   });
-
-  debugButton = new Button (175, 25, 100, 50, "Debug", () => {
-    iron += 1;
-    copper += 1;
-    helium += 1;
-  });
-  
   setupSettings();
-}
+};
 
 function preload() {
   titlePage = loadImage('resources/Title.jpg');
@@ -193,7 +185,7 @@ function drawGame() {
           item: null,
           colorOverride: null,
           entity: null,
-          entityId: null
+          entityId: null,
           entityId: null,
           building: null
         });
@@ -403,10 +395,10 @@ function updateMinerHarvesting(entities, dt) {
     // Add to global resource counters
     switch (entity.state.outputType) {
       case RESOURCE_TYPES.IRON_ORE:
-        iron += produced;
+        ironOre += produced;
         break;
       case RESOURCE_TYPES.COPPER_ORE:
-        copper += produced;
+        copperOre += produced;
         break;
       case RESOURCE_TYPES.HELIUM3:
         helium += produced;
@@ -1212,7 +1204,8 @@ function mousePressed() {
   let tabW = 25;
   let tabH = 60;
   let tabX = sidebarX + sidebarWidth;
-  let tabY = 175 / 2;
+  let mapY = drawGame.state ? drawGame.state.config.topMargin : 80;
+  let tabY = 425 / 2 - tabH / 2 + mapY;
   if (mouseX > tabX && mouseX < tabX + tabW && mouseY > tabY && mouseY < tabY + tabH) {
     isSidebarOpen = !isSidebarOpen;
     return;
@@ -1300,9 +1293,7 @@ function getPlacementOptionsForTile(type, tile) {
   if (type === ENTITY_TYPES.EXTRACTOR) {
     return { resourceType: "helium3" };
   }
-
-    placeBuildingFromHotbar(hit.tile, selectedItem, hit.row, hit.col);
-  }
+  return {};
 }
 
 function keyPressed() {
