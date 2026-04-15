@@ -669,6 +669,7 @@ function drawSideBar() {
     }
   }
 }
+
 /**
 function drawSideBar() {
   if (!drawGame.state) return;
