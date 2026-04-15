@@ -596,6 +596,100 @@ function drawSideBar() {
   drawingContext.rect(mapX, mapY, mapW, mapH);
   drawingContext.clip();
 
+  // 1. Define our sidebar data dynamically each frame
+  const sidebarItems = [
+    { img: ironOreImg, count: ironOre },
+    { img: ironBarImg, count: ironBar },
+    { img: ironPlateImg, count: ironPlate },
+    { img: copperOreImg, count: copperOre },
+    { img: copperBarImg, count: copperBar },
+    { img: copperPlateImg, count: copperPlate },
+    { img: copperWireImg, count: copperWire },
+    { img: heliumImg, count: helium },
+    { img: electronicsImg, count: electronics },
+    { img: modularComponentImg, count: modularComponent }
+  ];
+
+  fill(255, 200, 100);
+  noStroke();
+  let h = mapY + 20;
+
+  // 2. Loop through the array directly, removing all the if/else chains
+  for (let i = 0; i < sidebarItems.length; i++) {
+    let item = sidebarItems[i];
+    let rX = sidebarX + 17.5;
+    let rY = h;
+    let rSize = 35;
+    
+    // Draw Icon
+    image(item.img, rX, rY, rSize, rSize);
+
+    // Draw Text
+    textAlign(RIGHT, BOTTOM);
+    let centerX = rX + (rSize / 2) + 17;
+    let centerY = rY + (rSize / 2) + 17;
+    
+    sideBarText(item.count);
+    text(item.count, centerX, centerY);
+
+    // Reset styles for next item
+    noStroke();
+    textStyle(NORMAL);
+    fill(255, 200, 100);
+    h += 40;
+  }
+
+  drawingContext.restore();
+  textAlign(CENTER, CENTER);
+
+  // Draw the Interactive Tab
+  let tabW = 25;
+  let tabH = 60;
+  let tabX = sidebarX + sidebarWidth;
+  let tabY = 425 / 2 - tabH / 2 + mapY;
+  let isTabHovered = mouseX > tabX && mouseX < tabX + tabW &&
+                     mouseY > tabY && mouseY < tabY + tabH;
+
+  fill(50);
+  noStroke();
+  textSize(18);
+  if (isSidebarOpen) {
+    image(sideBarTabOpen, tabX + tabW / 2 - 13, tabY + tabH / 2 - 29, tabW, tabH);
+  } else {
+    image(sideBarTabClosed, tabX + tabW / 2 - 13, tabY + tabH / 2 - 30, tabW, tabH);
+  }
+
+  if (isTabHovered) {
+    fill('rgba(200, 200, 200, 0.2)');
+    rect(tabX, tabY, tabW, tabH, 0, 10, 10, 0);
+    cursor('pointer');
+  } else {
+    if (!backButtonGame.isHovered()) {
+      cursor('default');
+    }
+  }
+}
+/**
+function drawSideBar() {
+  if (!drawGame.state) return;
+
+  const { tileSize, mapCols, mapRows, margin, topMargin } = drawGame.state.config;
+  let mapX = margin;
+  let mapY = topMargin;
+  let mapW = mapCols * tileSize;
+  let mapH = mapRows * tileSize;
+
+  let target = isSidebarOpen ? mapX : mapX - sidebarWidth;
+  sidebarX = lerp(sidebarX, target, 0.15);
+
+  image(sideBarFrameImg, sidebarX, mapY, sidebarWidth + 7, 435);
+
+  // Clip to map area so sidebar doesn't draw over hotbar or back button
+  drawingContext.save();
+  drawingContext.beginPath();
+  drawingContext.rect(mapX, mapY, mapW, mapH);
+  drawingContext.clip();
+
   // Sidebar items
   fill(255, 200, 100);
   noStroke();
@@ -710,6 +804,7 @@ function drawSideBar() {
     }
   }
 }
+*/
 
 function getSelectedHotbarItem() {
   if (selectedHotbarSlot < 0 || selectedHotbarSlot >= hotbarItems.length) {
