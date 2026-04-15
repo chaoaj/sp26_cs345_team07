@@ -3,7 +3,7 @@ let currentState = "MENU";
 let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton, debugButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
-const hotbarSlots = 9;
+const hotbarSlots = 6;
 let canvas;
 let isSidebarOpen = false; 
 let sidebarX = 20 - 80;
@@ -52,8 +52,7 @@ const hotbarItems = HOTBAR_ENTITY_TYPES.map((entityType, i) => ({
   color: getEntityFillRgb(entityType),
   shape: "square"
 }));
-  ENTITY_TYPES.MERGER
-];
+
 
 function setup() {
   canvas = createCanvas(600, 600);
