@@ -336,6 +336,7 @@ class TubeState extends EntityState {
    * @param {string} facing - Cardinal direction (E/N/W/S).
    * @returns {void}
    */
+  }
   constructor(shape = TUBE_SHAPES.STRAIGHT, facing = "E") {
     super();
     this.isOn = true;

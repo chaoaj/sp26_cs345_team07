@@ -67,7 +67,6 @@ function setup() {
   startButton = new Button (90, 350, 150, 55, "Start", () => {
     currentState = "GAME";
   });
-  settingsButton = new Button(90, 405, 150, 55, "Settings", () => {
   debugButton = new Button (175, 25, 100, 50, "Debug", () => {
       ironOre += 100;
       copperOre += 1000;
@@ -187,7 +186,6 @@ function drawGame() {
           item: null,
           colorOverride: null,
           entity: null,
-          entityId: null
           entityId: null,
           building: null
         });
