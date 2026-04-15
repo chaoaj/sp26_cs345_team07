@@ -152,8 +152,8 @@ function drawMenu() {
 function drawGame() {
   if (!drawGame.state) {
     const tileSize = 32;
-    const mapCols = 25;
-    const mapRows = 25;
+    const mapCols = 50;
+    const mapRows = 50;
     const tiles = [];
 
     for (let y = 0; y < mapRows; y++) {
@@ -197,10 +197,18 @@ function drawGame() {
     };
 
     // Resource patches for testing
-    tiles[6][6].type = "iron";
-    tiles[6][7].type = "iron";
-    tiles[10][12].type = "copper";
-    tiles[11][12].type = "copper";
+    for (let y = 6; y <= 7; y++) {
+      for (let x = 6; x <= 10; x++) {
+        setResourceNode(x, y, "iron");
+      }
+    }
+
+    for (let y = 10; y <= 12; y++) {
+      for (let x = 12; x <= 16; x++) {
+        setResourceNode(x, y, "copper");
+      }
+    }
+
     tiles[18][17].type = "helium3";
     tiles[18][18].type = "helium3";
     tiles[19][17].type = "helium3";
@@ -231,7 +239,15 @@ function drawGame() {
         rangeBlinkUntil: 0
       },
       placementFacing: "E",
-      selectedBuilding: null
+      placementTubeShape: TUBE_SHAPES.STRAIGHT,
+      selectedBuilding: null,
+      renderCache: {
+        worldLayer: null,
+        minimapLayer: null,
+        minimapTileSize: null,
+        minimapCols: null,
+        minimapRows: null
+      }
     };
   }
 
@@ -240,6 +256,9 @@ function drawGame() {
 
   if (drawGame.state.placementFacing == null) {
     drawGame.state.placementFacing = "E";
+  }
+  if (drawGame.state.placementTubeShape == null) {
+    drawGame.state.placementTubeShape = TUBE_SHAPES.STRAIGHT;
   }
   if (drawGame.state.selectedBuilding === undefined) {
     drawGame.state.selectedBuilding = null;
@@ -271,9 +290,22 @@ function drawGame() {
 
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
+  const visibleMinCol = max(0, floor((cameraX - mapOriginX) / tileSize) - 1);
+  const visibleMaxCol = min(
+    mapCols - 1,
+    floor((cameraX + width - mapOriginX) / tileSize) + 1
+  );
+  const visibleMinRow = max(0, floor((cameraY - mapOriginY) / tileSize) - 1);
+  const visibleMaxRow = min(
+    mapRows - 1,
+    floor((cameraY + height - mapOriginY) / tileSize) + 1
+  );
 
   push();
   translate(-cameraX, -cameraY);
+
+  const worldLayer = getOrBuildWorldLayer(drawGame.state);
+  image(worldLayer, 0, 0);
 
   // Draw tiles
   push();
@@ -298,21 +330,27 @@ function drawGame() {
     }
   }
 
-  for (let y = 0; y < mapRows; y++) {
-    for (let x = 0; x < mapCols; x++) {
+  for (let y = visibleMinRow; y <= visibleMaxRow; y++) {
+    for (let x = visibleMinCol; x <= visibleMaxCol; x++) {
       const tile = map.tiles[y][x];
-      const tileColor = getTileRenderColor(tile);
-      fill(tileColor[0], tileColor[1], tileColor[2]);
       const portType = portOverlay.get(`${x},${y}`);
+      const hasBuilding = !!tile.building;
+      if (!hasBuilding && !portType) {
+        continue;
+      }
+
       if (portType === "output") {
         fill(70, 200, 90);
       } else if (portType === "input") {
         fill(80, 130, 230);
       } else if (portType === "both") {
         fill(60, 190, 190);
+      } else {
+        const tileColor = getMiniMapTileColor(tile);
+        fill(tileColor[0], tileColor[1], tileColor[2]);
       }
       rect(x * tileSize, y * tileSize, tileSize, tileSize);
-      if (tile.building) {
+      if (hasBuilding) {
         const px = x * tileSize;
         const py = y * tileSize;
         drawPlacedBuildingLetter(px, py, tileSize, tile.building);
@@ -328,23 +366,29 @@ function drawGame() {
   const item = selectedHotbarSlot >= 0 ? getSelectedHotbarItem() : null;
   if (item && !isMouseOverHotbarArea()) {
     const holoHit = getTileAtScreenPosition(mouseX, mouseY);
-    if (holoHit && !isResourceNodeTile(holoHit.tile)) {
-      const hpx = holoHit.col * tileSize;
-      const hpy = holoHit.row * tileSize;
-      const previewOptions = getPlacementOptionsForEntity(
-        item.entityType,
-        holoHit.tile
-      );
-      drawBuildingPlacementHologram(
-        hpx,
-        hpy,
-        tileSize,
-        item.color,
-        hotbarItemLabel(item),
-        drawGame.state.placementFacing || "E",
-        item.entityType,
-        previewOptions
-      );
+    if (holoHit) {
+      const isNode = isResourceNodeTile(holoHit.tile);
+      const canHoverOnNode =
+        item.entityType === ENTITY_TYPES.MINER ||
+        item.entityType === ENTITY_TYPES.EXTRACTOR;
+      if (!isNode || canHoverOnNode) {
+        const hpx = holoHit.col * tileSize;
+        const hpy = holoHit.row * tileSize;
+        const previewOptions = getPlacementOptionsForEntity(
+          item.entityType,
+          holoHit.tile
+        );
+        drawBuildingPlacementHologram(
+          hpx,
+          hpy,
+          tileSize,
+          item.color,
+          hotbarItemLabel(item),
+          drawGame.state.placementFacing || "E",
+          item.entityType,
+          previewOptions
+        );
+      }
     }
   }
 
@@ -352,27 +396,9 @@ function drawGame() {
 
   drawMiniMap(map, player, config, feedback);
   backButtonGame.draw();
+  drawSideBar();
   drawHotbar();
   drawResourceHoverTooltip();
-}
-
-/**
- * Draw a small colored dot in the top-left corner of resource tiles.
- * Green if a miner is placed on it, red otherwise.
- */
-function drawResourceNodeIndicator(tileX, tileY, tile, tileSize) {
-  const px = tileX * tileSize;
-  const py = tileY * tileSize;
-
-  const hasMiner = tile.entityId !== null && tile.entity !== null;
-
-  noStroke();
-  if (hasMiner) {
-    fill(0, 220, 0); // green = miner placed, ON
-  } else {
-    fill(220, 0, 0); // red = no miner, available node
-  }
-  circle(px + 6, py + 6, 8);
 }
 
 /**
@@ -429,7 +455,7 @@ function drawEntities(entities, tileSize, map) {
     fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
     circle(px + tileSize - 8, py + 8, 8);
 
-    // Draw output port indicators (green circles at port positions)
+    // Draw input/output arrows at ports
     drawEntityPorts(entity, tileSize);
 
     // Draw label
@@ -444,32 +470,65 @@ function drawEntities(entities, tileSize, map) {
  * Output ports are shown as green circles, input ports as orange circles.
  * These appear on the adjacent tile where a tube should connect.
  */
+function drawDirectionalArrow(cx, cy, dirX, dirY, rgb, arrowLen) {
+  const length = arrowLen || 14;
+  const headLen = 6;
+  const headWidth = 6;
+  const half = length / 2;
+  const startX = cx - dirX * half;
+  const startY = cy - dirY * half;
+  const endX = cx + dirX * half;
+  const endY = cy + dirY * half;
+
+  stroke(rgb[0], rgb[1], rgb[2], 200);
+  strokeWeight(2);
+  line(startX, startY, endX, endY);
+
+  const leftX = -dirY;
+  const leftY = dirX;
+  const baseX = endX - dirX * headLen;
+  const baseY = endY - dirY * headLen;
+
+  noStroke();
+  fill(rgb[0], rgb[1], rgb[2], 220);
+  triangle(
+    endX,
+    endY,
+    baseX + leftX * headWidth * 0.5,
+    baseY + leftY * headWidth * 0.5,
+    baseX - leftX * headWidth * 0.5,
+    baseY - leftY * headWidth * 0.5
+  );
+}
+
 function drawEntityPorts(entity, tileSize) {
+  if (entity.state && entity.state.isConnected) {
+    return;
+  }
   const ports = getEntityConnectionPorts(entity);
+  const centerX = entity.tileX * tileSize + tileSize / 2;
+  const centerY = entity.tileY * tileSize + tileSize / 2;
+  const arrowLen = tileSize * 0.45;
 
   for (const port of ports) {
     const portPx = port.worldX * tileSize + tileSize / 2;
     const portPy = port.worldY * tileSize + tileSize / 2;
+    const dx = portPx - centerX;
+    const dy = portPy - centerY;
+    const len = Math.hypot(dx, dy) || 1;
+    let dirX = dx / len;
+    let dirY = dy / len;
 
-    noStroke();
-    if (port.kind === "output") {
-      // Green circle for output port
-      fill(0, 200, 0, 180);
+    if (port.kind === "input") {
+      dirX = -dirX;
+      dirY = -dirY;
+      drawDirectionalArrow(portPx, portPy, dirX, dirY, [255, 210, 0], arrowLen);
+    } else if (port.kind === "output") {
+      drawDirectionalArrow(portPx, portPy, dirX, dirY, [230, 60, 60], arrowLen);
     } else {
-      // Orange circle for input port
-      fill(255, 165, 0, 180);
+      drawDirectionalArrow(portPx, portPy, dirX, dirY, [80, 180, 200], arrowLen);
+      drawDirectionalArrow(portPx, portPy, -dirX, -dirY, [80, 180, 200], arrowLen);
     }
-    circle(portPx, portPy, 10);
-
-    // Small direction arrow or letter
-    fill(255);
-    textSize(7);
-    if (port.kind === "output") {
-      text("O", portPx, portPy);
-    } else {
-      text("I", portPx, portPy);
-    }
-    textSize(10);
   }
 }
 
@@ -502,14 +561,31 @@ function drawMiniMap(map, player, config, feedback) {
   fill(245);
   rect(miniX - 4, miniY - 4, miniWidth + 8, miniHeight + 8, 6);
 
-  stroke(210);
-  for (let y = 0; y < mapRows; y++) {
-    for (let x = 0; x < mapCols; x++) {
-      const tile = map.tiles[y][x];
-      const tileColor = getTileRenderColor(tile);
-      fill(tileColor[0], tileColor[1], tileColor[2]);
-      rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
+  const minimapLayer = getOrBuildMinimapLayer(
+    drawGame.state,
+    mapCols,
+    mapRows,
+    miniTile
+  );
+  image(minimapLayer, miniX, miniY);
+
+  noStroke();
+  for (const entity of drawGame.state.entities) {
+    if (
+      entity.tileX < 0 || entity.tileX >= mapCols ||
+      entity.tileY < 0 || entity.tileY >= mapRows
+    ) {
+      continue;
     }
+    const tile = map.tiles[entity.tileY][entity.tileX];
+    const tileColor = tile?.building?.color || getEntityFillRgb(entity.type);
+    fill(tileColor[0], tileColor[1], tileColor[2]);
+    rect(
+      miniX + entity.tileX * miniTile,
+      miniY + entity.tileY * miniTile,
+      miniTile,
+      miniTile
+    );
   }
 
   noStroke();
@@ -531,10 +607,64 @@ function drawMiniMap(map, player, config, feedback) {
     player.size,
     player.size
   );
+}
 
-  backButtonGame.draw();
-  drawHotbar();
-  drawSideBar();
+function getOrBuildWorldLayer(state) {
+  const cache = state.renderCache;
+  if (cache.worldLayer) {
+    return cache.worldLayer;
+  }
+
+  const { config, map } = state;
+  const { tileSize, mapCols, mapRows } = config;
+  const layer = createGraphics(mapCols * tileSize, mapRows * tileSize);
+  layer.stroke(200);
+  layer.strokeWeight(1);
+
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tile = map.tiles[y][x];
+      const tileColor = getTileBaseColor(tile);
+      layer.fill(tileColor[0], tileColor[1], tileColor[2]);
+      layer.rect(x * tileSize, y * tileSize, tileSize, tileSize);
+    }
+  }
+
+  cache.worldLayer = layer;
+  return layer;
+}
+
+function getOrBuildMinimapLayer(state, mapCols, mapRows, miniTile) {
+  const cache = state.renderCache;
+  const unchanged =
+    cache.minimapLayer &&
+    cache.minimapTileSize === miniTile &&
+    cache.minimapCols === mapCols &&
+    cache.minimapRows === mapRows;
+
+  if (unchanged) {
+    return cache.minimapLayer;
+  }
+
+  const layer = createGraphics(mapCols * miniTile, mapRows * miniTile);
+  const map = state.map;
+  layer.stroke(210);
+  layer.strokeWeight(1);
+
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tile = map.tiles[y][x];
+      const tileColor = getTileBaseColor(tile);
+      layer.fill(tileColor[0], tileColor[1], tileColor[2]);
+      layer.rect(x * miniTile, y * miniTile, miniTile, miniTile);
+    }
+  }
+
+  cache.minimapLayer = layer;
+  cache.minimapTileSize = miniTile;
+  cache.minimapCols = mapCols;
+  cache.minimapRows = mapRows;
+  return layer;
 }
 
 function drawSettings() {
@@ -737,9 +867,12 @@ function getPlacementPreviewPorts(entityType, options = {}) {
   if (entityType === ENTITY_TYPES.TUBE) {
     const shape = options.shape || TUBE_SHAPES.STRAIGHT;
     const def = TUBE_PORT_DEFS[shape] || TUBE_PORT_DEFS[TUBE_SHAPES.STRAIGHT];
+    const isCorner = shape === TUBE_SHAPES.CORNER;
+    const inputKind = isCorner ? "both" : "input";
+    const outputKind = isCorner ? "both" : "output";
     return [
-      { kind: "input", offset: def.input },
-      { kind: "output", offset: def.output }
+      { kind: inputKind, offset: def.input },
+      { kind: outputKind, offset: def.output }
     ];
   }
   const defs = ENTITY_PORT_DEFS[entityType];
@@ -750,19 +883,56 @@ function getPlacementPreviewPorts(entityType, options = {}) {
 }
 
 function drawPlacementPorts(ports, tileSize) {
+  const arrowLen = tileSize * 0.45;
+  const headLen = 6;
+  const headWidth = 6;
+
+  const drawArrow = (cx, cy, dirX, dirY, rgb) => {
+    const half = arrowLen / 2;
+    const startX = cx - dirX * half;
+    const startY = cy - dirY * half;
+    const endX = cx + dirX * half;
+    const endY = cy + dirY * half;
+
+    stroke(rgb[0], rgb[1], rgb[2], 200);
+    strokeWeight(2);
+    line(startX, startY, endX, endY);
+
+    const leftX = -dirY;
+    const leftY = dirX;
+    const baseX = endX - dirX * headLen;
+    const baseY = endY - dirY * headLen;
+
+    noStroke();
+    fill(rgb[0], rgb[1], rgb[2], 220);
+    triangle(
+      endX,
+      endY,
+      baseX + leftX * headWidth * 0.5,
+      baseY + leftY * headWidth * 0.5,
+      baseX - leftX * headWidth * 0.5,
+      baseY - leftY * headWidth * 0.5
+    );
+  };
+
   for (const port of ports) {
     const portPx = port.offset.x * tileSize;
     const portPy = port.offset.y * tileSize;
 
-    noStroke();
-    if (port.kind === "output") {
-      fill(0, 200, 0, 180);
-    } else if (port.kind === "input") {
-      fill(255, 165, 0, 180);
-    } else {
-      fill(60, 190, 190, 180);
+    const len = Math.hypot(port.offset.x, port.offset.y) || 1;
+    let dirX = port.offset.x / len;
+    let dirY = port.offset.y / len;
+
+    if (port.kind === "input") {
+      dirX = -dirX;
+      dirY = -dirY;
+      drawArrow(portPx, portPy, dirX, dirY, [255, 165, 0]);
+    } else if (port.kind === "output") {
+      drawArrow(portPx, portPy, dirX, dirY, [0, 200, 0]);
+    } else if (port.kind === "both") {
+      drawArrow(portPx, portPy, dirX, dirY, [60, 190, 190]);
+      drawArrow(portPx, portPy, -dirX, -dirY, [60, 190, 190]);
     }
-    circle(portPx, portPy, 10);
   }
 }
 
@@ -822,7 +992,7 @@ function getResourceTypeForTile(tile) {
 function getPlacementOptionsForEntity(entityType, tile) {
   if (entityType === ENTITY_TYPES.TUBE) {
     return {
-      shape: TUBE_SHAPES.STRAIGHT,
+      shape: (drawGame.state && drawGame.state.placementTubeShape) || TUBE_SHAPES.STRAIGHT,
       facing: (drawGame.state && drawGame.state.placementFacing) || "E"
     };
   }
@@ -839,44 +1009,6 @@ function getPlacementOptionsForEntity(entityType, tile) {
   }
 
   return {};
-}
-
-function placeBuildingFromHotbar(tile, hotbarItem, row, col) {
-  if (!hotbarItem || !tile || hotbarItem.kind !== "building") {
-    return;
-  }
-  if (isResourceNodeTile(tile)) {
-    return;
-  }
-  if (tile.building || tile.entityId != null) {
-    return;
-  }
-  if (!drawGame.state) {
-    return;
-  }
-  const { entities } = drawGame.state;
-  const entityType = hotbarItem.entityType;
-  const options = getPlacementOptionsForEntity(entityType, tile);
-  const newEntity = createEntity(entityType, col, row, options);
-  newEntity.state.facing = drawGame.state.placementFacing || "E";
-  entities.push(newEntity);
-  tile.entityId = newEntity.id;
-  tile.item = entityType;
-
-  updateConnections(entities);
-
-  tile.building = {
-    color: hotbarItem.color.slice(),
-    label: hotbarItemLabel(hotbarItem),
-    name: hotbarItem.name,
-    entityType: hotbarItem.entityType,
-    facing: newEntity.state.facing,
-    entityId: newEntity.id
-  };
-  tile.colorOverride = null;
-  if (drawGame.state) {
-    drawGame.state.selectedBuilding = { row, col };
-  }
 }
 
 function drawSelectedBuildingHighlight(map, tileSize) {
@@ -1053,6 +1185,28 @@ function getTileRenderColor(tile) {
   }
   if (tile.colorOverride) {
     return tile.colorOverride;
+  }
+  return getTileBaseColor(tile);
+}
+
+function getMiniMapTileColor(tile) {
+  if (!tile) {
+    return [240, 240, 245];
+  }
+  if (tile.building && tile.building.color) {
+    return tile.building.color;
+  }
+  if (tile.entity && tile.entity.type) {
+    return getEntityFillRgb(tile.entity.type);
+  }
+  if (tile.resource === RESOURCE_TYPES.IRON_ORE) {
+    return [67, 67, 65];
+  }
+  if (tile.resource === RESOURCE_TYPES.COPPER_ORE) {
+    return [184, 135, 60];
+  }
+  if (tile.resource === RESOURCE_TYPES.HELIUM3) {
+    return [0, 180, 220];
   }
   return getTileBaseColor(tile);
 }
@@ -1294,7 +1448,23 @@ function placeSelectedEntityAtMouse() {
   tile.entity = newEntity;
   tile.item = type;
 
-  refreshEntityConnectionStates(entities);
+  const hotbarItem = getSelectedHotbarItem();
+  if (hotbarItem) {
+    tile.building = {
+      color: hotbarItem.color.slice(),
+      label: hotbarItemLabel(hotbarItem),
+      name: hotbarItem.name,
+      entityType: hotbarItem.entityType,
+      facing: newEntity.state.facing,
+      entityId: newEntity.id
+    };
+    tile.colorOverride = null;
+    if (drawGame.state) {
+      drawGame.state.selectedBuilding = { row: tileY, col: tileX };
+    }
+  }
+
+  updateConnections(entities);
 
   console.log("Placed entity:", newEntity);
   if (type === ENTITY_TYPES.MINER) {
@@ -1339,7 +1509,16 @@ function keyPressed() {
   } else if (key === 'x' || key === 'X') {
     deleteEntityUnderMouse();
   } else if (key === 'c' || key === 'C') {
-    if (hoveredEntity && hoveredEntity.type === ENTITY_TYPES.TUBE) {
+    if (
+      selectedHotbarSlot >= 0 &&
+      getSelectedHotbarItem() &&
+      getSelectedHotbarItem().entityType === ENTITY_TYPES.TUBE
+    ) {
+      drawGame.state.placementTubeShape =
+        drawGame.state.placementTubeShape === TUBE_SHAPES.CORNER
+          ? TUBE_SHAPES.STRAIGHT
+          : TUBE_SHAPES.CORNER;
+    } else if (hoveredEntity && hoveredEntity.type === ENTITY_TYPES.TUBE) {
       hoveredEntity.state.shape = hoveredEntity.state.shape === TUBE_SHAPES.CORNER
         ? TUBE_SHAPES.STRAIGHT
         : TUBE_SHAPES.CORNER;
@@ -1378,6 +1557,10 @@ function keyPressed() {
     inspectEntityUnderMouse();
   } else if (key === 'o' || key === 'O') {
     toggleEntityUnderMouse();
+  } else if (key === 'p' || key === 'P') {
+    if (drawGame.state) {
+      logConnectionDebug(drawGame.state.entities);
+    }
   }
 }
 
@@ -1519,37 +1702,110 @@ function getTubeSourcesByTarget(entities) {
 
 function updateConnections(entities) {
   refreshEntityConnectionStates(entities);
+  updateSplitterMergerRates(entities);
+  refreshEntityConnectionStates(entities);
   updateSmelterInputs(entities);
   updateConstructorInputs(entities);
-  updateSplitterMergerRates(entities);
   refreshEntityConnectionStates(entities);
 }
 
-function updateSmelterInputs(entities) {
-  const tubeSources = getTubeSourcesByTarget(entities);
+function logConnectionDebug(entities) {
+  const tubes = [];
+  const splitters = [];
+  const smelters = [];
 
+  for (const entity of entities) {
+    if (entity.type === ENTITY_TYPES.TUBE) {
+      tubes.push({
+        id: entity.id,
+        at: `${entity.tileX},${entity.tileY}`,
+        from: entity.state.fromEntityId || null,
+        to: entity.state.toEntityId || null,
+        component: entity.state.componentId ?? null,
+        rate: entity.state.outputRate ?? 0,
+        item: entity.state.carriedItem || null
+      });
+    } else if (entity.type === ENTITY_TYPES.SPLITTER) {
+      splitters.push({
+        id: entity.id,
+        at: `${entity.tileX},${entity.tileY}`,
+        inputRate: entity.state.inputRate ?? 0,
+        outputRate: entity.state.outputRate ?? 0,
+        outputType: entity.state.outputType || null,
+        isActive: !!entity.state.isActive
+      });
+    } else if (entity.type === ENTITY_TYPES.SMELTER) {
+      smelters.push({
+        id: entity.id,
+        at: `${entity.tileX},${entity.tileY}`,
+        inputRate: entity.state.inputRate ?? 0,
+        outputRate: entity.state.outputRate ?? 0,
+        inputType: entity.state.inputType || null,
+        outputType: entity.state.outputType || null,
+        isOn: !!entity.state.isOn
+      });
+    }
+  }
+
+  console.log("Connection debug:", {
+    tubes,
+    splitters,
+    smelters
+  });
+}
+
+function getIncomingTubeInputs(entities, targetId) {
+  const inputs = [];
+  const incomingKeys = new Set();
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.TUBE) continue;
+    if (entity.state.toEntityId !== targetId) continue;
+
+    const componentId = entity.state.componentId;
+    const key = componentId != null ? `c:${componentId}` : `t:${entity.id}`;
+    if (incomingKeys.has(key)) continue;
+    incomingKeys.add(key);
+
+    inputs.push({
+      rate: entity.state.outputRate || 0,
+      outputType: entity.state.carriedItem || null
+    });
+  }
+
+  return inputs;
+}
+
+function updateSmelterInputs(entities) {
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.SMELTER) continue;
     const smelterState = entity.state;
-    const sourceIds = tubeSources.get(entity.id);
-    const sourceId = sourceIds ? [...sourceIds][0] : null;
-    const sourceEntity = entities.find((entry) => entry.id === sourceId) || null;
-    const outputType = sourceEntity?.state?.outputType || null;
-    const inputType = smelterState.acceptedInputs?.includes(outputType)
-      ? outputType
+    const inputs = getIncomingTubeInputs(entities, entity.id);
+    const types = inputs.map((entry) => entry.outputType).filter(Boolean);
+    const sharedType = types.length > 0 && types.every((type) => type === types[0])
+      ? types[0]
       : null;
+    const inputType = smelterState.acceptedInputs?.includes(sharedType)
+      ? sharedType
+      : null;
+    const totalRate = inputType
+      ? inputs.reduce(
+          (sum, entry) => sum + (entry.outputType === inputType ? entry.rate : 0),
+          0
+        )
+      : 0;
 
-    if (smelterState.inputType === inputType) {
+    if (smelterState.inputType === inputType && smelterState.inputRate === totalRate) {
       continue;
     }
 
     smelterState.inputType = inputType;
     smelterState.currentRecipe = inputType;
-    smelterState.isActive = !!inputType;
-    smelterState.isOn = !!inputType;
+    smelterState.isActive = !!inputType && totalRate > 0;
+    smelterState.isOn = smelterState.isActive;
     smelterState.outputType = smelterState.recipes?.get(inputType) || null;
-    smelterState.inputRate = inputType ? 1 : 0;
-    smelterState.outputRate = smelterState.outputType ? 1 : 0;
+    smelterState.inputRate = totalRate;
+    smelterState.outputRate = smelterState.outputType ? totalRate : 0;
 
     if (!inputType) {
       smelterState.storedInput = 0;
@@ -1653,8 +1909,6 @@ function updateSplitterMergerRates(entities) {
       rate: entity.state.outputRate || 0,
       outputType: entity.state.carriedItem || null
     });
-
-    outgoingCount.set(fromId, (outgoingCount.get(fromId) || 0) + 1);
   }
 
   for (const entity of entities) {
