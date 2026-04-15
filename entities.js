@@ -591,7 +591,7 @@ function createEntityState(type, options = {}) {
       return new MergerState();
 
     case ENTITY_TYPES.EXTRACTOR:
-      return new MinerState(options.resourceType, options.isActive);
+      return new ExtractorState(options.resourceType);
 
     default:
       return new EntityState();

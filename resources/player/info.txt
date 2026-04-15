@@ -1,0 +1,10 @@
+front + back idle sheet size: 294 x 31
+front + back move sheet size: 210 x 31
+side sheet idle size: 252 x 32
+side sheet move size: 162 x 32
+
+idle frame count: 14
+front/back move frame count: 10
+side move frame count: 9
+
+*Animations are intended to play at 10fps.
