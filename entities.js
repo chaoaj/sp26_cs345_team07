@@ -329,6 +329,7 @@ class ConstructorState extends EntityState {
 }
 
 class TubeState extends EntityState {
+  constructor(shape = TUBE_SHAPES.STRAIGHT) {
   /**
    * Initialize tube geometry, facing, and carried item display.
    * @param {string} shape - Tube shape identifier.
@@ -576,6 +577,7 @@ function createEntityState(type, options = {}) {
       return new ConstructorState();
 
     case ENTITY_TYPES.TUBE:
+      return new TubeState(options.shape);
       return new TubeState(options.shape, options.facing);
 
     case ENTITY_TYPES.SHUTTLE:
@@ -591,6 +593,7 @@ function createEntityState(type, options = {}) {
       return new MergerState();
 
     case ENTITY_TYPES.EXTRACTOR:
+      return new ExtractorState(options.resourceType);
       return new MinerState(options.resourceType, options.isActive);
 
     default:

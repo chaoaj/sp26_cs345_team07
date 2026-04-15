@@ -6,12 +6,18 @@ let selectedHotbarSlot = 0;
 const hotbarSlots = 6;
 let canvas;
 let isSidebarOpen = false; 
-let sidebarX = 20 - 80;
+let sidebarX = -70; // start hidden to the left
 let sidebarWidth = 70; 
+let ironOreImg, ironBarImg, ironPlateImg;
+let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
+let heliumImg, modularComponentImg;
+let sideBarFrameImg;
 
-let iron = 0;
-let copper = 0;
-let helium = 0;
+
+let ironOre = 0, ironBar = 0, ironPlate = 0;
+let copperOre = 0, copperBar = 0, copperPlate = 0, copperWire = 0;
+let helium = 0, rocketFuel = 0;
+let modularComponent = 0, shipAlloy = 0;
 
 function getEntityFillRgb(entityType) {
   if (entityType === ENTITY_TYPES.MINER) return [90, 170, 90];
@@ -62,6 +68,12 @@ function setup() {
     currentState = "GAME";
   });
   settingsButton = new Button(90, 405, 150, 55, "Settings", () => {
+  debugButton = new Button (175, 25, 100, 50, "Debug", () => {
+      ironOre += 100;
+      copperOre += 1000;
+      helium += 10000;
+  });
+  settingsButton = new Button(65, 350, 150, 50, "Settings", () => {
     currentState = "SETTINGS";
   });
   escapeButton = new Button(90, 460, 150, 55, "Quit", () => {
@@ -88,6 +100,15 @@ function preload() {
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
   settingsBG = loadImage('resources/settingsBG.png');
+  ironOreImg = loadImage('resources/resourceIcons/ironOreIcon.png');
+  ironBarImg = loadImage('resources/resourceIcons/ironBarIcon.png');
+  ironPlateImg = loadImage('resources/resourceIcons/ironPlateIcon.png');
+  copperOreImg = loadImage('resources/resourceIcons/copperOreIcon.png');
+  copperBarImg = loadImage('resources/resourceIcons/copperBarIcon.png');
+  copperPlateImg = loadImage('resources/resourceIcons/copperPlateIcon.png');
+  copperWireImg = loadImage('resources/resourceIcons/wireIcon.png');
+  heliumImg = loadImage('resources/resourceIcons/heliumThreeIcon.png');
+  sideBarFrameImg = loadImage('resources/UI/sideBarFrame.png');
 }
 
 function centerCanvas() {
@@ -167,11 +188,22 @@ function drawGame() {
           colorOverride: null,
           entity: null,
           entityId: null
+          entityId: null,
+          building: null
         });
       }
       tiles.push(row);
     }
 
+    // Resource patches for testing
+    tiles[6][6].type = "iron";
+    tiles[6][7].type = "iron";
+    tiles[10][12].type = "copper";
+    tiles[11][12].type = "copper";
+    tiles[18][17].type = "helium3";
+    tiles[18][18].type = "helium3";
+    tiles[19][17].type = "helium3";
+    tiles[19][18].type = "helium3";
     // Existing terrain
     for (let x = 4; x < 11; x++) {
       tiles[6][x].type = "dirt";
@@ -197,15 +229,18 @@ function drawGame() {
       }
     };
 
-    // Resource patches for testing
-    tiles[6][6].type = "iron";
-    tiles[6][7].type = "iron";
-    tiles[10][12].type = "copper";
-    tiles[11][12].type = "copper";
-    tiles[18][17].type = "helium3";
-    tiles[18][18].type = "helium3";
-    tiles[19][17].type = "helium3";
-    tiles[19][18].type = "helium3";
+    setResourceNode(6, 6, "iron");
+    setResourceNode(11, 7, "iron");
+    setResourceNode(17, 18, "iron");
+    setResourceNode(9, 19, "iron");
+    setResourceNode(10, 12, "copper");
+    setResourceNode(14, 10, "copper");
+    setResourceNode(7, 20, "copper");
+    setResourceNode(19, 14, "copper");
+    setResourceNode(18, 20, "helium3");
+    setResourceNode(5, 15, "helium3");
+    setResourceNode(20, 8, "helium3");
+    setResourceNode(13, 5, "helium3");
 
     const entities = [];
 
@@ -239,6 +274,7 @@ function drawGame() {
   const { config, map, player, feedback, entities } = drawGame.state;
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY, modificationRadiusTiles } = config;
 
+  // --- Movement ---
   if (drawGame.state.placementFacing == null) {
     drawGame.state.placementFacing = "E";
   }
@@ -313,16 +349,19 @@ function drawGame() {
         fill(60, 190, 190);
       }
       rect(x * tileSize, y * tileSize, tileSize, tileSize);
+
+      // Draw resource node indicator dot in corner
       if (tile.building) {
         const px = x * tileSize;
         const py = y * tileSize;
         drawPlacedBuildingLetter(px, py, tileSize, tile.building);
       }
-    
     }
   }
   pop();
 
+  // Draw entities on map
+  drawEntities(entities, tileSize, map);
   drawSelectedBuildingHighlight(map, tileSize);
 
   drawEntities(entities, tileSize);
@@ -412,6 +451,18 @@ function drawEntities(entities, tileSize, map) {
     const py = entity.tileY * tileSize;
 
     stroke(50);
+    strokeWeight(1);
+
+    if (entity.type === ENTITY_TYPES.MINER) fill(90, 170, 90);
+    else if (entity.type === ENTITY_TYPES.SMELTER) fill(200, 120, 80);
+    else if (entity.type === ENTITY_TYPES.CONSTRUCTOR) fill(90, 140, 220);
+    else if (entity.type === ENTITY_TYPES.TUBE) fill(120, 120, 120);
+    else if (entity.type === ENTITY_TYPES.SHUTTLE) fill(230, 230, 120);
+    else if (entity.type === ENTITY_TYPES.ROCKET_SITE) fill(180, 180, 255);
+    else if (entity.type === ENTITY_TYPES.SPLITTER) fill(180, 120, 220);
+    else if (entity.type === ENTITY_TYPES.MERGER) fill(120, 220, 180);
+    else if (entity.type === ENTITY_TYPES.EXTRACTOR) fill(120, 255, 255);
+    else fill(200);
     const rgb = getEntityFillRgb(entity.type);
     fill(rgb[0], rgb[1], rgb[2]);
 
@@ -425,6 +476,7 @@ function drawEntities(entities, tileSize, map) {
       strokeWeight(1);
     }
 
+    // Small on/off indicator (top-right corner)
     noStroke();
     const powerOn =
       entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
@@ -505,6 +557,7 @@ function drawMiniMap(map, player, config, feedback) {
   rect(miniX - 4, miniY - 4, miniWidth + 8, miniHeight + 8, 6);
 
   stroke(210);
+  strokeWeight(1);
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
@@ -553,6 +606,17 @@ function drawSettings() {
   drawSettingsUI();
 }
 
+function sideBarText(resource) {
+  let digits = Math.floor(resource).toString().length;
+  
+  if (digits >= 5) {
+    let newSize = 12 - ((digits - 4) * 1.35);
+    textSize(Math.max(4, newSize)); 
+  } else {
+    textSize(12);
+  }
+}
+
 function drawSideBar() {
   if (!drawGame.state) return;
 
@@ -565,6 +629,9 @@ function drawSideBar() {
   let target = isSidebarOpen ? mapX : mapX - sidebarWidth;
   sidebarX = lerp(sidebarX, target, 0.15);
 
+  image(sideBarFrameImg, sidebarX, mapY, sidebarWidth + 7, 425);
+
+  // Clip to map area so sidebar doesn't draw over hotbar or back button
   drawingContext.save();
   drawingContext.beginPath();
   drawingContext.rect(mapX, mapY, mapW, mapH);
@@ -573,40 +640,74 @@ function drawSideBar() {
   fill (240, 240, 245, 240);
   stroke(180);
   strokeWeight(2);
-  rect(sidebarX, mapY, sidebarWidth, 175);
-  
+  //rect(sidebarX, mapY, sidebarWidth, 425);
+  // Sidebar items
   fill(255, 200, 100);
   noStroke();
   let h = mapY + 20;
-  let ironName = 0;
-  let copperName = 1;
-  let heliumName = 2;
-
-  for (let i = 0; i < 3; i++) {
+  let ironOreName = 0;
+  let ironBarName = 1;
+  let ironPlateName = 2;
+  let copperOreName = 3;
+  let copperBarName = 4;
+  let copperPlateName = 5;
+  let copperWireName = 6;
+  let heliumName = 7;
+  // Loop through 8 items and draw them in the sidebar
+  for (let i = 0; i < 8; i++) {
     let rX = sidebarX + 17.5;
     let rY = h;
     let rSize = 37.5;
-    if (ironName == i) {
-      fill(67, 67, 65);
-    } else if (copperName == i) {
-      fill(255, 215, 0);
+    if (ironOreName == i) {
+      image(ironOreImg, rX, rY, rSize, rSize);
+    } else if (ironBarName == i) {
+      image(ironBarImg, rX, rY, rSize, rSize);
+    } else if (ironPlateName == i) {
+      image(ironPlateImg, rX, rY, rSize, rSize);
+    } else if (copperOreName == i) {
+      image(copperOreImg, rX, rY, rSize, rSize);
+    } else if (copperBarName == i) {
+      image(copperBarImg, rX, rY, rSize, rSize);
+    } else if (copperPlateName == i) {
+      image(copperPlateImg, rX, rY, rSize, rSize);
+    } else if (copperWireName == i) {
+      image(copperWireImg, rX, rY, rSize, rSize);
     } else if (heliumName == i) {
-      fill(0, 200, 255);
+      image(heliumImg, rX, rY, rSize, rSize);
     }
+    //if (ironName != i) {
+      //rect(rX, rY, rSize + 5, rSize, 4);
+    //}
 
-    rect(rX, rY, rSize, rSize, 4);
-
-    fill(255);
+    fill(0);
     textAlign(RIGHT, BOTTOM);
-    textSize(12);
 
     let centerX = rX + (rSize / 2) + 17;
     let centerY = rY + (rSize / 2) + 17;
-    if (ironName == i) {
-      text(iron + "x", centerX, centerY);
-    } else if (copperName == i) {
-      text(copper + "x", centerX, centerY);
+
+    if (ironOreName == i) {
+      sideBarText(ironOre);
+      text(ironOre + "x", centerX, centerY);
+    } else if (ironBarName == i) {
+      sideBarText(ironBar);
+      text(ironBar + "x", centerX, centerY);
+    } else if (ironPlateName == i) {
+      sideBarText(ironPlate);
+      text(ironPlate + "x", centerX, centerY);
+    } else if (copperOreName == i) {
+      sideBarText(copperOre);
+      text(copperOre + "x", centerX, centerY);
+    } else if (copperBarName == i) {
+      sideBarText(copperBar);
+      text(copperBar + "x", centerX, centerY);
+    } else if (copperPlateName == i) {
+      sideBarText(copperPlate);
+      text(copperPlate + "x", centerX, centerY);
+    } else if (copperWireName == i) {
+      sideBarText(copperWire);
+      text(copperWire + "x", centerX, centerY);
     } else if (heliumName == i) {
+      sideBarText(helium);
       text(helium + "x", centerX, centerY);
     }
 
@@ -620,7 +721,7 @@ function drawSideBar() {
   let tabW = 25;
   let tabH = 60;
   let tabX = sidebarX + sidebarWidth;
-  let tabY = 175 / 2;
+  let tabY = 425 / 2 - tabH / 2 + mapY;
   let isTabHovered = mouseX > tabX && mouseX < tabX + tabW &&
                      mouseY > tabY && mouseY < tabY + tabH;
 
@@ -912,6 +1013,16 @@ function getTileBaseColor(tile) {
     default:
       return [240, 240, 245];
   }
+  if (tile.type === "iron") {
+    return [196, 198, 206];
+  }
+  if (tile.type === "copper") {
+    return [201, 125, 55];
+  }
+  if (tile.type === "helium3") {
+    return [130, 245, 255];
+  }
+  return [240, 240, 245];
 }
 
 function getPlacedBuildingDisplayName(tile) {
@@ -1317,6 +1428,10 @@ function getPlacementOptionsForTile(type, tile) {
       resourceType: resource,
       isOnResourceNode: onNode
     };
+  }
+
+  if (type === ENTITY_TYPES.EXTRACTOR) {
+    return { resourceType: "helium3" };
   }
 
   return getPlacementOptionsForEntity(type, tile);
