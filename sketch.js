@@ -11,7 +11,7 @@ let sidebarWidth = 70;
 let ironOreImg, ironBarImg, ironPlateImg;
 let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
 let heliumImg, modularComponentImg;
-let sideBarFrameImg;
+let sideBarFrameImg, sideBarTabOpen, sideBarTabClosed;
 
 let ironOre = 0, ironBar = 0, ironPlate = 0;
 let copperOre = 0, copperBar = 0, copperPlate = 0, copperWire = 0;
@@ -107,6 +107,8 @@ function preload() {
   modularComponentImg = loadImage('resources/resourceIcons/modularComponentIcon.png');
   electronicsImg = loadImage('resources/resourceIcons/electronicsIcon.png');
   sideBarFrameImg = loadImage('resources/UI/sideBarFrame.png');
+  sideBarTabOpen = loadImage('resources/UI/sidebarTabOpen.png');
+  sideBarTabClosed = loadImage('resources/UI/sidebarTabClosed.png');
 }
 
 function centerCanvas() {
@@ -694,28 +696,24 @@ function drawSideBar() {
   let isTabHovered = mouseX > tabX && mouseX < tabX + tabW &&
                      mouseY > tabY && mouseY < tabY + tabH;
 
-  if (isTabHovered) {
-    fill(220, 220, 250);
-    cursor('pointer');
-  } else {
-    fill(255);
-    if (!backButtonGame.isHovered()) {
-      cursor('default');
-    }
-  }
-
-  stroke(180);
-  strokeWeight(2);
-  rect(tabX, tabY, tabW, tabH, 0, 10, 10, 0);
-
   fill(50);
   noStroke();
   textSize(18);
   if (isSidebarOpen) {
-    text("<", tabX + tabW / 2, tabY + tabH / 2);
+    image(sideBarTabOpen, tabX + tabW / 2 - 13, tabY + tabH / 2 - 29, tabW, tabH);
     debugButton.draw();
   } else {
-    text(">", tabX + tabW / 2, tabY + tabH / 2);
+    image(sideBarTabClosed, tabX + tabW / 2 - 13, tabY + tabH / 2 - 30, tabW, tabH);
+  }
+
+  if (isTabHovered) {
+    fill('rgba(200, 200, 200, 0.2)');
+    rect(tabX, tabY, tabW, tabH, 0, 10, 10, 0);
+    cursor('pointer');
+  } else {
+    if (!backButtonGame.isHovered()) {
+      cursor('default');
+    }
   }
 }
 
