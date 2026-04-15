@@ -1,6 +1,6 @@
 // sketch.js
 let currentState = "MENU";
-let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton, debugButton;
+let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 9;
@@ -73,11 +73,6 @@ function setup() {
   });
   settingsButton = new Button(90, 405, 150, 55, "Settings", () => {
     currentState = "SETTINGS";
-  });
-  debugButton = new Button (175, 25, 100, 50, "Debug", () => {
-      ironOre += 100;
-      copperOre += 1000;
-      helium += 10000;
   });
   escapeButton = new Button(90, 460, 150, 55, "Quit", () => {
     window.close();
@@ -701,7 +696,6 @@ function drawSideBar() {
   textSize(18);
   if (isSidebarOpen) {
     image(sideBarTabOpen, tabX + tabW / 2 - 13, tabY + tabH / 2 - 29, tabW, tabH);
-    debugButton.draw();
   } else {
     image(sideBarTabClosed, tabX + tabW / 2 - 13, tabY + tabH / 2 - 30, tabW, tabH);
   }
@@ -1217,10 +1211,6 @@ function mousePressed() {
   if (mouseX > tabX && mouseX < tabX + tabW && mouseY > tabY && mouseY < tabY + tabH) {
     isSidebarOpen = !isSidebarOpen;
     return;
-  }
-
-  if (isSidebarOpen) {
-    debugButton.checkClick();
   }
 
   // UI back button
