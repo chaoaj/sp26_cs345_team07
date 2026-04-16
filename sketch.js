@@ -801,7 +801,6 @@ function drawSideBar() {
   }
 }
 
-
 function getSelectedHotbarItem() {
   if (selectedHotbarSlot < 0 || selectedHotbarSlot >= hotbarItems.length) {
     return null;
