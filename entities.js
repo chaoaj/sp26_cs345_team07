@@ -591,7 +591,7 @@ function createEntityState(type, options = {}) {
       return new MergerState();
 
     case ENTITY_TYPES.EXTRACTOR:
-      return new ExtractorState(options.resourceType);
+      return new MinerState(options.resourceType, options.isActive);
 
     default:
       return new EntityState();
@@ -652,6 +652,7 @@ function refreshEntityConnectionStates(entities) {
   }
 
   const visited = new Set();
+  let nextComponentId = 1;
   for (const tube of tubes) {
     if (visited.has(tube.id)) continue;
 
@@ -670,11 +671,13 @@ function refreshEntityConnectionStates(entities) {
       }
     }
 
+    const componentId = nextComponentId++;
     const outputs = new Set();
     const inputs = new Set();
     const attachedInComponent = new Set();
 
     for (const member of component) {
+      member.state.componentId = componentId;
       const portConnections = getTubePortConnections(entities, member);
       for (const connection of portConnections) {
         attachedInComponent.add(connection.entityId);
