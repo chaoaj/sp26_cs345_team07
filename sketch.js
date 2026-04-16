@@ -58,6 +58,7 @@ const hotbarItems = HOTBAR_ENTITY_TYPES.map((entityType, i) => ({
   shape: "square"
 }));
 
+
 function setup() {
   canvas = createCanvas(600, 600);
   centerCanvas();
@@ -177,6 +178,7 @@ function drawGame() {
           colorOverride: null,
           entity: null,
           entityId: null
+          building: null
         });
       }
       tiles.push(row);
@@ -377,29 +379,17 @@ function drawGame() {
   const item = selectedHotbarSlot >= 0 ? getSelectedHotbarItem() : null;
   if (item && !isMouseOverHotbarArea()) {
     const holoHit = getTileAtScreenPosition(mouseX, mouseY);
-    if (holoHit) {
-      const isNode = isResourceNodeTile(holoHit.tile);
-      const canHoverOnNode =
-        item.entityType === ENTITY_TYPES.MINER ||
-        item.entityType === ENTITY_TYPES.EXTRACTOR;
-      if (!isNode || canHoverOnNode) {
-        const hpx = holoHit.col * tileSize;
-        const hpy = holoHit.row * tileSize;
-        const previewOptions = getPlacementOptionsForEntity(
-          item.entityType,
-          holoHit.tile
-        );
-        drawBuildingPlacementHologram(
-          hpx,
-          hpy,
-          tileSize,
-          item.color,
-          hotbarItemLabel(item),
-          drawGame.state.placementFacing || "E",
-          item.entityType,
-          previewOptions
-        );
-      }
+    if (holoHit && !isResourceNodeTile(holoHit.tile)) {
+      const hpx = holoHit.col * tileSize;
+      const hpy = holoHit.row * tileSize;
+      drawBuildingPlacementHologram(
+        hpx,
+        hpy,
+        tileSize,
+        item.color,
+        hotbarItemLabel(item),
+        drawGame.state.placementFacing || "E"
+      );
     }
   }
 
@@ -588,15 +578,6 @@ function drawMiniMap(map, player, config, feedback) {
     ) {
       continue;
     }
-    const tile = map.tiles[entity.tileY][entity.tileX];
-    const tileColor = tile?.building?.color || getEntityFillRgb(entity.type);
-    fill(tileColor[0], tileColor[1], tileColor[2]);
-    rect(
-      miniX + entity.tileX * miniTile,
-      miniY + entity.tileY * miniTile,
-      miniTile,
-      miniTile
-    );
   }
 
   noStroke();

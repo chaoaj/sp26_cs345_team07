@@ -335,6 +335,7 @@ class TubeState extends EntityState {
    * @param {string} facing - Cardinal direction (E/N/W/S).
    * @returns {void}
    */
+  }
   constructor(shape = TUBE_SHAPES.STRAIGHT, facing = "E") {
     super();
     this.isOn = true;
@@ -591,7 +592,7 @@ function createEntityState(type, options = {}) {
       return new MergerState();
 
     case ENTITY_TYPES.EXTRACTOR:
-      return new MinerState(options.resourceType, options.isActive);
+      return new ExtractorState(options.resourceType);
 
     default:
       return new EntityState();
