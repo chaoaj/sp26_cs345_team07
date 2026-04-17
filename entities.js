@@ -24,7 +24,6 @@ const RESOURCE_TYPES = {
   IRON_BAR: "ironBar",
   IRON_PLATE: "ironPlate",
   MODULAR_COMPONENT: "modularComponent",
-  GEAR: "gear",
   SHIP_ALLOY: "shipAlloy",
   ELECTRONICS: "electronics",
   HELIUM3: "helium3",
@@ -119,14 +118,24 @@ const ENTITY_PORT_DEFS = {
     { name: "output", kind: "output", offset: { x: 0, y: 1 } }
   ],
   [ENTITY_TYPES.SHUTTLE]: [
-    { name: "input", kind: "input", offset: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+    { name: "inputLeft", kind: "input", offset: { x: -2, y: 0 } },
+    { name: "inputRight", kind: "input", offset: { x: 2, y: 0 } },
+    { name: "inputUp", kind: "input", offset: { x: 0, y: -2 } },
+    { name: "inputDown", kind: "input", offset: { x: 0, y: 2 } }
   ],
   [ENTITY_TYPES.ROCKET_SITE]: [
     { name: "input", kind: "input", offset: { x: -1, y: 0 } }
   ],
   [ENTITY_TYPES.EXTRACTOR]: [
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+  ]
+};
+
+const ENTITY_FOOTPRINT_DEFS = {
+  [ENTITY_TYPES.SHUTTLE]: [
+    { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
+    { x: -1, y: 0 },  { x: 0, y: 0 },  { x: 1, y: 0 },
+    { x: -1, y: 1 },  { x: 0, y: 1 },  { x: 1, y: 1 }
   ]
 };
 
@@ -355,7 +364,6 @@ class ShuttleState extends EntityState {
     this.inventory = {
       ironPlate: 10,
       copperPlate: 6,
-      gear: 4
     };
 
     this.isConnected = false;
@@ -544,6 +552,22 @@ function getEntityConnectionPorts(entity) {
       worldY: entity.tileY + rotated.y
     };
   });
+}
+
+function getEntityFootprintOffsets(entityType) {
+  const custom = ENTITY_FOOTPRINT_DEFS[entityType];
+  if (custom && custom.length) {
+    return custom;
+  }
+  return [{ x: 0, y: 0 }];
+}
+
+function getEntityFootprintTilesAt(entityType, tileX, tileY) {
+  const offsets = getEntityFootprintOffsets(entityType);
+  return offsets.map((offset) => ({
+    x: tileX + offset.x,
+    y: tileY + offset.y
+  }));
 }
 
 function getPortsAtTile(entities, tileX, tileY) {

@@ -193,6 +193,17 @@ function drawMenu() {
 }
 
 function drawGame() {
+  const restrictedMode = (typeof isRestrictedModeEnabled === "function")
+    ? isRestrictedModeEnabled()
+    : false;
+
+  if (
+    drawGame.state &&
+    drawGame.state.isRestrictedMode !== restrictedMode
+  ) {
+    drawGame.state = null;
+  }
+
   if (!drawGame.state) {
     const tileSize = 32;
     const mapCols = 50;
@@ -294,6 +305,13 @@ function drawGame() {
       },
       animationTimer: 0
     };
+
+    drawGame.state.isRestrictedMode = restrictedMode;
+    drawGame.state.shuttleEntityId = null;
+
+    if (restrictedMode) {
+      spawnRestrictedModeShuttle(drawGame.state);
+    }
   }
 
   const { config, map, player, feedback, entities } = drawGame.state;
@@ -476,6 +494,58 @@ function drawGame() {
   updatePlayerAnimation();
 }
 
+function spawnRestrictedModeShuttle(state) {
+  if (!state || !state.map || !state.entities) {
+    return;
+  }
+
+  // Keep shuttle close to spawn and off current resource nodes.
+  const shuttleCol = 3;
+  const shuttleRow = 4;
+  const footprintTiles = getEntityFootprintTilesAt(
+    ENTITY_TYPES.SHUTTLE,
+    shuttleCol,
+    shuttleRow
+  );
+
+  for (const entry of footprintTiles) {
+    const tile = state.map.tiles[entry.y] && state.map.tiles[entry.y][entry.x];
+    if (!tile || tile.entityId != null) {
+      return;
+    }
+  }
+
+  const centerTile = state.map.tiles[shuttleRow] && state.map.tiles[shuttleRow][shuttleCol];
+  if (!centerTile) {
+    return;
+  }
+
+  const shuttle = createEntity(ENTITY_TYPES.SHUTTLE, shuttleCol, shuttleRow, {});
+  shuttle.state.facing = "E";
+
+  state.entities.push(shuttle);
+
+  for (const entry of footprintTiles) {
+    const tile = state.map.tiles[entry.y][entry.x];
+    tile.entityId = shuttle.id;
+    tile.entity = shuttle;
+    tile.item = ENTITY_TYPES.SHUTTLE;
+    tile.colorOverride = null;
+  }
+
+  centerTile.building = {
+    color: getEntityFillRgb(ENTITY_TYPES.SHUTTLE),
+    label: getEntityShortLabel(ENTITY_TYPES.SHUTTLE),
+    name: "Crashed Shuttle",
+    entityType: ENTITY_TYPES.SHUTTLE,
+    facing: shuttle.state.facing,
+    entityId: shuttle.id
+  };
+  state.shuttleEntityId = shuttle.id;
+
+  updateConnections(state.entities);
+}
+
 /**
  * Update all miners: accumulate harvested resources into global counters.
  */
@@ -646,20 +716,36 @@ function drawEntities(entities, tileSize, map) {
   textSize(10);
 
   for (const entity of entities) {
-    const px = entity.tileX * tileSize;
-    const py = entity.tileY * tileSize;
+    const footprintOffsets = getEntityFootprintOffsets(entity.type);
+    let minOffsetX = Infinity;
+    let maxOffsetX = -Infinity;
+    let minOffsetY = Infinity;
+    let maxOffsetY = -Infinity;
+    for (const offset of footprintOffsets) {
+      minOffsetX = min(minOffsetX, offset.x);
+      maxOffsetX = max(maxOffsetX, offset.x);
+      minOffsetY = min(minOffsetY, offset.y);
+      maxOffsetY = max(maxOffsetY, offset.y);
+    }
+
+    const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
+    const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
+    const px = (entity.tileX + minOffsetX) * tileSize;
+    const py = (entity.tileY + minOffsetY) * tileSize;
+    const drawWidth = footprintWidthTiles * tileSize;
+    const drawHeight = footprintHeightTiles * tileSize;
 
     stroke(50);
     const rgb = getEntityFillRgb(entity.type);
     fill(rgb[0], rgb[1], rgb[2]);
 
-    rect(px + 4, py + 4, tileSize - 8, tileSize - 8, 4);
+    rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
 
     if (entity.state.isBroken) {
       stroke(255, 0, 0);
       strokeWeight(3);
-      line(px + 6, py + 6, px + tileSize - 6, py + tileSize - 6);
-      line(px + tileSize - 6, py + 6, px + 6, py + tileSize - 6);
+      line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
+      line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
       strokeWeight(1);
     }
 
@@ -667,7 +753,7 @@ function drawEntities(entities, tileSize, map) {
     const powerOn =
       entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
     fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-    circle(px + tileSize - 8, py + 8, 8);
+    circle(px + drawWidth - 8, py + 8, 8);
 
     // Draw input/output arrows at ports
     drawEntityPorts(entity, tileSize);
@@ -675,7 +761,11 @@ function drawEntities(entities, tileSize, map) {
     // Draw label
     fill(20);
     noStroke();
-    text(getEntityShortLabel(entity.type), px + tileSize / 2, py + tileSize / 2);
+    text(
+      getEntityShortLabel(entity.type),
+      px + drawWidth / 2,
+      py + drawHeight / 2
+    );
   }
 }
 
@@ -1228,6 +1318,23 @@ function drawBuildingPlacementHologram(
 ) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
+  const footprintOffsets = getEntityFootprintOffsets(entityType);
+  let minOffsetX = Infinity;
+  let maxOffsetX = -Infinity;
+  let minOffsetY = Infinity;
+  let maxOffsetY = -Infinity;
+  for (const offset of footprintOffsets) {
+    minOffsetX = min(minOffsetX, offset.x);
+    maxOffsetX = max(maxOffsetX, offset.x);
+    minOffsetY = min(minOffsetY, offset.y);
+    maxOffsetY = max(maxOffsetY, offset.y);
+  }
+  const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
+  const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
+  const footprintLeft = minOffsetX * tileSize;
+  const footprintTop = minOffsetY * tileSize;
+  const footprintWidth = footprintWidthTiles * tileSize;
+  const footprintHeight = footprintHeightTiles * tileSize;
   const previewOptions = {
     ...(options || {}),
     facing: facing || ((options && options.facing) || "E")
@@ -1244,7 +1351,13 @@ function drawBuildingPlacementHologram(
   stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
   strokeWeight(2);
   fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
-  rect(-tileSize / 2 + 3, -tileSize / 2 + 3, tileSize - 6, tileSize - 6, 4);
+  rect(
+    footprintLeft + 3,
+    footprintTop + 3,
+    footprintWidth - 6,
+    footprintHeight - 6,
+    4
+  );
   fill(35, 35, 42, 200);
   noStroke();
   textSize(14);
@@ -1310,12 +1423,25 @@ function drawSelectedBuildingHighlight(map, tileSize) {
     drawGame.state.selectedBuilding = null;
     return;
   }
-  const px = sel.col * tileSize;
-  const py = sel.row * tileSize;
+  const footprintOffsets = getEntityFootprintOffsets(tile.building.entityType);
+  let minOffsetX = Infinity;
+  let maxOffsetX = -Infinity;
+  let minOffsetY = Infinity;
+  let maxOffsetY = -Infinity;
+  for (const offset of footprintOffsets) {
+    minOffsetX = min(minOffsetX, offset.x);
+    maxOffsetX = max(maxOffsetX, offset.x);
+    minOffsetY = min(minOffsetY, offset.y);
+    maxOffsetY = max(maxOffsetY, offset.y);
+  }
+  const left = (sel.col + minOffsetX) * tileSize;
+  const top = (sel.row + minOffsetY) * tileSize;
+  const widthTiles = maxOffsetX - minOffsetX + 1;
+  const heightTiles = maxOffsetY - minOffsetY + 1;
   noFill();
   stroke(255, 210, 60);
   strokeWeight(2.5);
-  rect(px - 2, py - 2, tileSize + 4, tileSize + 4, 4);
+  rect(left - 2, top - 2, widthTiles * tileSize + 4, heightTiles * tileSize + 4, 4);
 }
 
 function getTileBaseColor(tile) {
@@ -1693,19 +1819,30 @@ function placeSelectedEntityAtMouse() {
 
   if (tileX < 0 || tileX >= mapCols || tileY < 0 || tileY >= mapRows) return;
 
-  // Check modification range
-  if (!isTileWithinModificationRange(tileY, tileX)) {
-    triggerModificationRangeBlink();
-    return;
+  const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
+  if (!type) return;
+  const footprintTiles = getEntityFootprintTilesAt(type, tileX, tileY);
+
+  for (const entry of footprintTiles) {
+    if (
+      entry.x < 0 ||
+      entry.x >= mapCols ||
+      entry.y < 0 ||
+      entry.y >= mapRows
+    ) {
+      return;
+    }
+    if (!isTileWithinModificationRange(entry.y, entry.x)) {
+      triggerModificationRangeBlink();
+      return;
+    }
+    const occupiedTile = map.tiles[entry.y][entry.x];
+    if (occupiedTile.entityId !== null) {
+      return;
+    }
   }
 
   const tile = map.tiles[tileY][tileX];
-
-  // Don't place on occupied tiles
-  if (tile.entityId !== null) return;
-
-  const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
-  if (!type) return;
 
   // Build placement options based on entity type and tile
   const options = getPlacementOptionsForTile(type, tile);
@@ -1714,9 +1851,14 @@ function placeSelectedEntityAtMouse() {
   newEntity.state.facing = drawGame.state.placementFacing || "E";
 
   entities.push(newEntity);
-  tile.entityId = newEntity.id;
-  tile.entity = newEntity;
-  tile.item = type;
+
+  for (const entry of footprintTiles) {
+    const occupiedTile = map.tiles[entry.y][entry.x];
+    occupiedTile.entityId = newEntity.id;
+    occupiedTile.entity = newEntity;
+    occupiedTile.item = type;
+    occupiedTile.colorOverride = null;
+  }
 
   const hotbarItem = getSelectedHotbarItem();
   if (hotbarItem) {
@@ -1728,7 +1870,6 @@ function placeSelectedEntityAtMouse() {
       facing: newEntity.state.facing,
       entityId: newEntity.id
     };
-    tile.colorOverride = null;
     if (drawGame.state) {
       drawGame.state.selectedBuilding = { row: tileY, col: tileX };
     }
@@ -1846,8 +1987,18 @@ function deleteEntityUnderMouse() {
 
   const { entities, map } = drawGame.state;
   const targetId = hit.tile.entityId;
+  const targetEntity = targetId != null ? getEntityById(entities, targetId) : null;
 
   if (targetId == null && !hit.tile.building) {
+    return;
+  }
+
+  if (
+    drawGame.state.isRestrictedMode &&
+    targetEntity &&
+    targetEntity.type === ENTITY_TYPES.SHUTTLE
+  ) {
+    console.log("Cannot delete crashed shuttle in restricted mode.");
     return;
   }
 
@@ -1856,17 +2007,41 @@ function deleteEntityUnderMouse() {
     if (index !== -1) {
       entities.splice(index, 1);
     }
-    hit.tile.entityId = null;
-    hit.tile.item = null;
-  }
-
-  if (hit.tile.building) {
+    if (targetEntity) {
+      const footprintTiles = getEntityFootprintTilesAt(
+        targetEntity.type,
+        targetEntity.tileX,
+        targetEntity.tileY
+      );
+      for (const entry of footprintTiles) {
+        const tile = map.tiles[entry.y]?.[entry.x];
+        if (!tile || tile.entityId !== targetId) continue;
+        tile.entityId = null;
+        tile.entity = null;
+        tile.item = null;
+        tile.colorOverride = null;
+        if (tile.building && tile.building.entityId === targetId) {
+          tile.building = null;
+        }
+      }
+    } else {
+      hit.tile.entityId = null;
+      hit.tile.entity = null;
+      hit.tile.item = null;
+      hit.tile.colorOverride = null;
+      if (hit.tile.building && hit.tile.building.entityId === targetId) {
+        hit.tile.building = null;
+      }
+    }
+  } else if (hit.tile.building) {
     hit.tile.building = null;
   }
 
   if (drawGame.state.selectedBuilding) {
     const sel = drawGame.state.selectedBuilding;
-    if (map.tiles[sel.row]?.[sel.col] === hit.tile) {
+    const selectedTile = map.tiles[sel.row]?.[sel.col];
+    const selectedEntityId = selectedTile?.building?.entityId ?? selectedTile?.entityId;
+    if (!selectedTile || selectedEntityId === targetId || selectedTile === hit.tile) {
       drawGame.state.selectedBuilding = null;
     }
   }
