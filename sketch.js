@@ -177,7 +177,7 @@ function drawGame() {
           item: null,
           colorOverride: null,
           entity: null,
-          entityId: null
+          entityId: null,
           building: null
         });
       }
