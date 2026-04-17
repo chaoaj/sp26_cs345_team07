@@ -96,7 +96,7 @@ function preload() {
   heliumImg = loadImage('resources/resourceIcons/heliumThreeIcon.png');
   modularComponentImg = loadImage('resources/resourceIcons/modularComponentIcon.png');
   electronicsImg = loadImage('resources/resourceIcons/electronicsIcon.png');
-  sideBarFrameImg = loadImage('resources/UI/sideBarFrame.png');
+  sideBarFrameImg = loadImage('resources/UI/sidebarFrame.png');
   sideBarTabOpen = loadImage('resources/UI/sidebarTabOpen.png');
   sideBarTabClosed = loadImage('resources/UI/sidebarTabClosed.png');
 }
