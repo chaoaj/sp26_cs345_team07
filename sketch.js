@@ -468,18 +468,22 @@ function drawGame() {
           item.entityType,
           holoHit.tile
         );
-        drawBuildingPlacementHologram(
-          hpx,
-          hpy,
-          tileSize,
-          item.color,
-          hotbarItemLabel(item),
-          drawGame.state.placementFacing || "E",
-          item.entityType,
-          previewOptions,
-          holoHit.col,
-          holoHit.row
-        );
+        try {
+          drawBuildingPlacementHologram(
+            hpx,
+            hpy,
+            tileSize,
+            item.color,
+            hotbarItemLabel(item),
+            drawGame.state.placementFacing || "E",
+            item.entityType,
+            previewOptions,
+            holoHit.col,
+            holoHit.row
+          );
+        } catch (error) {
+          console.error("Placement hologram draw failed:", error);
+        }
       }
     }
   }
@@ -500,9 +504,9 @@ function spawnRestrictedModeShuttle(state) {
   }
 
   // Keep shuttle close to spawn and off current resource nodes.
-  const shuttleCol = 3;
+  const shuttleCol = 18;
   const shuttleRow = 4;
-  const footprintTiles = getEntityFootprintTilesAt(
+  const footprintTiles = getSafeFootprintTilesAt(
     ENTITY_TYPES.SHUTTLE,
     shuttleCol,
     shuttleRow
@@ -617,6 +621,35 @@ function addProducedResource(resourceType, count) {
   }
 }
 
+function getSafeFootprintOffsets(entityType) {
+  const fallback = [{ x: 0, y: 0 }];
+  if (typeof getEntityFootprintOffsets !== "function") {
+    return fallback;
+  }
+
+  const offsets = getEntityFootprintOffsets(entityType);
+  if (!Array.isArray(offsets) || offsets.length === 0) {
+    return fallback;
+  }
+
+  const normalized = offsets.filter(
+    (offset) =>
+      offset &&
+      Number.isFinite(offset.x) &&
+      Number.isFinite(offset.y)
+  );
+
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+function getSafeFootprintTilesAt(entityType, tileX, tileY) {
+  const offsets = getSafeFootprintOffsets(entityType);
+  return offsets.map((offset) => ({
+    x: tileX + offset.x,
+    y: tileY + offset.y
+  }));
+}
+
 function updateFactoryProduction(entities, dt) {
   for (const entity of entities) {
     if (
@@ -716,7 +749,7 @@ function drawEntities(entities, tileSize, map) {
   textSize(10);
 
   for (const entity of entities) {
-    const footprintOffsets = getEntityFootprintOffsets(entity.type);
+    const footprintOffsets = getSafeFootprintOffsets(entity.type);
     let minOffsetX = Infinity;
     let maxOffsetX = -Infinity;
     let minOffsetY = Infinity;
@@ -1318,7 +1351,7 @@ function drawBuildingPlacementHologram(
 ) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
-  const footprintOffsets = getEntityFootprintOffsets(entityType);
+  const footprintOffsets = getSafeFootprintOffsets(entityType);
   let minOffsetX = Infinity;
   let maxOffsetX = -Infinity;
   let minOffsetY = Infinity;
@@ -1331,8 +1364,9 @@ function drawBuildingPlacementHologram(
   }
   const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
   const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
-  const footprintLeft = minOffsetX * tileSize;
-  const footprintTop = minOffsetY * tileSize;
+  // Offsets are in tile-center coordinates; convert to local rect top-left.
+  const footprintLeft = (minOffsetX - 0.5) * tileSize;
+  const footprintTop = (minOffsetY - 0.5) * tileSize;
   const footprintWidth = footprintWidthTiles * tileSize;
   const footprintHeight = footprintHeightTiles * tileSize;
   const previewOptions = {
@@ -1423,7 +1457,7 @@ function drawSelectedBuildingHighlight(map, tileSize) {
     drawGame.state.selectedBuilding = null;
     return;
   }
-  const footprintOffsets = getEntityFootprintOffsets(tile.building.entityType);
+  const footprintOffsets = getSafeFootprintOffsets(tile.building.entityType);
   let minOffsetX = Infinity;
   let maxOffsetX = -Infinity;
   let minOffsetY = Infinity;
@@ -1821,7 +1855,7 @@ function placeSelectedEntityAtMouse() {
 
   const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
   if (!type) return;
-  const footprintTiles = getEntityFootprintTilesAt(type, tileX, tileY);
+  const footprintTiles = getSafeFootprintTilesAt(type, tileX, tileY);
 
   for (const entry of footprintTiles) {
     if (
@@ -2008,7 +2042,7 @@ function deleteEntityUnderMouse() {
       entities.splice(index, 1);
     }
     if (targetEntity) {
-      const footprintTiles = getEntityFootprintTilesAt(
+      const footprintTiles = getSafeFootprintTilesAt(
         targetEntity.type,
         targetEntity.tileX,
         targetEntity.tileY

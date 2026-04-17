@@ -556,7 +556,7 @@ function getEntityConnectionPorts(entity) {
 
 function getEntityFootprintOffsets(entityType) {
   const custom = ENTITY_FOOTPRINT_DEFS[entityType];
-  if (custom && custom.length) {
+  if (Array.isArray(custom) && custom.length > 0) {
     return custom;
   }
   return [{ x: 0, y: 0 }];
