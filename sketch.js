@@ -276,7 +276,7 @@ function drawGame() {
       player: {
         x: tileSize * 5,
         y: tileSize * 5,
-        size: 16,
+        size: 54.4,
         speed: 180
       },
       feedback: {
@@ -601,7 +601,8 @@ function drawPlayerSprite(player, tileSize) {
 
   const frameWidth = dims.width / dims.frames;
   const frameHeight = dims.height;
-  const s = tileSize / frameHeight; 
+  const targetHeight = player.size || tileSize;
+  const s = targetHeight / frameHeight;
   const drawWidth = frameWidth * s;
   const drawHeight = frameHeight * s;
   const frameIndex = currentFrame % dims.frames;
