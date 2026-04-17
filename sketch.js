@@ -18,6 +18,31 @@ let copperOre = 0, copperBar = 0, copperPlate = 0, copperWire = 0;
 let helium = 0, rocketFuel = 0;
 let modularComponent = 0, shipAlloy = 0, electronics = 0;
 
+let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
+let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
+let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
+
+let currentDirection = "front";
+let currentAnimation = "idle";
+let currentFrame = 0;
+let facingLeft = false;
+const animationFPS = 10;
+
+const spriteDimensions = {
+  front: {
+    idle: { width: 294, height: 31, frames: 14 },
+    move: { width: 210, height: 31, frames: 10 }
+  },
+  back: {
+    idle: { width: 294, height: 31, frames: 14 },
+    move: { width: 210, height: 31, frames: 10 }
+  },
+  side: {
+    idle: { width: 252, height: 32, frames: 14 },
+    move: { width: 162, height: 32, frames: 9 }
+  }
+};
+
 function getEntityFillRgb(entityType) {
   if (entityType === ENTITY_TYPES.MINER) return [90, 170, 90];
   if (entityType === ENTITY_TYPES.SMELTER) return [200, 120, 80];
@@ -98,6 +123,12 @@ function preload() {
   sideBarFrameImg = loadImage('resources/UI/sideBarFrame.png');
   sideBarTabOpen = loadImage('resources/UI/sidebarTabOpen.png');
   sideBarTabClosed = loadImage('resources/UI/sidebarTabClosed.png');
+  playerSpriteSheetBackIdle = loadImage('resources/player/pBackIdle.png');
+  playerSpriteSheetBackMove = loadImage('resources/player/pBackMove.png');
+  playerSpriteSheetFrontIdle = loadImage('resources/player/pFrontIdle.png');
+  playerSpriteSheetFrontMove = loadImage('resources/player/pFrontMove.png');
+  playerSpriteSheetSideIdle = loadImage('resources/player/pSideIdle.png');
+  playerSpriteSheetSideMove = loadImage('resources/player/pSideMove.png');
 }
 
 function centerCanvas() {
@@ -262,7 +293,8 @@ function drawGame() {
         minimapTileSize: null,
         minimapCols: null,
         minimapRows: null
-      }
+      },
+      animationTimer: 0
     };
   }
 
@@ -279,6 +311,10 @@ function drawGame() {
     drawGame.state.selectedBuilding = null;
   }
 
+  if (drawGame.state.player.facing === undefined) {
+    drawGame.state.player.facing = "N";
+  }
+
   let moveX = 0;
   let moveY = 0;
   if (keyIsDown(65)) moveX -= 1;
@@ -287,11 +323,33 @@ function drawGame() {
   if (keyIsDown(83)) moveY += 1;
 
   const dt = min(0.05, deltaTime / 1000);
-  if (moveX !== 0 || moveY !== 0) {
+  const isMoving = (moveX !== 0 || moveY !== 0);
+
+  if (isMoving) {
     const len = Math.hypot(moveX, moveY);
     const speed = player.speed * dt;
     player.x += (moveX / len) * speed;
     player.y += (moveY / len) * speed;
+  }
+
+  const prevDirection = currentDirection;
+  const prevAnimation = currentAnimation;
+  if (isMoving) {
+    if (moveY < 0) {
+      currentDirection = "back";
+    } else if (moveY > 0) {
+      currentDirection = "front";
+    } else if (moveX !== 0) {
+      currentDirection = "side";
+      facingLeft = moveX < 0;
+    }
+    currentAnimation = "move";
+  } else {
+    currentAnimation = "idle";
+  }
+  if (prevDirection !== currentDirection || prevAnimation !== currentAnimation) {
+    currentFrame = 0;
+    if (drawGame.state) drawGame.state.animationTimer = 0;
   }
 
   const mapWidth = mapCols * tileSize;
@@ -402,6 +460,7 @@ function drawGame() {
   drawSideBar();
   drawHotbar();
   drawResourceHoverTooltip();
+  updatePlayerAnimation();
 }
 
 /**
@@ -427,6 +486,65 @@ function updateMinerHarvesting(entities, dt) {
         helium += produced;
         break;
     }
+  }
+}
+
+function drawPlayerSprite(player, tileSize) {
+  const dims = spriteDimensions[currentDirection] &&
+               spriteDimensions[currentDirection][currentAnimation];
+  if (!dims) return;
+
+  let spriteSheet;
+  if (currentDirection === "front") {
+    spriteSheet = (currentAnimation === "idle")
+      ? playerSpriteSheetFrontIdle : playerSpriteSheetFrontMove;
+  } else if (currentDirection === "back") {
+    spriteSheet = (currentAnimation === "idle")
+      ? playerSpriteSheetBackIdle : playerSpriteSheetBackMove;
+  } else {
+    spriteSheet = (currentAnimation === "idle")
+      ? playerSpriteSheetSideIdle : playerSpriteSheetSideMove;
+  }
+  if (!spriteSheet) return;
+
+  const frameWidth = dims.width / dims.frames;
+  const frameHeight = dims.height;
+  const s = tileSize / frameHeight; 
+  const drawWidth = frameWidth * s;
+  const drawHeight = frameHeight * s;
+  const frameIndex = currentFrame % dims.frames;
+  const sx = frameIndex * frameWidth;
+
+  push();
+  translate(width / 2, height / 2);
+  if (currentDirection === "side" && facingLeft) {
+    scale(-1, 1);
+  }
+  imageMode(CORNER);
+  image(
+    spriteSheet,
+    -drawWidth / 2, -drawHeight / 2,
+    drawWidth, drawHeight,
+    sx, 0, frameWidth, frameHeight
+  );
+  pop();
+}
+
+function updatePlayerAnimation() {
+  if (!drawGame.state) return;
+  const dims = spriteDimensions[currentDirection] &&
+               spriteDimensions[currentDirection][currentAnimation];
+  if (!dims) return;
+
+  const now = millis();
+  if (!drawGame.state.animationTimer) {
+    drawGame.state.animationTimer = now;
+    return;
+  }
+  const frameDuration = 1000 / animationFPS;
+  if (now - drawGame.state.animationTimer >= frameDuration) {
+    currentFrame = (currentFrame + 1) % dims.frames;
+    drawGame.state.animationTimer = now;
   }
 }
 
@@ -601,12 +719,8 @@ function drawMiniMap(map, player, config, feedback) {
 
   noStroke();
   fill(255, 0, 0);
-  rect(
-    width / 2 - player.size / 2,
-    height / 2 - player.size / 2,
-    player.size,
-    player.size
-  );
+  
+  drawPlayerSprite(player, config.tileSize);
 }
 
 function getOrBuildWorldLayer(state) {
@@ -1056,19 +1170,6 @@ function getTileBaseColor(tile) {
     default:
       return [240, 240, 245];
   }
-<<<<<<<<< Temporary merge branch 1
-  if (tile.type === "iron") {
-    return [196, 198, 206];
-  }
-  if (tile.type === "copper") {
-    return [201, 125, 55];
-  }
-  if (tile.type === "helium3") {
-    return [130, 245, 255];
-  }
-  return [240, 240, 245];
-=========
->>>>>>>>> Temporary merge branch 2
 }
 
 function getPlacedBuildingDisplayName(tile) {
