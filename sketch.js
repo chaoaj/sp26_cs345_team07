@@ -300,6 +300,7 @@ function drawGame() {
 
   // --- Miner harvesting tick ---
   updateMinerHarvesting(entities, dt);
+  updateFactoryProduction(entities, dt);
 
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
@@ -379,17 +380,31 @@ function drawGame() {
   const item = selectedHotbarSlot >= 0 ? getSelectedHotbarItem() : null;
   if (item && !isMouseOverHotbarArea()) {
     const holoHit = getTileAtScreenPosition(mouseX, mouseY);
-    if (holoHit && !isResourceNodeTile(holoHit.tile)) {
-      const hpx = holoHit.col * tileSize;
-      const hpy = holoHit.row * tileSize;
-      drawBuildingPlacementHologram(
-        hpx,
-        hpy,
-        tileSize,
-        item.color,
-        hotbarItemLabel(item),
-        drawGame.state.placementFacing || "E"
-      );
+    if (holoHit) {
+      const isNode = isResourceNodeTile(holoHit.tile);
+      const canHoverOnNode =
+        item.entityType === ENTITY_TYPES.MINER ||
+        item.entityType === ENTITY_TYPES.EXTRACTOR;
+      if (!isNode || canHoverOnNode) {
+        const hpx = holoHit.col * tileSize;
+        const hpy = holoHit.row * tileSize;
+        const previewOptions = getPlacementOptionsForEntity(
+          item.entityType,
+          holoHit.tile
+        );
+        drawBuildingPlacementHologram(
+          hpx,
+          hpy,
+          tileSize,
+          item.color,
+          hotbarItemLabel(item),
+          drawGame.state.placementFacing || "E",
+          item.entityType,
+          previewOptions,
+          holoHit.col,
+          holoHit.row
+        );
+      }
     }
   }
 
@@ -428,7 +443,86 @@ function updateMinerHarvesting(entities, dt) {
   }
 }
 
-function drawEntities(entities, tileSize, map) {
+function addProducedResource(resourceType, count) {
+  if (!resourceType || count <= 0) return;
+
+  switch (resourceType) {
+    case RESOURCE_TYPES.IRON_ORE:
+      ironOre += count;
+      break;
+    case RESOURCE_TYPES.COPPER_ORE:
+      copperOre += count;
+      break;
+    case RESOURCE_TYPES.IRON_BAR:
+      ironBar += count;
+      break;
+    case RESOURCE_TYPES.COPPER_BAR:
+      copperBar += count;
+      break;
+    case RESOURCE_TYPES.IRON_PLATE:
+      ironPlate += count;
+      break;
+    case RESOURCE_TYPES.COPPER_PLATE:
+      copperPlate += count;
+      break;
+    case RESOURCE_TYPES.COPPER_WIRE:
+      copperWire += count;
+      break;
+    case RESOURCE_TYPES.MODULAR_COMPONENT:
+      modularComponent += count;
+      break;
+    case RESOURCE_TYPES.ELECTRONICS:
+      electronics += count;
+      break;
+    case RESOURCE_TYPES.SHIP_ALLOY:
+      shipAlloy += count;
+      break;
+    case RESOURCE_TYPES.ROCKET_FUEL:
+      rocketFuel += count;
+      break;
+    case RESOURCE_TYPES.HELIUM3:
+      helium += count;
+      break;
+    default:
+      break;
+  }
+}
+
+function updateFactoryProduction(entities, dt) {
+  for (const entity of entities) {
+    if (
+      entity.type !== ENTITY_TYPES.SMELTER &&
+      entity.type !== ENTITY_TYPES.CONSTRUCTOR
+    ) {
+      continue;
+    }
+
+    const state = entity.state;
+    if (!state || !state.isActive || !state.outputType) {
+      continue;
+    }
+
+    const outputRate = Number(state.outputRate) || 0;
+    if (outputRate <= 0) {
+      continue;
+    }
+
+    if (typeof state.productionAccumulator !== "number") {
+      state.productionAccumulator = 0;
+    }
+
+    state.productionAccumulator += outputRate * dt;
+    const produced = Math.floor(state.productionAccumulator);
+    if (produced <= 0) {
+      continue;
+    }
+
+    state.productionAccumulator -= produced;
+    addProducedResource(state.outputType, produced);
+  }
+}
+
+function drawEntities(entities, tileSize) {
   textAlign(CENTER, CENTER);
   textSize(10);
 
@@ -502,16 +596,31 @@ function drawDirectionalArrow(cx, cy, dirX, dirY, rgb, arrowLen) {
   );
 }
 
+function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
+  if (!drawGame.state) return false;
+  const map = drawGame.state.map;
+  const row = map.tiles[tileY];
+  const tile = row ? row[tileX] : null;
+  if (!tile) return false;
+  if (tile.entityId == null) return false;
+  return tile.entityId !== ignoreEntityId;
+}
+
 function drawEntityPorts(entity, tileSize) {
-  if (entity.state && entity.state.isConnected) {
+  if (entity.type !== ENTITY_TYPES.TUBE && entity.state && entity.state.isConnected) {
     return;
   }
-  const ports = getEntityConnectionPorts(entity);
+  const ports = entity.type === ENTITY_TYPES.TUBE
+    ? getTubePortTiles(entity)
+    : getEntityConnectionPorts(entity);
   const centerX = entity.tileX * tileSize + tileSize / 2;
   const centerY = entity.tileY * tileSize + tileSize / 2;
   const arrowLen = tileSize * 0.45;
 
   for (const port of ports) {
+    if (isPortTileBlockedByBuilding(port.worldX, port.worldY, entity.id)) {
+      continue;
+    }
     const portPx = port.worldX * tileSize + tileSize / 2;
     const portPy = port.worldY * tileSize + tileSize / 2;
     const dx = portPx - centerX;
@@ -569,16 +678,6 @@ function drawMiniMap(map, player, config, feedback) {
     miniTile
   );
   image(minimapLayer, miniX, miniY);
-
-  noStroke();
-  for (const entity of drawGame.state.entities) {
-    if (
-      entity.tileX < 0 || entity.tileX >= mapCols ||
-      entity.tileY < 0 || entity.tileY >= mapRows
-    ) {
-      continue;
-    }
-  }
 
   noStroke();
   
@@ -869,6 +968,9 @@ function getPlacementPreviewPorts(entityType, options = {}) {
   if (!entityType) {
     return [];
   }
+  const facing = options.facing || "E";
+  const rotateOffset = (offset) => rotateOffsetFromEast(offset, facing);
+
   if (entityType === ENTITY_TYPES.TUBE) {
     const shape = options.shape || TUBE_SHAPES.STRAIGHT;
     const def = TUBE_PORT_DEFS[shape] || TUBE_PORT_DEFS[TUBE_SHAPES.STRAIGHT];
@@ -876,18 +978,28 @@ function getPlacementPreviewPorts(entityType, options = {}) {
     const inputKind = isCorner ? "both" : "input";
     const outputKind = isCorner ? "both" : "output";
     return [
-      { kind: inputKind, offset: def.input },
-      { kind: outputKind, offset: def.output }
+      { kind: inputKind, offset: rotateOffset(def.input) },
+      { kind: outputKind, offset: rotateOffset(def.output) }
     ];
   }
   const defs = ENTITY_PORT_DEFS[entityType];
   if (!defs) {
     return [];
   }
-  return defs.map((port) => ({ kind: port.kind, offset: port.offset }));
+  return defs.map((port) => ({
+    kind: port.kind,
+    offset: rotateOffset(port.offset)
+  }));
 }
 
-function drawPlacementPorts(ports, tileSize) {
+function drawPlacementPorts(
+  ports,
+  tileSize,
+  originX = 0,
+  originY = 0,
+  baseCol = null,
+  baseRow = null
+) {
   const arrowLen = tileSize * 0.45;
   const headLen = 6;
   const headWidth = 6;
@@ -921,8 +1033,16 @@ function drawPlacementPorts(ports, tileSize) {
   };
 
   for (const port of ports) {
-    const portPx = port.offset.x * tileSize;
-    const portPy = port.offset.y * tileSize;
+    if (baseCol != null && baseRow != null) {
+      const tileX = baseCol + port.offset.x;
+      const tileY = baseRow + port.offset.y;
+      if (isPortTileBlockedByBuilding(tileX, tileY, null)) {
+        continue;
+      }
+    }
+
+    const portPx = originX + port.offset.x * tileSize;
+    const portPy = originY + port.offset.y * tileSize;
 
     const len = Math.hypot(port.offset.x, port.offset.y) || 1;
     let dirX = port.offset.x / len;
@@ -941,6 +1061,44 @@ function drawPlacementPorts(ports, tileSize) {
   }
 }
 
+function drawPlacementPortTileHighlights(
+  ports,
+  tileSize,
+  originX = 0,
+  originY = 0,
+  baseCol = null,
+  baseRow = null
+) {
+  const colorForKind = (kind) => {
+    if (kind === "input") return [255, 170, 0];
+    if (kind === "output") return [60, 210, 90];
+    return [60, 190, 190];
+  };
+
+  noStroke();
+  for (const port of ports) {
+    if (baseCol != null && baseRow != null) {
+      const tileX = baseCol + port.offset.x;
+      const tileY = baseRow + port.offset.y;
+      if (isPortTileBlockedByBuilding(tileX, tileY, null)) {
+        continue;
+      }
+    }
+
+    const rgb = colorForKind(port.kind);
+    const centerX = originX + port.offset.x * tileSize;
+    const centerY = originY + port.offset.y * tileSize;
+    fill(rgb[0], rgb[1], rgb[2], 55);
+    rect(
+      centerX - tileSize / 2 + 1,
+      centerY - tileSize / 2 + 1,
+      tileSize - 2,
+      tileSize - 2,
+      3
+    );
+  }
+}
+
 function drawBuildingPlacementHologram(
   px,
   py,
@@ -949,10 +1107,22 @@ function drawBuildingPlacementHologram(
   label,
   facing,
   entityType,
-  options
+  options,
+  baseCol = null,
+  baseRow = null
 ) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
+  const previewOptions = {
+    ...(options || {}),
+    facing: facing || ((options && options.facing) || "E")
+  };
+  const ports = getPlacementPreviewPorts(entityType, previewOptions);
+
+  if (ports.length) {
+    drawPlacementPortTileHighlights(ports, tileSize, cx, cy, baseCol, baseRow);
+  }
+
   push();
   translate(cx, cy);
   rotate(facingToAngle(facing));
@@ -966,12 +1136,11 @@ function drawBuildingPlacementHologram(
   textStyle(BOLD);
   textAlign(CENTER, CENTER);
   text(label, 0, 0);
-
-  const ports = getPlacementPreviewPorts(entityType, options);
-  if (ports.length) {
-    drawPlacementPorts(ports, tileSize);
-  }
   pop();
+
+  if (ports.length) {
+    drawPlacementPorts(ports, tileSize, cx, cy, baseCol, baseRow);
+  }
   textStyle(NORMAL);
 }
 
@@ -1184,16 +1353,6 @@ function drawResourceHoverTooltip() {
   textAlign(CENTER, CENTER);
 }
 
-function getTileRenderColor(tile) {
-  if (tile.building) {
-    return tile.building.color;
-  }
-  if (tile.colorOverride) {
-    return tile.colorOverride;
-  }
-  return getTileBaseColor(tile);
-}
-
 function getMiniMapTileColor(tile) {
   if (!tile) {
     return [240, 240, 245];
@@ -1241,20 +1400,6 @@ function getTileAtScreenPosition(screenX, screenY) {
     tile: map.tiles[tileRow][tileCol],
     row: tileRow,
     col: tileCol
-  };
-}
-
-function getPlayerTilePosition() {
-  if (!drawGame.state) {
-    return null;
-  }
-
-  const { config, player } = drawGame.state;
-  const { tileSize, mapOriginX, mapOriginY } = config;
-
-  return {
-    col: floor((player.x - mapOriginX) / tileSize),
-    row: floor((player.y - mapOriginY) / tileSize)
   };
 }
 
@@ -1661,6 +1806,10 @@ function toggleEntityUnderMouse() {
     entity.state.updateOutputRate();
   }
 
+  if (drawGame.state) {
+    updateConnections(drawGame.state.entities);
+  }
+
   console.log("Toggled entity:", entity);
 }
 
@@ -1804,10 +1953,6 @@ function updateSmelterInputs(entities) {
           0
         )
       : 0;
-
-    if (smelterState.inputType === inputType && smelterState.inputRate === totalRate) {
-      continue;
-    }
 
     smelterState.inputType = inputType;
     smelterState.currentRecipe = inputType;
