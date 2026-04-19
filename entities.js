@@ -362,8 +362,18 @@ class ShuttleState extends EntityState {
     this.isOn = true;
     this.isActive = true;
     this.inventory = {
-      ironPlate: 10,
-      copperPlate: 6,
+      [RESOURCE_TYPES.IRON_ORE]: 0,
+      [RESOURCE_TYPES.IRON_BAR]: 0,
+      [RESOURCE_TYPES.IRON_PLATE]: 10,
+      [RESOURCE_TYPES.COPPER_ORE]: 0,
+      [RESOURCE_TYPES.COPPER_BAR]: 0,
+      [RESOURCE_TYPES.COPPER_PLATE]: 6,
+      [RESOURCE_TYPES.COPPER_WIRE]: 0,
+      [RESOURCE_TYPES.MODULAR_COMPONENT]: 0,
+      [RESOURCE_TYPES.SHIP_ALLOY]: 0,
+      [RESOURCE_TYPES.ELECTRONICS]: 0,
+      [RESOURCE_TYPES.HELIUM3]: 0,
+      [RESOURCE_TYPES.ROCKET_FUEL]: 0
     };
 
     this.isConnected = false;
@@ -517,7 +527,15 @@ function getTubePortConnections(entities, tube) {
   for (const match of portMatches) {
     const dx = match.entity.tileX - tube.tileX;
     const dy = match.entity.tileY - tube.tileY;
-    if (offsetKeys.has(`${dx},${dy}`)) {
+    const normalizedDx = Math.sign(dx);
+    const normalizedDy = Math.sign(dy);
+    if (
+      (normalizedDx === 0 && normalizedDy === 0) ||
+      (normalizedDx !== 0 && normalizedDy !== 0)
+    ) {
+      continue;
+    }
+    if (offsetKeys.has(`${normalizedDx},${normalizedDy}`)) {
       connections.push({ kind: match.port.kind, entityId: match.entity.id });
     }
   }
@@ -532,7 +550,15 @@ function getTubeEntityOffsetConnections(entities, tube) {
   for (const match of portMatches) {
     const dx = match.entity.tileX - tube.tileX;
     const dy = match.entity.tileY - tube.tileY;
-    offsets.add(`${dx},${dy}`);
+    const normalizedDx = Math.sign(dx);
+    const normalizedDy = Math.sign(dy);
+    if (
+      (normalizedDx === 0 && normalizedDy === 0) ||
+      (normalizedDx !== 0 && normalizedDy !== 0)
+    ) {
+      continue;
+    }
+    offsets.add(`${normalizedDx},${normalizedDy}`);
   }
 
   return offsets;

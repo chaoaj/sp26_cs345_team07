@@ -377,6 +377,7 @@ function drawGame() {
   // --- Miner harvesting tick ---
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
+  updateRestrictedModeShuttleIntake(entities, dt);
 
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
@@ -561,18 +562,73 @@ function updateMinerHarvesting(entities, dt) {
     const produced = entity.state.harvest(dt);
     if (produced <= 0) continue;
 
-    // Add to global resource counters
-    switch (entity.state.outputType) {
-      case RESOURCE_TYPES.IRON_ORE:
-        ironOre += produced;
-        break;
-      case RESOURCE_TYPES.COPPER_ORE:
-        copperOre += produced;
-        break;
-      case RESOURCE_TYPES.HELIUM3:
-        helium += produced;
-        break;
+    addProducedResource(entity.state.outputType, produced);
+  }
+}
+
+function getRestrictedModeShuttleEntity() {
+  if (!drawGame.state || !drawGame.state.isRestrictedMode) {
+    return null;
+  }
+
+  const { entities, shuttleEntityId } = drawGame.state;
+  let shuttle = shuttleEntityId != null
+    ? getEntityById(entities, shuttleEntityId)
+    : null;
+
+  if (!shuttle || shuttle.type !== ENTITY_TYPES.SHUTTLE) {
+    shuttle = entities.find((entity) => entity.type === ENTITY_TYPES.SHUTTLE) || null;
+  }
+
+  return shuttle && shuttle.type === ENTITY_TYPES.SHUTTLE ? shuttle : null;
+}
+
+function getRestrictedModeShuttleInventory() {
+  const shuttle = getRestrictedModeShuttleEntity();
+  const inventory = shuttle?.state?.inventory;
+  if (!inventory || typeof inventory !== "object") {
+    return null;
+  }
+
+  return inventory;
+}
+
+function updateRestrictedModeShuttleIntake(entities, dt) {
+  const shuttle = getRestrictedModeShuttleEntity();
+  if (!shuttle || !Number.isFinite(dt) || dt <= 0) {
+    return;
+  }
+
+  const shuttleState = shuttle.state;
+  const inventory = shuttleState?.inventory;
+  if (!inventory || typeof inventory !== "object") {
+    return;
+  }
+
+  if (!shuttleState.pipeIntakeAccumulators || typeof shuttleState.pipeIntakeAccumulators !== "object") {
+    shuttleState.pipeIntakeAccumulators = {};
+  }
+
+  const inputs = getIncomingTubeInputs(entities, shuttle.id);
+  for (const input of inputs) {
+    const resourceType = input.outputType;
+    const rate = Number(input.rate) || 0;
+    if (!resourceType || rate <= 0) {
+      continue;
     }
+
+    const accumulators = shuttleState.pipeIntakeAccumulators;
+    const previous = Number(accumulators[resourceType]) || 0;
+    const total = previous + rate * dt;
+    const wholeUnits = Math.floor(total);
+    accumulators[resourceType] = total - wholeUnits;
+
+    if (wholeUnits <= 0) {
+      continue;
+    }
+
+    const current = Number(inventory[resourceType]) || 0;
+    inventory[resourceType] = current + wholeUnits;
   }
 }
 
@@ -1046,17 +1102,30 @@ function drawSideBar() {
   drawingContext.clip();
 
   // 1. Define our sidebar data dynamically each frame
+  const restrictedInventory = getRestrictedModeShuttleInventory();
+  const restrictedMode = !!(drawGame.state && drawGame.state.isRestrictedMode);
+  const getCount = (resourceType, fallback) => {
+    if (!restrictedMode) {
+      return fallback;
+    }
+    if (!restrictedInventory) {
+      return 0;
+    }
+    const value = Number(restrictedInventory[resourceType]);
+    return Number.isFinite(value) ? value : 0;
+  };
+
   const sidebarItems = [
-    { img: ironOreImg, count: ironOre },
-    { img: ironBarImg, count: ironBar },
-    { img: ironPlateImg, count: ironPlate },
-    { img: copperOreImg, count: copperOre },
-    { img: copperBarImg, count: copperBar },
-    { img: copperPlateImg, count: copperPlate },
-    { img: copperWireImg, count: copperWire },
-    { img: heliumImg, count: helium },
-    { img: electronicsImg, count: electronics },
-    { img: modularComponentImg, count: modularComponent }
+    { img: ironOreImg, count: getCount(RESOURCE_TYPES.IRON_ORE, ironOre) },
+    { img: ironBarImg, count: getCount(RESOURCE_TYPES.IRON_BAR, ironBar) },
+    { img: ironPlateImg, count: getCount(RESOURCE_TYPES.IRON_PLATE, ironPlate) },
+    { img: copperOreImg, count: getCount(RESOURCE_TYPES.COPPER_ORE, copperOre) },
+    { img: copperBarImg, count: getCount(RESOURCE_TYPES.COPPER_BAR, copperBar) },
+    { img: copperPlateImg, count: getCount(RESOURCE_TYPES.COPPER_PLATE, copperPlate) },
+    { img: copperWireImg, count: getCount(RESOURCE_TYPES.COPPER_WIRE, copperWire) },
+    { img: heliumImg, count: getCount(RESOURCE_TYPES.HELIUM3, helium) },
+    { img: electronicsImg, count: getCount(RESOURCE_TYPES.ELECTRONICS, electronics) },
+    { img: modularComponentImg, count: getCount(RESOURCE_TYPES.MODULAR_COMPONENT, modularComponent) }
   ];
 
   fill(255, 200, 100);
