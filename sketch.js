@@ -10,7 +10,7 @@ let sidebarX = -70; // start hidden to the left
 let sidebarWidth = 70; 
 let ironOreImg, ironBarImg, ironPlateImg;
 let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
-let heliumImg, modularComponentImg;
+let heliumImg, modularComponentImg, rocketFuelImg, electronicsImg, shipAlloyImg;
 let sideBarFrameImg, sideBarTabOpen, sideBarTabClosed;
 
 let ironOre = 0, ironBar = 0, ironPlate = 0;
@@ -121,6 +121,8 @@ function preload() {
   heliumImg = loadImage('resources/resourceIcons/heliumThreeIcon.png');
   modularComponentImg = loadImage('resources/resourceIcons/modularComponentIcon.png');
   electronicsImg = loadImage('resources/resourceIcons/electronicsIcon.png');
+  shipAlloyImg = loadImage('resources/resourceIcons/shipAlloyIcon.png');
+  rocketFuelImg = loadImage('resources/resourceIcons/rocketFuelIcon.png');
   sideBarFrameImg = loadImage('resources/UI/sidebarFrame.png');
   sideBarTabOpen = loadImage('resources/UI/sidebarTabOpen.png');
   sideBarTabClosed = loadImage('resources/UI/sidebarTabClosed.png');
@@ -914,7 +916,7 @@ function drawSideBar() {
   let target = isSidebarOpen ? mapX : mapX - sidebarWidth;
   sidebarX = lerp(sidebarX, target, 0.15);
 
-  image(sideBarFrameImg, sidebarX, mapY, sidebarWidth + 7, 435);
+  image(sideBarFrameImg, sidebarX, mapY, sidebarWidth + 7, 510);
 
   // Clip to map area so sidebar doesn't draw over hotbar or back button
   drawingContext.save();
@@ -933,7 +935,9 @@ function drawSideBar() {
     { img: copperWireImg, count: copperWire },
     { img: heliumImg, count: helium },
     { img: electronicsImg, count: electronics },
-    { img: modularComponentImg, count: modularComponent }
+    { img: modularComponentImg, count: modularComponent },
+    { img: shipAlloyImg, count: shipAlloy },
+    { img: rocketFuelImg, count: rocketFuel }
   ];
 
   fill(255, 200, 100);
