@@ -335,6 +335,7 @@ class TubeState extends EntityState {
    * @param {string} facing - Cardinal direction (E/N/W/S).
    * @returns {void}
    */
+  
   constructor(shape = TUBE_SHAPES.STRAIGHT, facing = "E") {
     super();
     this.isOn = true;
@@ -652,6 +653,7 @@ function refreshEntityConnectionStates(entities) {
   }
 
   const visited = new Set();
+  let nextComponentId = 1;
   for (const tube of tubes) {
     if (visited.has(tube.id)) continue;
 
@@ -670,11 +672,13 @@ function refreshEntityConnectionStates(entities) {
       }
     }
 
+    const componentId = nextComponentId++;
     const outputs = new Set();
     const inputs = new Set();
     const attachedInComponent = new Set();
 
     for (const member of component) {
+      member.state.componentId = componentId;
       const portConnections = getTubePortConnections(entities, member);
       for (const connection of portConnections) {
         attachedInComponent.add(connection.entityId);
