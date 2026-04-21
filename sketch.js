@@ -83,6 +83,19 @@ const hotbarItems = HOTBAR_ENTITY_TYPES.map((entityType, i) => ({
   shape: "square"
 }));
 
+const SIDEBAR_RESOURCE_TYPES = [
+  RESOURCE_TYPES.IRON_ORE,
+  RESOURCE_TYPES.IRON_BAR,
+  RESOURCE_TYPES.IRON_PLATE,
+  RESOURCE_TYPES.COPPER_ORE,
+  RESOURCE_TYPES.COPPER_BAR,
+  RESOURCE_TYPES.COPPER_PLATE,
+  RESOURCE_TYPES.COPPER_WIRE,
+  RESOURCE_TYPES.HELIUM3,
+  RESOURCE_TYPES.ELECTRONICS,
+  RESOURCE_TYPES.MODULAR_COMPONENT
+];
+
 
 function setup() {
   canvas = createCanvas(600, 600);
@@ -291,7 +304,11 @@ function drawGame() {
         speed: 180
       },
       feedback: {
-        rangeBlinkUntil: 0
+        rangeBlinkUntil: 0,
+        buildCostBlinkUntil: 0,
+        buildCostMessageUntil: 0,
+        buildCostEntityType: null,
+        buildCostMessageText: ""
       },
       placementFacing: "E",
       placementTubeShape: TUBE_SHAPES.STRAIGHT,
@@ -325,6 +342,18 @@ function drawGame() {
   }
   if (drawGame.state.selectedBuilding === undefined) {
     drawGame.state.selectedBuilding = null;
+  }
+  if (feedback.buildCostBlinkUntil == null) {
+    feedback.buildCostBlinkUntil = 0;
+  }
+  if (feedback.buildCostMessageUntil == null) {
+    feedback.buildCostMessageUntil = 0;
+  }
+  if (feedback.buildCostEntityType === undefined) {
+    feedback.buildCostEntityType = null;
+  }
+  if (feedback.buildCostMessageText == null) {
+    feedback.buildCostMessageText = "";
   }
 
   if (drawGame.state.player.facing === undefined) {
@@ -455,6 +484,7 @@ function drawGame() {
   drawEntities(entities, tileSize);
 
   const item = selectedHotbarSlot >= 0 ? getSelectedHotbarItem() : null;
+  let hologramTooltipItem = null;
   if (item && !isMouseOverHotbarArea()) {
     const holoHit = getTileAtScreenPosition(mouseX, mouseY);
     if (holoHit) {
@@ -470,11 +500,14 @@ function drawGame() {
           holoHit.tile
         );
         try {
+          const hologramColor = shouldBlinkBuildHologram(item.entityType)
+            ? [240, 70, 70]
+            : item.color;
           drawBuildingPlacementHologram(
             hpx,
             hpy,
             tileSize,
-            item.color,
+            hologramColor,
             hotbarItemLabel(item),
             drawGame.state.placementFacing || "E",
             item.entityType,
@@ -482,6 +515,7 @@ function drawGame() {
             holoHit.col,
             holoHit.row
           );
+          hologramTooltipItem = item;
         } catch (error) {
           console.error("Placement hologram draw failed:", error);
         }
@@ -495,7 +529,14 @@ function drawGame() {
   backButtonGame.draw();
   drawSideBar();
   drawHotbar();
-  drawResourceHoverTooltip();
+  if (drawGame.state.isRestrictedMode) {
+    drawHotbarCostTooltip();
+    const drewHologramCostTooltip = drawHologramBuildCostTooltip(hologramTooltipItem);
+    if (!drewHologramCostTooltip) {
+      drawResourceHoverTooltip();
+    }
+  }
+  drawBuildCostFeedbackMessage();
   updatePlayerAnimation();
 }
 
@@ -591,6 +632,220 @@ function getRestrictedModeShuttleInventory() {
   }
 
   return inventory;
+}
+
+function getBuildCostForEntity(entityType) {
+  if (typeof ENTITY_BUILD_COSTS === "undefined" || !entityType) {
+    return null;
+  }
+  return ENTITY_BUILD_COSTS[entityType] || null;
+}
+
+function getResourceTypeLabel(resourceType) {
+  switch (resourceType) {
+    case RESOURCE_TYPES.IRON_ORE:
+      return "Iron Ore";
+    case RESOURCE_TYPES.IRON_BAR:
+      return "Iron Bar";
+    case RESOURCE_TYPES.IRON_PLATE:
+      return "Iron Plate";
+    case RESOURCE_TYPES.COPPER_ORE:
+      return "Copper Ore";
+    case RESOURCE_TYPES.COPPER_BAR:
+      return "Copper Bar";
+    case RESOURCE_TYPES.COPPER_PLATE:
+      return "Copper Plate";
+    case RESOURCE_TYPES.COPPER_WIRE:
+      return "Copper Wire";
+    case RESOURCE_TYPES.MODULAR_COMPONENT:
+      return "Modular Component";
+    case RESOURCE_TYPES.ELECTRONICS:
+      return "Electronics";
+    case RESOURCE_TYPES.SHIP_ALLOY:
+      return "Ship Alloy";
+    case RESOURCE_TYPES.ROCKET_FUEL:
+      return "Rocket Fuel";
+    case RESOURCE_TYPES.HELIUM3:
+      return "Helium-3";
+    default:
+      return String(resourceType || "Resource");
+  }
+}
+
+function getResourceIconForType(resourceType) {
+  switch (resourceType) {
+    case RESOURCE_TYPES.IRON_ORE:
+      return ironOreImg;
+    case RESOURCE_TYPES.IRON_BAR:
+      return ironBarImg;
+    case RESOURCE_TYPES.IRON_PLATE:
+      return ironPlateImg;
+    case RESOURCE_TYPES.COPPER_ORE:
+      return copperOreImg;
+    case RESOURCE_TYPES.COPPER_BAR:
+      return copperBarImg;
+    case RESOURCE_TYPES.COPPER_PLATE:
+      return copperPlateImg;
+    case RESOURCE_TYPES.COPPER_WIRE:
+      return copperWireImg;
+    case RESOURCE_TYPES.MODULAR_COMPONENT:
+      return modularComponentImg;
+    case RESOURCE_TYPES.ELECTRONICS:
+      return electronicsImg;
+    case RESOURCE_TYPES.HELIUM3:
+      return heliumImg;
+    default:
+      return null;
+  }
+}
+
+function getGlobalResourceCount(resourceType) {
+  switch (resourceType) {
+    case RESOURCE_TYPES.IRON_ORE:
+      return ironOre;
+    case RESOURCE_TYPES.IRON_BAR:
+      return ironBar;
+    case RESOURCE_TYPES.IRON_PLATE:
+      return ironPlate;
+    case RESOURCE_TYPES.COPPER_ORE:
+      return copperOre;
+    case RESOURCE_TYPES.COPPER_BAR:
+      return copperBar;
+    case RESOURCE_TYPES.COPPER_PLATE:
+      return copperPlate;
+    case RESOURCE_TYPES.COPPER_WIRE:
+      return copperWire;
+    case RESOURCE_TYPES.HELIUM3:
+      return helium;
+    case RESOURCE_TYPES.ELECTRONICS:
+      return electronics;
+    case RESOURCE_TYPES.MODULAR_COMPONENT:
+      return modularComponent;
+    case RESOURCE_TYPES.SHIP_ALLOY:
+      return shipAlloy;
+    case RESOURCE_TYPES.ROCKET_FUEL:
+      return rocketFuel;
+    default:
+      return 0;
+  }
+}
+
+function getMissingBuildResources(entityType, inventory) {
+  const cost = getBuildCostForEntity(entityType);
+  if (!cost) {
+    return [];
+  }
+
+  const missing = [];
+  const source = inventory || {};
+  for (const [resourceType, required] of Object.entries(cost)) {
+    const have = Number(source[resourceType]) || 0;
+    if (have < required) {
+      missing.push({
+        resourceType,
+        needed: required - have
+      });
+    }
+  }
+  return missing;
+}
+
+function spendBuildResources(inventory, entityType) {
+  const cost = getBuildCostForEntity(entityType);
+  if (!cost || !inventory) {
+    return;
+  }
+
+  for (const [resourceType, required] of Object.entries(cost)) {
+    const have = Number(inventory[resourceType]) || 0;
+    inventory[resourceType] = Math.max(0, have - required);
+  }
+}
+
+function refundBuildResources(inventory, entityType) {
+  const cost = getBuildCostForEntity(entityType);
+  if (!cost || !inventory) {
+    return;
+  }
+
+  for (const [resourceType, required] of Object.entries(cost)) {
+    const have = Number(inventory[resourceType]) || 0;
+    inventory[resourceType] = have + required;
+  }
+}
+
+function triggerBuildCostFeedback(entityType, missingResources) {
+  if (!drawGame.state || !drawGame.state.feedback) {
+    return;
+  }
+
+  const feedback = drawGame.state.feedback;
+  feedback.buildCostEntityType = entityType || null;
+  feedback.buildCostBlinkUntil = millis() + 900;
+
+  if (!Array.isArray(missingResources) || missingResources.length === 0) {
+    feedback.buildCostMessageText = "Insufficient resources.";
+  } else {
+    const details = missingResources
+      .map((entry) => `${entry.needed} ${getResourceTypeLabel(entry.resourceType)}`)
+      .join(", ");
+    feedback.buildCostMessageText = `Missing: ${details}`;
+  }
+
+  feedback.buildCostMessageUntil = millis() + 1600;
+}
+
+function shouldBlinkBuildHologram(entityType) {
+  if (!drawGame.state || !drawGame.state.feedback || !entityType) {
+    return false;
+  }
+
+  const feedback = drawGame.state.feedback;
+  if (feedback.buildCostEntityType !== entityType) {
+    return false;
+  }
+
+  const remaining = feedback.buildCostBlinkUntil - millis();
+  if (remaining <= 0) {
+    return false;
+  }
+
+  const phase = Math.floor((900 - remaining) / 120);
+  return phase % 2 === 0;
+}
+
+function drawBuildCostFeedbackMessage() {
+  if (!drawGame.state || !drawGame.state.feedback) {
+    return;
+  }
+
+  const feedback = drawGame.state.feedback;
+  const remaining = feedback.buildCostMessageUntil - millis();
+  if (remaining <= 0 || !feedback.buildCostMessageText) {
+    return;
+  }
+
+  push();
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(12);
+  const padX = 10;
+  const boxH = 24;
+  const contentW = textWidth(feedback.buildCostMessageText) + padX * 2;
+  const boxW = constrain(contentW, 160, width - 20);
+  const boxX = width / 2;
+  const boxY = 20;
+
+  rectMode(CENTER);
+  fill(255, 235, 235, 245);
+  stroke(210, 70, 70);
+  strokeWeight(1.5);
+  rect(boxX, boxY, boxW, boxH, 5);
+
+  noStroke();
+  fill(120, 25, 25);
+  text(feedback.buildCostMessageText, boxX, boxY + 0.5);
+  pop();
 }
 
 function updateRestrictedModeShuttleIntake(entities, dt) {
@@ -1081,6 +1336,214 @@ function sideBarText(resource) {
   }
 }
 
+function getEntityDisplayName(entityType) {
+  const idx = HOTBAR_ENTITY_TYPES.indexOf(entityType);
+  if (idx >= 0) {
+    return HOTBAR_BUILDING_NAMES[idx];
+  }
+  return entityType ? String(entityType) : "Building";
+}
+
+function getSidebarResourceBuildUses(resourceType) {
+  if (!resourceType) {
+    return [];
+  }
+
+  if (typeof RESOURCE_TOOLTIP_RECIPES !== "undefined") {
+    const customRoutes = RESOURCE_TOOLTIP_RECIPES[resourceType];
+    if (Array.isArray(customRoutes) && customRoutes.length > 0) {
+      const routes = [];
+      for (const route of customRoutes) {
+        const ingredientsRaw = Array.isArray(route?.ingredients)
+          ? route.ingredients
+          : [];
+        const ingredients = ingredientsRaw
+          .map((ingredient) => ({
+            resourceType: ingredient?.type || null,
+            amount: Number(ingredient?.count) || 0
+          }))
+          .filter((ingredient) => ingredient.resourceType && ingredient.amount > 0);
+        if (ingredients.length === 0) {
+          continue;
+        }
+        routes.push({
+          buildingName: String(route?.building || "constructor").toLowerCase(),
+          ingredients
+        });
+      }
+      if (routes.length > 0) {
+        return routes;
+      }
+    }
+  }
+
+  if (typeof ENTITY_BUILD_COSTS === "undefined") {
+    return [];
+  }
+
+  const uses = [];
+  for (const [entityType, cost] of Object.entries(ENTITY_BUILD_COSTS)) {
+    const required = Number(cost?.[resourceType]) || 0;
+    if (required > 0) {
+      const ingredients = Object.entries(cost)
+        .map(([type, amount]) => ({
+          resourceType: type,
+          amount: Number(amount) || 0
+        }))
+        .filter((ingredient) => ingredient.amount > 0);
+      uses.push({
+        buildingName: getEntityDisplayName(entityType).toLowerCase(),
+        ingredients
+      });
+    }
+  }
+  return uses;
+}
+
+function getHoveredSidebarResourceItem() {
+  if (
+    currentState !== "GAME" ||
+    !drawGame.state ||
+    !isSidebarOpen
+  ) {
+    return null;
+  }
+
+  const mapY = drawGame.state.config.topMargin;
+  const rX = sidebarX + 17.5;
+  const rSize = 35;
+  let rY = mapY + 20;
+
+  for (const resourceType of SIDEBAR_RESOURCE_TYPES) {
+    if (
+      mouseX >= rX &&
+      mouseX <= rX + rSize &&
+      mouseY >= rY &&
+      mouseY <= rY + rSize
+    ) {
+      return {
+        resourceType,
+        icon: getResourceIconForType(resourceType)
+      };
+    }
+    rY += 40;
+  }
+
+  return null;
+}
+
+function isMouseOverSidebarResourceIcon() {
+  return !!getHoveredSidebarResourceItem();
+}
+
+function drawSidebarResourceHoverTooltip(hoveredItem) {
+  if (!hoveredItem || !hoveredItem.resourceType) {
+    return false;
+  }
+
+  const uses = getSidebarResourceBuildUses(hoveredItem.resourceType);
+  if (uses.length === 0) {
+    return false;
+  }
+
+  const pad = 8;
+  const lineGap = 4;
+  const ingredientGap = 6;
+  const iconSize = 22;
+
+  push();
+  textAlign(LEFT, TOP);
+  textSize(12);
+  textStyle(NORMAL);
+  const textH = textAscent() + textDescent();
+  const lineH = max(textH, iconSize);
+
+  let maxLineW = 0;
+  for (const use of uses) {
+    let lineW = 0;
+    for (let i = 0; i < use.ingredients.length; i++) {
+      const ingredient = use.ingredients[i];
+      if (i > 0) {
+        lineW += textWidth(", ");
+      }
+      const amountText = `${ingredient.amount}x`;
+      lineW += textWidth(amountText);
+      const icon = getResourceIconForType(ingredient.resourceType);
+      if (icon) {
+        lineW += 4 + iconSize;
+      } else {
+        lineW += 4 + textWidth(getResourceTypeLabel(ingredient.resourceType).toLowerCase());
+      }
+      if (i < use.ingredients.length - 1) {
+        lineW += ingredientGap;
+      }
+    }
+    lineW += textWidth(" in ");
+    lineW += textWidth(use.buildingName || "constructor");
+    maxLineW = max(maxLineW, lineW);
+  }
+
+  const boxW = maxLineW + pad * 2;
+  const boxH = pad * 2 + uses.length * lineH + (uses.length - 1) * lineGap;
+
+  let bx = mouseX + 14;
+  let by = mouseY + 14;
+  if (bx + boxW > width - 6) {
+    bx = mouseX - boxW - 14;
+  }
+  if (by + boxH > height - 6) {
+    by = mouseY - boxH - 14;
+  }
+  bx = constrain(bx, 6, width - boxW - 6);
+  by = constrain(by, 6, height - boxH - 6);
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  let lineY = by + pad;
+  for (const use of uses) {
+    textStyle(NORMAL);
+    fill(28, 28, 36);
+    let x = bx + pad;
+    for (let i = 0; i < use.ingredients.length; i++) {
+      const ingredient = use.ingredients[i];
+      if (i > 0) {
+        text(", ", x, lineY + (lineH - textH) / 2);
+        x += textWidth(", ");
+      }
+
+      const amountText = `${ingredient.amount}x`;
+      text(amountText, x, lineY + (lineH - textH) / 2);
+      x += textWidth(amountText);
+
+      const icon = getResourceIconForType(ingredient.resourceType);
+      if (icon) {
+        imageMode(CORNER);
+        image(icon, x + 4, lineY + (lineH - iconSize) / 2, iconSize, iconSize);
+        x += 4 + iconSize;
+      } else {
+        const label = getResourceTypeLabel(ingredient.resourceType).toLowerCase();
+        text(" " + label, x + 4, lineY + (lineH - textH) / 2);
+        x += 4 + textWidth(label) + textWidth(" ");
+      }
+
+      if (i < use.ingredients.length - 1) {
+        x += ingredientGap;
+      }
+    }
+
+    text(" in ", x, lineY + (lineH - textH) / 2);
+    x += textWidth(" in ");
+    text(use.buildingName || "constructor", x, lineY + (lineH - textH) / 2);
+    lineY += lineH + lineGap;
+  }
+
+  pop();
+  return true;
+}
+
 function drawSideBar() {
   if (!drawGame.state) return;
 
@@ -1115,18 +1578,11 @@ function drawSideBar() {
     return Number.isFinite(value) ? value : 0;
   };
 
-  const sidebarItems = [
-    { img: ironOreImg, count: getCount(RESOURCE_TYPES.IRON_ORE, ironOre) },
-    { img: ironBarImg, count: getCount(RESOURCE_TYPES.IRON_BAR, ironBar) },
-    { img: ironPlateImg, count: getCount(RESOURCE_TYPES.IRON_PLATE, ironPlate) },
-    { img: copperOreImg, count: getCount(RESOURCE_TYPES.COPPER_ORE, copperOre) },
-    { img: copperBarImg, count: getCount(RESOURCE_TYPES.COPPER_BAR, copperBar) },
-    { img: copperPlateImg, count: getCount(RESOURCE_TYPES.COPPER_PLATE, copperPlate) },
-    { img: copperWireImg, count: getCount(RESOURCE_TYPES.COPPER_WIRE, copperWire) },
-    { img: heliumImg, count: getCount(RESOURCE_TYPES.HELIUM3, helium) },
-    { img: electronicsImg, count: getCount(RESOURCE_TYPES.ELECTRONICS, electronics) },
-    { img: modularComponentImg, count: getCount(RESOURCE_TYPES.MODULAR_COMPONENT, modularComponent) }
-  ];
+  const sidebarItems = SIDEBAR_RESOURCE_TYPES.map((resourceType) => ({
+    resourceType,
+    img: getResourceIconForType(resourceType),
+    count: getCount(resourceType, getGlobalResourceCount(resourceType))
+  }));
 
   fill(255, 200, 100);
   noStroke();
@@ -1186,6 +1642,9 @@ function drawSideBar() {
       cursor('default');
     }
   }
+
+  const hoveredSidebarItem = getHoveredSidebarResourceItem();
+  drawSidebarResourceHoverTooltip(hoveredSidebarItem);
 }
 
 function getSelectedHotbarItem() {
@@ -1195,18 +1654,302 @@ function getSelectedHotbarItem() {
   return hotbarItems[selectedHotbarSlot];
 }
 
-function isMouseOverHotbarArea() {
+function getHotbarLayout() {
   const slotSize = 42;
   const gap = 8;
   const totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
   const startX = width / 2 - totalWidth / 2;
   const y = height - 60;
+  return { slotSize, gap, totalWidth, startX, y };
+}
+
+function isMouseOverHotbarArea() {
+  const { slotSize, totalWidth, startX, y } = getHotbarLayout();
   return (
     mouseY >= y - 4 &&
     mouseY <= y + slotSize + 8 &&
     mouseX >= startX - 8 &&
     mouseX <= startX + totalWidth + 8
   );
+}
+
+function getHoveredHotbarSlot() {
+  if (currentState !== "GAME") {
+    return -1;
+  }
+
+  const { slotSize, gap, startX, y } = getHotbarLayout();
+  for (let i = 0; i < hotbarSlots; i++) {
+    const x = startX + i * (slotSize + gap);
+    if (
+      mouseX >= x &&
+      mouseX <= x + slotSize &&
+      mouseY >= y &&
+      mouseY <= y + slotSize
+    ) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function getHotbarCostTooltipLines(entityType) {
+  const cost = getBuildCostForEntity(entityType);
+  if (!cost) {
+    return [];
+  }
+
+  return Object.entries(cost).map(([resourceType, amount]) => ({
+    resourceType,
+    amount,
+    icon: getResourceIconForType(resourceType),
+    label: getResourceTypeLabel(resourceType)
+  }));
+}
+
+function getHotbarTooltipDescription(entityType) {
+  if (typeof ENTITY_HOTBAR_DESCRIPTIONS === "undefined" || !entityType) {
+    return "";
+  }
+  const description = ENTITY_HOTBAR_DESCRIPTIONS[entityType];
+  return typeof description === "string" ? description : "";
+}
+
+function drawHotbarCostTooltip() {
+  if (currentState !== "GAME") {
+    return;
+  }
+  if (!drawGame.state || !drawGame.state.isRestrictedMode) {
+    return;
+  }
+
+  const hoveredSlot = getHoveredHotbarSlot();
+  if (hoveredSlot < 0) {
+    return;
+  }
+
+  const item = hotbarItems[hoveredSlot];
+  if (!item || !item.entityType) {
+    return;
+  }
+
+  const lines = getHotbarCostTooltipLines(item.entityType);
+  if (lines.length === 0) {
+    return;
+  }
+  const description = getHotbarTooltipDescription(item.entityType);
+  const hasDescription = description.length > 0;
+
+  const { slotSize, y } = getHotbarLayout();
+  const title = item.name;
+
+  push();
+  textAlign(CENTER, TOP);
+
+  textStyle(BOLD);
+  textSize(12);
+  const titleW = textWidth(title);
+  const titleH = textAscent() + textDescent();
+
+  textStyle(NORMAL);
+  textSize(11);
+  let iconSize = 24; // Keep current size for 3+ requirements
+  if (lines.length === 2) {
+    iconSize = 28; // Slightly bigger for 2 requirements
+  } else if (lines.length === 1) {
+    iconSize = 34; // Bigger for 1 requirement
+  }
+  const iconGap = 4;
+  const textGap = 6;
+  const requirementGap = 12;
+  const requirementBlocks = [];
+  let requirementsW = 0;
+  for (const line of lines) {
+    const amountText = `${line.amount}x`;
+    const amountW = textWidth(amountText);
+    const labelW = line.icon ? 0 : textWidth(line.label);
+    const detailW = line.icon
+      ? iconGap + iconSize
+      : textGap + labelW;
+    const blockW = amountW + detailW;
+    requirementBlocks.push({
+      ...line,
+      amountText,
+      amountW,
+      blockW
+    });
+    requirementsW += blockW;
+  }
+  if (requirementBlocks.length > 1) {
+    requirementsW += requirementGap * (requirementBlocks.length - 1);
+  }
+  const requirementTextH = textAscent() + textDescent();
+  textSize(10);
+  const descriptionW = hasDescription ? textWidth(description) : 0;
+  const descriptionH = hasDescription ? (textAscent() + textDescent()) : 0;
+
+  const pad = 8;
+  const requirementsH = Math.max(iconSize, requirementTextH);
+  const contentW = max(titleW, requirementsW, descriptionW);
+  const boxW = contentW + pad * 2;
+  const descriptionBlockH = hasDescription ? (4 + descriptionH) : 0;
+  const boxH = pad * 2 + titleH + descriptionBlockH + 6 + requirementsH;
+  let bx = width / 2 - boxW / 2;
+  bx = constrain(bx, 6, width - boxW - 6);
+  let by = y - boxH - 10;
+  if (by < 6) {
+    by = y + slotSize + 10;
+  }
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  noStroke();
+  fill(28, 28, 36);
+  textStyle(BOLD);
+  textSize(12);
+  text(title, bx + boxW / 2, by + pad);
+
+  let cursorY = by + pad + titleH;
+  if (hasDescription) {
+    cursorY += 4;
+    fill(55, 55, 68);
+    textStyle(NORMAL);
+    textSize(10);
+    text(description, bx + boxW / 2, cursorY);
+    cursorY += descriptionH;
+  }
+
+  cursorY += 6;
+  textStyle(NORMAL);
+  textSize(11);
+  fill(28, 28, 36);
+  let reqX = bx + (boxW - requirementsW) / 2;
+  for (const block of requirementBlocks) {
+    const amountY = cursorY + (requirementsH - requirementTextH) / 2;
+    text(block.amountText, reqX + block.amountW / 2, amountY);
+    if (block.icon) {
+      imageMode(CORNER);
+      image(
+        block.icon,
+        reqX + block.amountW + iconGap,
+        cursorY + (requirementsH - iconSize) / 2,
+        iconSize,
+        iconSize
+      );
+    } else {
+      textAlign(LEFT, TOP);
+      text(
+        block.label,
+        reqX + block.amountW + textGap,
+        amountY
+      );
+      textAlign(CENTER, TOP);
+    }
+    reqX += block.blockW + requirementGap;
+  }
+
+  pop();
+}
+
+function drawHologramBuildCostTooltip(item) {
+  if (currentState !== "GAME") {
+    return false;
+  }
+  if (!drawGame.state || !drawGame.state.isRestrictedMode) {
+    return false;
+  }
+  if (!item || !item.entityType) {
+    return false;
+  }
+
+  const lines = getHotbarCostTooltipLines(item.entityType);
+  if (lines.length === 0) {
+    return false;
+  }
+
+  const title = item.name;
+
+  push();
+  textAlign(LEFT, TOP);
+
+  textStyle(BOLD);
+  textSize(12);
+  const titleW = textWidth(title);
+  const titleH = textAscent() + textDescent();
+
+  textStyle(NORMAL);
+  textSize(11);
+  const iconSize = 24;
+  const iconGap = 4;
+  const textGap = 6;
+  let maxLineW = 0;
+  for (const line of lines) {
+    const amountText = `${line.amount}x`;
+    const amountW = textWidth(amountText);
+    const detailW = line.icon
+      ? iconGap + iconSize
+      : textGap + textWidth(line.label);
+    maxLineW = max(maxLineW, amountW + detailW);
+  }
+
+  const pad = 8;
+  const lineH = Math.max(15, iconSize + 2);
+  const contentW = max(titleW, maxLineW);
+  const boxW = contentW + pad * 2;
+  const boxH = pad * 2 + titleH + 4 + lines.length * lineH;
+
+  let bx = mouseX + 14;
+  let by = mouseY + 14;
+  if (bx + boxW > width - 6) {
+    bx = mouseX - boxW - 14;
+  }
+  if (by + boxH > height - 6) {
+    by = mouseY - boxH - 14;
+  }
+  bx = constrain(bx, 6, width - boxW - 6);
+  by = constrain(by, 6, height - boxH - 6);
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  noStroke();
+  fill(28, 28, 36);
+  textStyle(BOLD);
+  textSize(12);
+  text(title, bx + pad, by + pad);
+
+  textStyle(NORMAL);
+  textSize(11);
+  let lineY = by + pad + titleH + 4;
+  const lineTextOffsetY = 4;
+  for (const line of lines) {
+    const amountText = `${line.amount}x`;
+    const amountX = bx + pad;
+    const amountW = textWidth(amountText);
+    text(amountText, amountX, lineY + lineTextOffsetY);
+    if (line.icon) {
+      imageMode(CORNER);
+      image(
+        line.icon,
+        amountX + amountW + iconGap,
+        lineY + (lineH - iconSize) / 2,
+        iconSize,
+        iconSize
+      );
+    } else {
+      text(line.label, amountX + amountW + textGap, lineY + lineTextOffsetY);
+    }
+    lineY += lineH;
+  }
+
+  pop();
+  return true;
 }
 
 function facingToAngle(facing) {
@@ -1636,7 +2379,7 @@ function isPointerOverMinimap() {
 }
 
 function isMouseOverResourceTooltipBlockers() {
-  if (backButtonGame.isHovered() || isPointerOverMinimap()) {
+  if (backButtonGame.isHovered() || isPointerOverMinimap() || isMouseOverSidebarResourceIcon()) {
     return true;
   }
   const slotSize = 42;
@@ -1654,6 +2397,9 @@ function isMouseOverResourceTooltipBlockers() {
 
 function drawResourceHoverTooltip() {
   if (currentState !== "GAME" || !drawGame.state) {
+    return;
+  }
+  if (!drawGame.state.isRestrictedMode) {
     return;
   }
   if (isMouseOverResourceTooltipBlockers()) {
@@ -1802,11 +2548,7 @@ function drawModificationRangeIndicator(config, feedback) {
 
 function drawHotbar() {
   push();
-  let slotSize = 42;
-  let gap = 8;
-  let totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
-  let startX = width / 2 - totalWidth / 2;
-  let y = height - 60;
+  const { slotSize, gap, startX, y } = getHotbarLayout();
 
   for (let i = 0; i < hotbarSlots; i++) {
     let x = startX + i * (slotSize + gap);
@@ -1949,6 +2691,16 @@ function placeSelectedEntityAtMouse() {
 
   // Build placement options based on entity type and tile
   const options = getPlacementOptionsForTile(type, tile);
+  const isRestrictedMode = !!drawGame.state.isRestrictedMode;
+  if (isRestrictedMode) {
+    const restrictedInventory = getRestrictedModeShuttleInventory();
+    const missingResources = getMissingBuildResources(type, restrictedInventory);
+    if (missingResources.length > 0) {
+      triggerBuildCostFeedback(type, missingResources);
+      return;
+    }
+    spendBuildResources(restrictedInventory, type);
+  }
 
   const newEntity = createEntity(type, tileX, tileY, options);
   newEntity.state.facing = drawGame.state.placementFacing || "E";
@@ -2108,6 +2860,10 @@ function deleteEntityUnderMouse() {
   if (targetId != null) {
     const index = entities.findIndex((entry) => entry.id === targetId);
     if (index !== -1) {
+      if (drawGame.state.isRestrictedMode && targetEntity) {
+        const restrictedInventory = getRestrictedModeShuttleInventory();
+        refundBuildResources(restrictedInventory, targetEntity.type);
+      }
       entities.splice(index, 1);
     }
     if (targetEntity) {

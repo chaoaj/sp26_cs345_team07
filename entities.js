@@ -30,6 +30,44 @@ const RESOURCE_TYPES = {
   ROCKET_FUEL: "rocketFuel",
 };
 
+// Build costs per placeable building entity.
+const ENTITY_BUILD_COSTS = Object.freeze({
+  [ENTITY_TYPES.TUBE]: Object.freeze({
+    [RESOURCE_TYPES.IRON_BAR]: 3,
+    [RESOURCE_TYPES.COPPER_BAR]: 3
+  }),
+  [ENTITY_TYPES.MINER]: Object.freeze({
+    [RESOURCE_TYPES.IRON_PLATE]: 3,
+    [RESOURCE_TYPES.COPPER_BAR]: 3
+  }),
+  [ENTITY_TYPES.SMELTER]: Object.freeze({
+    [RESOURCE_TYPES.IRON_BAR]: 2,
+    [RESOURCE_TYPES.COPPER_PLATE]: 2
+  }),
+  [ENTITY_TYPES.SPLITTER]: Object.freeze({
+    [RESOURCE_TYPES.IRON_PLATE]: 2
+  }),
+  [ENTITY_TYPES.MERGER]: Object.freeze({
+    [RESOURCE_TYPES.COPPER_PLATE]: 2
+  }),
+  [ENTITY_TYPES.CONSTRUCTOR]: Object.freeze({
+    [RESOURCE_TYPES.IRON_PLATE]: 3,
+    [RESOURCE_TYPES.COPPER_PLATE]: 2,
+    [RESOURCE_TYPES.MODULAR_COMPONENT]: 1
+  })
+});
+
+// Hotbar tooltip descriptions per entity type.
+// Replace placeholder strings with player-facing descriptions as needed.
+const ENTITY_HOTBAR_DESCRIPTIONS = Object.freeze({
+  [ENTITY_TYPES.TUBE]: "Transports resources.",
+  [ENTITY_TYPES.MINER]: "Extracts resources from nodes.",
+  [ENTITY_TYPES.SMELTER]: "Processes ores into bars.",
+  [ENTITY_TYPES.SPLITTER]: "Splits one input into two outputs.",
+  [ENTITY_TYPES.MERGER]: "Merges two inputs into one output.",
+  [ENTITY_TYPES.CONSTRUCTOR]: "Constructs advanced items from basic resources.",
+});
+
 // Tile types that count as mineable resource nodes
 const MINEABLE_TILE_TYPES = new Set(["iron", "copper", "helium3"]);
 
@@ -363,13 +401,13 @@ class ShuttleState extends EntityState {
     this.isActive = true;
     this.inventory = {
       [RESOURCE_TYPES.IRON_ORE]: 0,
-      [RESOURCE_TYPES.IRON_BAR]: 0,
-      [RESOURCE_TYPES.IRON_PLATE]: 10,
+      [RESOURCE_TYPES.IRON_BAR]: 45,
+      [RESOURCE_TYPES.IRON_PLATE]: 14,
       [RESOURCE_TYPES.COPPER_ORE]: 0,
-      [RESOURCE_TYPES.COPPER_BAR]: 0,
-      [RESOURCE_TYPES.COPPER_PLATE]: 6,
+      [RESOURCE_TYPES.COPPER_BAR]: 50,
+      [RESOURCE_TYPES.COPPER_PLATE]: 12,
       [RESOURCE_TYPES.COPPER_WIRE]: 0,
-      [RESOURCE_TYPES.MODULAR_COMPONENT]: 0,
+      [RESOURCE_TYPES.MODULAR_COMPONENT]: 2,
       [RESOURCE_TYPES.SHIP_ALLOY]: 0,
       [RESOURCE_TYPES.ELECTRONICS]: 0,
       [RESOURCE_TYPES.HELIUM3]: 0,
