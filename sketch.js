@@ -96,6 +96,9 @@ const SIDEBAR_RESOURCE_TYPES = [
   RESOURCE_TYPES.MODULAR_COMPONENT
 ];
 
+const RESTRICTED_SHUTTLE_COL = 25;
+const RESTRICTED_SHUTTLE_ROW = 6;
+
 
 function setup() {
   canvas = createCanvas(600, 600);
@@ -264,23 +267,27 @@ function drawGame() {
       }
     };
 
-    // Resource patches for testing
-    for (let y = 6; y <= 7; y++) {
-      for (let x = 6; x <= 10; x++) {
-        setResourceNode(x, y, "iron");
+    if (restrictedMode) {
+      applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceNode);
+    } else {
+      // Resource patches for testing in creative mode
+      for (let y = 6; y <= 7; y++) {
+        for (let x = 6; x <= 10; x++) {
+          setResourceNode(x, y, "iron");
+        }
       }
-    }
 
-    for (let y = 10; y <= 12; y++) {
-      for (let x = 12; x <= 16; x++) {
-        setResourceNode(x, y, "copper");
+      for (let y = 10; y <= 12; y++) {
+        for (let x = 12; x <= 16; x++) {
+          setResourceNode(x, y, "copper");
+        }
       }
-    }
 
-    tiles[18][17].type = "helium3";
-    tiles[18][18].type = "helium3";
-    tiles[19][17].type = "helium3";
-    tiles[19][18].type = "helium3";
+      setResourceNode(17, 18, "helium3");
+      setResourceNode(18, 18, "helium3");
+      setResourceNode(17, 19, "helium3");
+      setResourceNode(18, 19, "helium3");
+    }
 
     const entities = [];
 
@@ -540,14 +547,116 @@ function drawGame() {
   updatePlayerAnimation();
 }
 
+function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceNode) {
+  if (!Array.isArray(tiles) || typeof setResourceNode !== "function") {
+    return;
+  }
+
+  const reserved = new Set();
+  const reserve = (x, y) => reserved.add(`${x},${y}`);
+  const isReserved = (x, y) => reserved.has(`${x},${y}`);
+  const isInside = (x, y) => x >= 0 && x < mapCols && y >= 0 && y < mapRows;
+
+  const clearResourceNode = (tile) => {
+    if (!tile) return;
+    if (tile.type === "iron" || tile.type === "copper" || tile.type === "helium3") {
+      tile.type = "empty";
+    }
+    if (
+      tile.resource === RESOURCE_TYPES.IRON_ORE ||
+      tile.resource === RESOURCE_TYPES.COPPER_ORE ||
+      tile.resource === RESOURCE_TYPES.HELIUM3
+    ) {
+      tile.resource = null;
+    }
+  };
+
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      clearResourceNode(tiles[y][x]);
+    }
+  }
+
+  // Reserve shuttle footprint so random scatter stays clear of it.
+  for (let y = RESTRICTED_SHUTTLE_ROW - 1; y <= RESTRICTED_SHUTTLE_ROW + 1; y++) {
+    for (let x = RESTRICTED_SHUTTLE_COL - 1; x <= RESTRICTED_SHUTTLE_COL + 1; x++) {
+      if (isInside(x, y)) {
+        reserve(x, y);
+      }
+    }
+  }
+
+  const placeDepositPatch = (centerX, centerY, radiusX, radiusY, type) => {
+    for (let dy = -radiusY; dy <= radiusY; dy++) {
+      for (let dx = -radiusX; dx <= radiusX; dx++) {
+        const x = centerX + dx;
+        const y = centerY + dy;
+        if (!isInside(x, y) || isReserved(x, y)) {
+          continue;
+        }
+        setResourceNode(x, y, type);
+        reserve(x, y);
+      }
+    }
+  };
+
+  // Small starter patches near the shuttle.
+  const nearShuttleRow = RESTRICTED_SHUTTLE_ROW + 4;
+  placeDepositPatch(RESTRICTED_SHUTTLE_COL - 6, nearShuttleRow, 1, 0, "iron");
+  placeDepositPatch(RESTRICTED_SHUTTLE_COL + 6, nearShuttleRow, 1, 0, "copper");
+
+  // Large center-left and center-right deposits.
+  const centerRow = Math.floor(mapRows / 2);
+  const leftCenterCol = Math.floor(mapCols * 0.3);
+  const rightCenterCol = Math.floor(mapCols * 0.7);
+  placeDepositPatch(leftCenterCol, centerRow, 2, 2, "iron");
+  placeDepositPatch(rightCenterCol, centerRow, 2, 2, "copper");
+
+  // Helium-3 near center-bottom.
+  const heliumRow = mapRows - 8;
+  const heliumCenterCol = Math.floor(mapCols / 2);
+  placeDepositPatch(heliumCenterCol, heliumRow, 1, 1, "helium3");
+
+  // Sparse scatter across the map to keep exploration useful.
+  const sparseScatterPlan = [
+    { type: "iron", count: 3 },
+    { type: "copper", count: 3 },
+    { type: "helium3", count: 2 }
+  ];
+
+  for (const group of sparseScatterPlan) {
+    let placed = 0;
+    let attempts = 0;
+    const maxAttempts = 500;
+
+    while (placed < group.count && attempts < maxAttempts) {
+      attempts++;
+      const x = Math.floor(Math.random() * mapCols);
+      const y = Math.floor(Math.random() * mapRows);
+      if (!isInside(x, y) || isReserved(x, y)) {
+        continue;
+      }
+
+      const tile = tiles[y] && tiles[y][x];
+      if (!tile || tile.entityId != null || tile.type !== "empty") {
+        continue;
+      }
+
+      setResourceNode(x, y, group.type);
+      reserve(x, y);
+      placed++;
+    }
+  }
+}
+
 function spawnRestrictedModeShuttle(state) {
   if (!state || !state.map || !state.entities) {
     return;
   }
 
   // Keep shuttle close to spawn and off current resource nodes.
-  const shuttleCol = 18;
-  const shuttleRow = 4;
+  const shuttleCol = RESTRICTED_SHUTTLE_COL;
+  const shuttleRow = RESTRICTED_SHUTTLE_ROW;
   const footprintTiles = getSafeFootprintTilesAt(
     ENTITY_TYPES.SHUTTLE,
     shuttleCol,
@@ -1055,9 +1164,180 @@ function updatePlayerAnimation() {
   }
 }
 
+function getTubeRenderPathData(entity, tileSize) {
+  if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
+    return null;
+  }
+
+  const offsets = getTubePortOffsets(entity);
+  const centerX = entity.tileX * tileSize + tileSize / 2;
+  const centerY = entity.tileY * tileSize + tileSize / 2;
+  const endpointDistance = tileSize * 0.42;
+  const inputPoint = {
+    x: centerX + offsets.input.x * endpointDistance,
+    y: centerY + offsets.input.y * endpointDistance
+  };
+  const outputPoint = {
+    x: centerX + offsets.output.x * endpointDistance,
+    y: centerY + offsets.output.y * endpointDistance
+  };
+
+  const segments = [
+    {
+      x1: inputPoint.x,
+      y1: inputPoint.y,
+      x2: centerX,
+      y2: centerY
+    },
+    {
+      x1: centerX,
+      y1: centerY,
+      x2: outputPoint.x,
+      y2: outputPoint.y
+    }
+  ].map((segment) => ({
+    ...segment,
+    len: Math.hypot(segment.x2 - segment.x1, segment.y2 - segment.y1)
+  }));
+
+  const totalLength = segments.reduce((sum, segment) => sum + segment.len, 0);
+  return { segments, totalLength, centerX, centerY };
+}
+
+function getPointAlongTubePath(pathData, t) {
+  if (!pathData || !Array.isArray(pathData.segments) || pathData.totalLength <= 0) {
+    return { x: 0, y: 0 };
+  }
+
+  let normalized = Number.isFinite(t) ? t : 0;
+  normalized = normalized % 1;
+  if (normalized < 0) normalized += 1;
+  let distance = normalized * pathData.totalLength;
+
+  for (const segment of pathData.segments) {
+    if (segment.len <= 0) {
+      continue;
+    }
+
+    if (distance <= segment.len) {
+      const ratio = distance / segment.len;
+      return {
+        x: lerp(segment.x1, segment.x2, ratio),
+        y: lerp(segment.y1, segment.y2, ratio)
+      };
+    }
+
+    distance -= segment.len;
+  }
+
+  const last = pathData.segments[pathData.segments.length - 1];
+  return { x: last.x2, y: last.y2 };
+}
+
+function getTubeItemGlowColor(resourceType) {
+  switch (resourceType) {
+    case RESOURCE_TYPES.IRON_ORE: return [120, 120, 125];
+    case RESOURCE_TYPES.IRON_BAR: return [180, 180, 190];
+    case RESOURCE_TYPES.IRON_PLATE: return [210, 210, 220];
+    case RESOURCE_TYPES.COPPER_ORE: return [190, 120, 70];
+    case RESOURCE_TYPES.COPPER_BAR: return [210, 130, 60];
+    case RESOURCE_TYPES.COPPER_PLATE: return [232, 160, 82];
+    case RESOURCE_TYPES.COPPER_WIRE: return [244, 186, 90];
+    case RESOURCE_TYPES.HELIUM3: return [95, 220, 255];
+    case RESOURCE_TYPES.MODULAR_COMPONENT: return [165, 215, 255];
+    case RESOURCE_TYPES.ELECTRONICS: return [120, 255, 180];
+    default: return [235, 235, 235];
+  }
+}
+
+function drawTubeFlowEffects(entity, tileSize) {
+  if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
+    return;
+  }
+
+  const pathData = getTubeRenderPathData(entity, tileSize);
+  if (!pathData) {
+    return;
+  }
+
+  const state = entity.state || {};
+  const flowState = state.flowState || "off";
+  const flowDistance = Number.isFinite(state.flowDistance) ? state.flowDistance : 0;
+  const phaseOffset = Number(state.flowPhaseOffset) || 0;
+  const now = millis() / 1000;
+
+  noFill();
+  stroke(40, 40, 48, 220);
+  strokeWeight(tileSize * 0.22);
+  strokeCap(ROUND);
+  for (const segment of pathData.segments) {
+    line(segment.x1, segment.y1, segment.x2, segment.y2);
+  }
+
+  let signalRgb = [190, 70, 70];
+  if (flowState === "flowing") {
+    signalRgb = [60, 235, 110];
+  }
+
+  const staticSlots = [0.2, 0.5, 0.8];
+  for (let i = 0; i < staticSlots.length; i++) {
+    let t = staticSlots[i];
+    if (flowState === "flowing") {
+      t = (now * 0.85 - flowDistance * 0.07 - i * 0.22 - phaseOffset * 0.04) % 1;
+      if (t < 0) t += 1;
+    }
+
+    const point = getPointAlongTubePath(pathData, t);
+    const pulse = flowState === "flowing"
+      ? 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(now * 7 - flowDistance * 0.8 - phaseOffset - i * 1.6))
+      : 1;
+    const alpha = flowState === "flowing"
+      ? Math.floor(90 + 120 * pulse)
+      : 170;
+    const radius = tileSize * (flowState === "flowing" ? 0.19 : 0.16);
+    noStroke();
+    fill(signalRgb[0], signalRgb[1], signalRgb[2], alpha);
+    circle(point.x, point.y, radius);
+  }
+
+  if (flowState === "flowing") {
+    const progress = Number.isFinite(state.flowProgress)
+      ? state.flowProgress
+      : ((now * 1.35 - flowDistance * 0.08 - phaseOffset * 0.03) % 1 + 1) % 1;
+    const itemPoint = getPointAlongTubePath(pathData, progress);
+    const itemRgb = getTubeItemGlowColor(state.carriedItem || null);
+
+    noStroke();
+    fill(itemRgb[0], itemRgb[1], itemRgb[2], 180);
+    circle(itemPoint.x, itemPoint.y, tileSize * 0.24);
+    fill(itemRgb[0], itemRgb[1], itemRgb[2], 245);
+    circle(itemPoint.x, itemPoint.y, tileSize * 0.12);
+  }
+}
+
+function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
+  if (!tubeState || tubeState.flowState !== "flowing") {
+    return false;
+  }
+
+  const flowSpeed = Number(tubeState.flowSpeed) || 1;
+  const flowDistance = Number.isFinite(tubeState.flowDistance)
+    ? tubeState.flowDistance
+    : 0;
+  const phaseOffset = Number(tubeState.flowPhaseOffset) || 0;
+  let wave = (nowSeconds * (1.7 * flowSpeed) - flowDistance * 0.18 - phaseOffset) % 1;
+  if (wave < 0) {
+    wave += 1;
+  }
+
+  // Short duty cycle gives a clear source-to-sink propagation.
+  return wave < 0.34;
+}
+
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
+  const nowSeconds = millis() / 1000;
 
   for (const entity of entities) {
     const footprintOffsets = getSafeFootprintOffsets(entity.type);
@@ -1094,8 +1374,9 @@ function drawEntities(entities, tileSize, map) {
     }
 
     noStroke();
-    const powerOn =
-      entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
+    const powerOn = entity.type === ENTITY_TYPES.TUBE
+      ? isTubeFlowIndicatorLit(entity.state, nowSeconds)
+      : (entity.state.isOn != null ? entity.state.isOn : entity.state.isActive);
     fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
     circle(px + drawWidth - 8, py + 8, 8);
 
@@ -2934,6 +3215,11 @@ function repairEntityUnderMouse() {
 function toggleEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
+
+  if (entity.type === ENTITY_TYPES.TUBE) {
+    console.log("Tube state is flow-driven and cannot be manually toggled.");
+    return;
+  }
 
   // Miners can only be ON when on a resource node
   if (entity.type === ENTITY_TYPES.MINER) {

@@ -30,6 +30,31 @@ const RESOURCE_TYPES = {
   ROCKET_FUEL: "rocketFuel",
 };
 
+// Relative tube propagation speed by carried item (1.0 = baseline).
+const TUBE_FLOW_SPEED_BY_RESOURCE = Object.freeze({
+  [RESOURCE_TYPES.IRON_ORE]: 0.9,
+  [RESOURCE_TYPES.IRON_BAR]: 1.0,
+  [RESOURCE_TYPES.IRON_PLATE]: 0.7,
+  [RESOURCE_TYPES.COPPER_ORE]: 0.9,
+  [RESOURCE_TYPES.COPPER_BAR]: 1.0,
+  [RESOURCE_TYPES.COPPER_PLATE]: 0.7,
+  [RESOURCE_TYPES.COPPER_WIRE]: 1.5,
+  [RESOURCE_TYPES.HELIUM3]: 0.7,
+  [RESOURCE_TYPES.MODULAR_COMPONENT]: 0.5,
+  [RESOURCE_TYPES.ELECTRONICS]: 0.5,
+  [RESOURCE_TYPES.SHIP_ALLOY]: 0.5,
+  [RESOURCE_TYPES.ROCKET_FUEL]: 0.3
+});
+
+function getTubeFlowSpeedForResource(resourceType) {
+  if (!resourceType) {
+    return 1;
+  }
+
+  const speed = Number(TUBE_FLOW_SPEED_BY_RESOURCE[resourceType]);
+  return Number.isFinite(speed) && speed > 0 ? speed : 1;
+}
+
 // Build costs per placeable building entity.
 const ENTITY_BUILD_COSTS = Object.freeze({
   [ENTITY_TYPES.TUBE]: Object.freeze({
@@ -388,9 +413,14 @@ class TubeState extends EntityState {
     this.isOn = true;
     this.isActive = true;
     this.shape = shape === TUBE_SHAPES.CORNER ? shape : TUBE_SHAPES.STRAIGHT;
-    this.facing = "E";
+    this.facing = facing || "E";
     this.carriedItem = null;
     this.isConnected = false;
+    this.flowState = "off"; // off | blocked | flowing
+    this.flowDistance = Infinity;
+    this.flowPhaseOffset = 0;
+    this.flowProgress = 0;
+    this.flowSpeed = 1;
   }
 }
 
@@ -401,11 +431,11 @@ class ShuttleState extends EntityState {
     this.isActive = true;
     this.inventory = {
       [RESOURCE_TYPES.IRON_ORE]: 0,
-      [RESOURCE_TYPES.IRON_BAR]: 45,
-      [RESOURCE_TYPES.IRON_PLATE]: 14,
+      [RESOURCE_TYPES.IRON_BAR]: 75,
+      [RESOURCE_TYPES.IRON_PLATE]: 20,
       [RESOURCE_TYPES.COPPER_ORE]: 0,
-      [RESOURCE_TYPES.COPPER_BAR]: 50,
-      [RESOURCE_TYPES.COPPER_PLATE]: 12,
+      [RESOURCE_TYPES.COPPER_BAR]: 75,
+      [RESOURCE_TYPES.COPPER_PLATE]: 20,
       [RESOURCE_TYPES.COPPER_WIRE]: 0,
       [RESOURCE_TYPES.MODULAR_COMPONENT]: 2,
       [RESOURCE_TYPES.SHIP_ALLOY]: 0,
@@ -801,6 +831,40 @@ function refreshEntityConnectionStates(entities) {
       baseRate = Math.min(baseRate, sinkRate);
     }
 
+    const flowDistanceByTubeId = new Map();
+    if (fromEntityId != null) {
+      const frontier = [];
+      for (const member of component) {
+        const portConnections = getTubePortConnections(entities, member);
+        const isSourceFacingTube = portConnections.some(
+          (connection) =>
+            connection.kind === "output" && connection.entityId === fromEntityId
+        );
+        if (isSourceFacingTube) {
+          flowDistanceByTubeId.set(member.id, 0);
+          frontier.push(member.id);
+        }
+      }
+
+      if (frontier.length === 0 && component.length > 0) {
+        flowDistanceByTubeId.set(component[0].id, 0);
+        frontier.push(component[0].id);
+      }
+
+      while (frontier.length > 0) {
+        const currentId = frontier.shift();
+        const currentDistance = flowDistanceByTubeId.get(currentId) || 0;
+        const neighbors = adjacency.get(currentId) || new Set();
+        for (const neighborId of neighbors) {
+          if (flowDistanceByTubeId.has(neighborId)) {
+            continue;
+          }
+          flowDistanceByTubeId.set(neighborId, currentDistance + 1);
+          frontier.push(neighborId);
+        }
+      }
+    }
+
     for (const member of component) {
       const connections = tubeConnections.get(member.id);
       const entityOffsets = connections.entityOffsetConnections;
@@ -827,6 +891,37 @@ function refreshEntityConnectionStates(entities) {
       member.state.inputRate = tubeRate;
       member.state.outputRate = tubeRate;
       member.state.carriedItem = hasOpenPort ? null : sourceItem;
+      member.state.flowSpeed = getTubeFlowSpeedForResource(member.state.carriedItem);
+      const flowDistance = flowDistanceByTubeId.has(member.id)
+        ? flowDistanceByTubeId.get(member.id)
+        : Infinity;
+      member.state.flowDistance = flowDistance;
+      member.state.flowPhaseOffset = Number.isFinite(flowDistance)
+        ? flowDistance * 0.18
+        : 0;
+      const isFlowing = connected &&
+        !hasOpenPort &&
+        !!sourceItem &&
+        tubeRate > 0;
+      if (isFlowing) {
+        member.state.flowState = "flowing";
+      } else if (connected || !!fromEntityId || !!toEntityId || !!sourceItem) {
+        member.state.flowState = "blocked";
+      } else {
+        member.state.flowState = "off";
+      }
+      member.state.isActive = member.state.flowState === "flowing";
+
+      if (member.state.flowState === "flowing") {
+        const nowSeconds = Date.now() / 1000;
+        const flowSpeed = Number(member.state.flowSpeed) || 1;
+        const phaseDistance = Number.isFinite(flowDistance) ? flowDistance : 0;
+        let progress = (nowSeconds * (1.35 * flowSpeed) - phaseDistance * 0.08) % 1;
+        if (progress < 0) progress += 1;
+        member.state.flowProgress = progress;
+      } else {
+        member.state.flowProgress = 0;
+      }
     }
 
     for (const entityId of attachedInComponent) {
