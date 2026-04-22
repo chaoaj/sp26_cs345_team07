@@ -300,7 +300,7 @@ function drawGame() {
       player: {
         x: tileSize * 5,
         y: tileSize * 5,
-        size: 54.4,
+        size: 220,
         speed: 180
       },
       feedback: {
@@ -400,8 +400,8 @@ function drawGame() {
   push();
   noStroke();
   for (let star of stars) {
-    let sx = star.x - cameraX * 0.5;
-    let sy = star.y - cameraY * 0.5;
+    let sx = star.x - cameraX * 0.2;
+    let sy = star.y - cameraY * 0.2;
     if (sx > -star.r && sx < width + star.r && sy > -star.r && sy < height + star.r) {
       fill(255, star.alpha);
       ellipse(sx, sy, star.r, star.r);
