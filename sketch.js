@@ -22,6 +22,10 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
+let bgTiles = [];
+let pipeCurve1Offimg;
+let stars = [];
+
 let currentDirection = "front";
 let currentAnimation = "idle";
 let currentFrame = 0;
@@ -88,6 +92,17 @@ function setup() {
   canvas = createCanvas(600, 600);
   centerCanvas();
   textAlign(CENTER, CENTER);
+
+  stars = [];
+  background(0);
+  for (let i = 0; i < 10000; i++) {
+    stars.push({
+      x: random(-1000, 2600),
+      y: random(-1000, 2600),
+      r: random(1, 3),
+      alpha: random(100, 255)
+    });
+  }
   startButton = new Button (90, 350, 150, 55, "Start", () => {
     currentState = "GAME";
   });
@@ -108,6 +123,12 @@ function setup() {
 };
 
 function preload() {
+  bgTiles[0] = loadImage('resources/tiles/tile1.png');
+  bgTiles[1] = loadImage('resources/tiles/tile2.png');
+  bgTiles[2] = loadImage('resources/tiles/tile3.png');
+  bgTiles[3] = loadImage('resources/tiles/tile4.png');
+  pipeCurve1Offimg = loadImage('resources/pipes/pipeCurve1Off.png');
+
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
   settingsBG = loadImage('resources/settingsBG.png');
@@ -148,12 +169,12 @@ function windowResized() {
 }
 
 function draw() {
-  background(220);
   cursor('default');
   if (currentState == "MENU") {
     drawMenu();
     hideSettingsUI();
   } else if (currentState == "GAME") {
+    background(0);
     drawGame();
     hideSettingsUI();
   } else if (currentState == "SETTINGS") {
@@ -211,7 +232,8 @@ function drawGame() {
           colorOverride: null,
           entity: null,
           entityId: null,
-          building: null
+          building: null,
+          bgIndex: Math.floor(Math.random() * 4)
         });
       }
       tiles.push(row);
@@ -376,7 +398,19 @@ function drawGame() {
   );
 
   push();
-  translate(-cameraX, -cameraY);
+  noStroke();
+  for (let star of stars) {
+    let sx = star.x - cameraX * 0.5;
+    let sy = star.y - cameraY * 0.5;
+    if (sx > -star.r && sx < width + star.r && sy > -star.r && sy < height + star.r) {
+      fill(255, star.alpha);
+      ellipse(sx, sy, star.r, star.r);
+    }
+  }
+  pop();
+
+  push();
+  translate(-Math.round(cameraX), -Math.round(cameraY));
 
   const worldLayer = getOrBuildWorldLayer(drawGame.state);
   image(worldLayer, 0, 0);
@@ -826,15 +860,20 @@ function getOrBuildWorldLayer(state) {
   const { config, map } = state;
   const { tileSize, mapCols, mapRows } = config;
   const layer = createGraphics(mapCols * tileSize, mapRows * tileSize);
-  layer.stroke(200);
-  layer.strokeWeight(1);
+  layer.noStroke();
 
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
-      const tileColor = getTileBaseColor(tile);
-      layer.fill(tileColor[0], tileColor[1], tileColor[2]);
-      layer.rect(x * tileSize, y * tileSize, tileSize, tileSize);
+      const px = x * tileSize;
+      const py = y * tileSize;
+      if ((tile.type === "empty" || tile.type === "dirt") && bgTiles[tile.bgIndex] && bgTiles[tile.bgIndex].width > 0) {
+        layer.image(bgTiles[tile.bgIndex], px, py, tileSize, tileSize);
+      } else {
+        const tileColor = getTileBaseColor(tile);
+        layer.fill(tileColor[0], tileColor[1], tileColor[2]);
+        layer.rect(px, py, tileSize, tileSize);
+      }
     }
   }
 
@@ -916,7 +955,7 @@ function drawSideBar() {
   let target = isSidebarOpen ? mapX : mapX - sidebarWidth;
   sidebarX = lerp(sidebarX, target, 0.15);
 
-  image(sideBarFrameImg, sidebarX, mapY, sidebarWidth + 7, 510);
+  image(sideBarFrameImg, sidebarX, mapY - 15, sidebarWidth + 7, 510);
 
   // Clip to map area so sidebar doesn't draw over hotbar or back button
   drawingContext.save();
@@ -942,7 +981,7 @@ function drawSideBar() {
 
   fill(255, 200, 100);
   noStroke();
-  let h = mapY + 20;
+  let h = mapY + 5;
 
   // 2. Loop through the array directly, removing all the if/else chains
   for (let i = 0; i < sidebarItems.length; i++) {
