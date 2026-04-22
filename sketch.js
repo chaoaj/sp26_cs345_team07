@@ -3043,6 +3043,24 @@ function keyPressed() {
     return;
   }
 
+  if (
+    (key === "p" || key === "P") &&
+    keyIsDown(CONTROL) &&
+    keyIsDown(SHIFT)
+  ) {
+    if (drawGame.state && drawGame.state.isRestrictedMode) {
+      if (
+        typeof DevCheckpoint !== "undefined" &&
+        typeof DevCheckpoint.applyRestrictedLateGameSkip === "function"
+      ) {
+        DevCheckpoint.applyRestrictedLateGameSkip();
+      } else {
+        console.error("DevCheckpoint module is unavailable.");
+      }
+    }
+    return false;
+  }
+
   const hoveredEntity = getEntityUnderMouse();
 
   if (key >= '1' && key <= '9') {
