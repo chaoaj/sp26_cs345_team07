@@ -544,6 +544,7 @@ function drawGame() {
     }
   }
   drawBuildCostFeedbackMessage();
+  drawActiveTubeFlowTooltip();
   updatePlayerAnimation();
 }
 
@@ -1440,10 +1441,65 @@ function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
   return tile.entityId !== ignoreEntityId;
 }
 
-function drawEntityPorts(entity, tileSize) {
-  if (entity.type !== ENTITY_TYPES.TUBE && entity.state && entity.state.isConnected) {
+function shouldExposeConstructorOutputPort(entity, port = null) {
+  if (!entity || entity.type !== ENTITY_TYPES.CONSTRUCTOR) {
+    return false;
+  }
+
+  const outputType = entity.state?.outputType || null;
+  const isLateStageOutput =
+    outputType === RESOURCE_TYPES.ELECTRONICS ||
+    outputType === RESOURCE_TYPES.SHIP_ALLOY;
+  if (!isLateStageOutput) {
+    return false;
+  }
+
+  if (port && port.kind !== "output") {
+    return false;
+  }
+  return true;
+}
+
+function drawConstructorOutputItemBadge(portPx, portPy, tileSize, outputType) {
+  if (!outputType) {
     return;
   }
+
+  const badgeSize = max(14, tileSize * 0.46);
+  const icon = getResourceIconForType(outputType);
+
+  noStroke();
+  fill(252, 252, 255, 238);
+  circle(portPx, portPy, badgeSize);
+
+  if (icon) {
+    const iconSize = badgeSize * 0.72;
+    imageMode(CENTER);
+    image(icon, portPx, portPy, iconSize, iconSize);
+    imageMode(CORNER);
+    return;
+  }
+
+  const fallback =
+    outputType === RESOURCE_TYPES.SHIP_ALLOY
+      ? "SA"
+      : outputType === RESOURCE_TYPES.ELECTRONICS
+        ? "E"
+        : "?";
+  const fontSize = fallback.length > 1 ? 7 : 9;
+  fill(30, 30, 36);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(fontSize);
+  text(fallback, portPx, portPy + 0.3);
+  textStyle(NORMAL);
+}
+
+function drawEntityPorts(entity, tileSize) {
+  const hideConnectedNonTube =
+    entity.type !== ENTITY_TYPES.TUBE &&
+    entity.state &&
+    entity.state.isConnected;
   const ports = entity.type === ENTITY_TYPES.TUBE
     ? getTubePortTiles(entity)
     : getEntityConnectionPorts(entity);
@@ -1452,7 +1508,14 @@ function drawEntityPorts(entity, tileSize) {
   const arrowLen = tileSize * 0.45;
 
   for (const port of ports) {
-    if (isPortTileBlockedByBuilding(port.worldX, port.worldY, entity.id)) {
+    const forceExposeOutput = shouldExposeConstructorOutputPort(entity, port);
+    if (hideConnectedNonTube && !forceExposeOutput) {
+      continue;
+    }
+    if (
+      !forceExposeOutput &&
+      isPortTileBlockedByBuilding(port.worldX, port.worldY, entity.id)
+    ) {
       continue;
     }
     const portPx = port.worldX * tileSize + tileSize / 2;
@@ -1469,6 +1532,14 @@ function drawEntityPorts(entity, tileSize) {
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [255, 210, 0], arrowLen);
     } else if (port.kind === "output") {
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [230, 60, 60], arrowLen);
+      if (forceExposeOutput) {
+        drawConstructorOutputItemBadge(
+          portPx,
+          portPy,
+          tileSize,
+          entity.state?.outputType || null
+        );
+      }
     } else {
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [80, 180, 200], arrowLen);
       drawDirectionalArrow(portPx, portPy, -dirX, -dirY, [80, 180, 200], arrowLen);
@@ -2724,6 +2795,129 @@ function drawResourceHoverTooltip() {
   textAlign(CENTER, CENTER);
 }
 
+function formatTooltipResourceAmount(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) {
+    return "0";
+  }
+  const rounded = Math.round(amount);
+  if (Math.abs(amount - rounded) < 0.001) {
+    return String(rounded);
+  }
+  return amount.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function getHoveredActiveTubeTooltipData() {
+  if (currentState !== "GAME" || !drawGame.state) {
+    return null;
+  }
+
+  const entity = getEntityUnderMouse();
+  if (!entity || entity.type !== ENTITY_TYPES.TUBE || !entity.state) {
+    return null;
+  }
+
+  const state = entity.state;
+  const resourceType = state.carriedItem;
+  const outputRate = Number(state.outputRate) || 0;
+  const isFlowing = state.flowState === "flowing" && !!state.isActive;
+
+  if (!isFlowing || !resourceType || outputRate <= 0) {
+    return null;
+  }
+
+  return {
+    title: "Tube",
+    amountText: `${formatTooltipResourceAmount(outputRate)}x`,
+    icon: getResourceIconForType(resourceType),
+    label: getResourceTypeLabel(resourceType),
+    resourceType
+  };
+}
+
+function drawActiveTubeFlowTooltip() {
+  if (currentState !== "GAME" || !drawGame.state) {
+    return false;
+  }
+  if (isMouseOverResourceTooltipBlockers()) {
+    return false;
+  }
+
+  const tooltip = getHoveredActiveTubeTooltipData();
+  if (!tooltip) {
+    return false;
+  }
+
+  push();
+  textAlign(LEFT, TOP);
+
+  textStyle(BOLD);
+  textSize(12);
+  const titleW = textWidth(tooltip.title);
+  const titleH = textAscent() + textDescent();
+
+  textStyle(NORMAL);
+  textSize(11);
+  const iconSize = 24;
+  const iconGap = 4;
+  const textGap = 6;
+  const amountW = textWidth(tooltip.amountText);
+  const detailW = tooltip.icon
+    ? iconGap + iconSize
+    : textGap + textWidth(tooltip.label);
+  const lineW = amountW + detailW;
+
+  const pad = 8;
+  const lineH = Math.max(15, iconSize + 2);
+  const contentW = max(titleW, lineW);
+  const boxW = contentW + pad * 2;
+  const boxH = pad * 2 + titleH + 4 + lineH;
+
+  let bx = mouseX + 14;
+  let by = mouseY + 14;
+  if (bx + boxW > width - 6) {
+    bx = mouseX - boxW - 14;
+  }
+  if (by + boxH > height - 6) {
+    by = mouseY - boxH - 14;
+  }
+  bx = constrain(bx, 6, width - boxW - 6);
+  by = constrain(by, 6, height - boxH - 6);
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  noStroke();
+  fill(28, 28, 36);
+  textStyle(BOLD);
+  textSize(12);
+  text(tooltip.title, bx + pad, by + pad);
+
+  textStyle(NORMAL);
+  textSize(11);
+  const lineY = by + pad + titleH + 4;
+  const lineTextOffsetY = 4;
+  const amountX = bx + pad;
+  text(tooltip.amountText, amountX, lineY + lineTextOffsetY);
+  if (tooltip.icon) {
+    imageMode(CORNER);
+    image(
+      tooltip.icon,
+      amountX + amountW + iconGap,
+      lineY + (lineH - iconSize) / 2,
+      iconSize,
+      iconSize
+    );
+  } else {
+    text(tooltip.label, amountX + amountW + textGap, lineY + lineTextOffsetY);
+  }
+
+  pop();
+  return true;
+}
+
 function getMiniMapTileColor(tile) {
   if (!tile) {
     return [240, 240, 245];
@@ -3389,6 +3583,9 @@ function getIncomingTubeInputs(entities, targetId) {
 }
 
 function updateSmelterInputs(entities) {
+  const EPSILON = 1e-6;
+  const SMELTER_INPUTS_PER_BAR = 2;
+
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.SMELTER) continue;
     const smelterState = entity.state;
@@ -3406,14 +3603,18 @@ function updateSmelterInputs(entities) {
           0
         )
       : 0;
+    const isExactBatch =
+      !!inputType &&
+      Math.abs(totalRate - SMELTER_INPUTS_PER_BAR) <= EPSILON;
+    const outputType = smelterState.recipes?.get(inputType) || null;
 
     smelterState.inputType = inputType;
     smelterState.currentRecipe = inputType;
-    smelterState.isActive = !!inputType && totalRate > 0;
+    smelterState.isActive = isExactBatch && !!outputType;
     smelterState.isOn = smelterState.isActive;
-    smelterState.outputType = smelterState.recipes?.get(inputType) || null;
-    smelterState.inputRate = totalRate;
-    smelterState.outputRate = smelterState.outputType ? totalRate : 0;
+    smelterState.outputType = outputType;
+    smelterState.inputRate = isExactBatch ? SMELTER_INPUTS_PER_BAR : 0;
+    smelterState.outputRate = isExactBatch && outputType ? 1 : 0;
 
     if (!inputType) {
       smelterState.storedInput = 0;
@@ -3438,23 +3639,24 @@ function findConstructorRecipeByTypes(types) {
 }
 
 function updateConstructorInputs(entities) {
-  const tubeSources = getTubeSourcesByTarget(entities);
+  const EPSILON = 1e-6;
 
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.CONSTRUCTOR) continue;
     const constructorState = entity.state;
-    const sourceIds = tubeSources.get(entity.id) || new Set();
-    const sourceTypes = [];
+    const incoming = getIncomingTubeInputs(entities, entity.id);
+    const incomingRatesByType = new Map();
 
-    for (const sourceId of sourceIds) {
-      const sourceEntity = entities.find((entry) => entry.id === sourceId);
-      const outputType = sourceEntity?.state?.outputType;
-      if (outputType) {
-        sourceTypes.push(outputType);
+    for (const input of incoming) {
+      const type = input?.outputType || null;
+      const rate = Number(input?.rate) || 0;
+      if (!type || rate <= 0) {
+        continue;
       }
+      incomingRatesByType.set(type, (incomingRatesByType.get(type) || 0) + rate);
     }
 
-    const uniqueTypes = [...new Set(sourceTypes)].slice(0, 2);
+    const uniqueTypes = [...incomingRatesByType.keys()];
     const recipe = uniqueTypes.length
       ? findConstructorRecipeByTypes(uniqueTypes)
       : null;
@@ -3479,8 +3681,45 @@ function updateConstructorInputs(entities) {
       });
     }
 
-    constructorState.updateOutputFromInputs();
-    constructorState.isActive = !!constructorState.outputType;
+    if (!recipe) {
+      constructorState.outputType = null;
+      constructorState.outputCount = 0;
+      constructorState.inputRate = 0;
+      constructorState.outputRate = 0;
+      constructorState.isActive = false;
+      continue;
+    }
+
+    let hasExactRecipeInputs = true;
+    for (const input of recipe.inputs) {
+      const requiredCount = Number(input.count) || 0;
+      const availableRate = incomingRatesByType.get(input.type) || 0;
+      if (
+        requiredCount <= 0 ||
+        Math.abs(availableRate - requiredCount) > EPSILON
+      ) {
+        hasExactRecipeInputs = false;
+        break;
+      }
+    }
+
+    const recipeOutputCount = Number(recipe.output?.count) || 0;
+    const totalRequiredPerCraft = recipe.inputs.reduce(
+      (sum, input) => sum + (Number(input.count) || 0),
+      0
+    );
+    const outputRate = hasExactRecipeInputs ? recipeOutputCount : 0;
+
+    constructorState.outputType = recipe.output?.type || null;
+    constructorState.outputCount = recipeOutputCount;
+    constructorState.inputRate = hasExactRecipeInputs
+      ? totalRequiredPerCraft
+      : 0;
+    constructorState.outputRate = outputRate;
+    constructorState.isActive =
+      !!constructorState.outputType &&
+      hasExactRecipeInputs &&
+      outputRate > 0;
   }
 }
 

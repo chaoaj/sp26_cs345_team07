@@ -1,683 +1,764 @@
-const DevCheckpoint = (() => {
-  function cloneDevData(value) {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
+// dev-checkpoint.js
+// Restricted-mode developer checkpoint spawner.
+
+(function initDevCheckpoint(globalScope) {
+  "use strict";
+
+  const CARDINAL_NEIGHBORS = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 }
+  ];
+
+  function inGameRestrictedState() {
+    if (typeof drawGame === "undefined" || !drawGame.state) {
+      return false;
     }
-    return JSON.parse(JSON.stringify(value));
+    return !!drawGame.state.isRestrictedMode;
   }
 
-  function cloneEntityForSnapshot(entity) {
-    if (!entity) {
-      return null;
+  function getStateOrThrow() {
+    if (typeof drawGame === "undefined" || !drawGame.state) {
+      throw new Error("Game state is not initialized.");
     }
-    const stateData = cloneDevData(entity.state || {});
-    const stateProto = entity.state ? Object.getPrototypeOf(entity.state) : Object.prototype;
-    const stateClone = Object.assign(Object.create(stateProto), stateData);
-    return {
-      id: entity.id,
-      type: entity.type,
-      tileX: entity.tileX,
-      tileY: entity.tileY,
-      state: stateClone
-    };
+    return drawGame.state;
   }
 
-  function captureRestrictedSkipSnapshot(state) {
-    const counters = {
-      ironOre,
-      ironBar,
-      ironPlate,
-      copperOre,
-      copperBar,
-      copperPlate,
-      copperWire,
-      helium,
-      rocketFuel,
-      modularComponent,
-      shipAlloy,
-      electronics
-    };
+  function getRecipeOrThrow(outputType) {
+    if (typeof CONSTRUCTOR_RECIPES === "undefined" || !Array.isArray(CONSTRUCTOR_RECIPES)) {
+      throw new Error("CONSTRUCTOR_RECIPES is unavailable.");
+    }
 
-    const entities = state.entities.map((entity) => cloneEntityForSnapshot(entity));
-    const tiles = state.map.tiles.map((row) =>
-      row.map((tile) => {
-        const cloned = cloneDevData(tile);
-        cloned.entity = null;
-        return cloned;
-      })
+    const recipe = CONSTRUCTOR_RECIPES.find(
+      (entry) => entry && entry.output && entry.output.type === outputType
     );
-
-    return {
-      counters,
-      entities,
-      tiles,
-      shuttleEntityId: state.shuttleEntityId,
-      selectedBuilding: cloneDevData(state.selectedBuilding),
-      feedback: cloneDevData(state.feedback)
-    };
+    if (!recipe) {
+      throw new Error(`Missing constructor recipe for ${String(outputType)}`);
+    }
+    return recipe;
   }
 
-  function restoreRestrictedSkipSnapshot(state, snapshot) {
-    if (!state || !snapshot) {
-      return;
-    }
-
-    ironOre = snapshot.counters.ironOre;
-    ironBar = snapshot.counters.ironBar;
-    ironPlate = snapshot.counters.ironPlate;
-    copperOre = snapshot.counters.copperOre;
-    copperBar = snapshot.counters.copperBar;
-    copperPlate = snapshot.counters.copperPlate;
-    copperWire = snapshot.counters.copperWire;
-    helium = snapshot.counters.helium;
-    rocketFuel = snapshot.counters.rocketFuel;
-    modularComponent = snapshot.counters.modularComponent;
-    shipAlloy = snapshot.counters.shipAlloy;
-    electronics = snapshot.counters.electronics;
-
-    state.entities.length = 0;
-    for (const entity of snapshot.entities) {
-      state.entities.push(cloneEntityForSnapshot(entity));
-    }
-
-    const entityById = new Map(state.entities.map((entity) => [entity.id, entity]));
-    for (let y = 0; y < state.map.tiles.length; y++) {
-      for (let x = 0; x < state.map.tiles[y].length; x++) {
-        const tileSnapshot = snapshot.tiles[y][x];
-        state.map.tiles[y][x] = {
-          ...tileSnapshot,
-          entity: tileSnapshot.entityId != null ? entityById.get(tileSnapshot.entityId) || null : null
-        };
-      }
-    }
-
-    state.shuttleEntityId = snapshot.shuttleEntityId;
-    state.selectedBuilding = cloneDevData(snapshot.selectedBuilding);
-    state.feedback = cloneDevData(snapshot.feedback);
-  }
-
-  function showDevSkipFeedback(messageText) {
-    if (!drawGame.state || !drawGame.state.feedback) {
-      return;
-    }
-    const feedback = drawGame.state.feedback;
-    feedback.buildCostMessageText = String(messageText || "Dev skip updated.");
-    feedback.buildCostMessageUntil = millis() + 2400;
-    feedback.buildCostBlinkUntil = 0;
-    feedback.buildCostEntityType = null;
-  }
-
-  function setTileResourceNodeForDevSkip(state, col, row, nodeKey) {
-    const tile = state?.map?.tiles?.[row]?.[col];
-    if (!tile) {
-      throw new Error(`Cannot mark resource at (${col},${row})`);
-    }
-
-    tile.type = nodeKey;
-    if (nodeKey === "iron") {
-      tile.resource = RESOURCE_TYPES.IRON_ORE;
-    } else if (nodeKey === "copper") {
-      tile.resource = RESOURCE_TYPES.COPPER_ORE;
-    } else if (nodeKey === "helium3") {
-      tile.resource = RESOURCE_TYPES.HELIUM3;
-    } else {
-      tile.resource = null;
-    }
-  }
-
-  function resetRestrictedDevLayoutState(state) {
-    if (!state || !state.map || !Array.isArray(state.entities)) {
-      throw new Error("Invalid game state for dev reset.");
-    }
-
-    const mapRows = state.map.tiles.length;
-    const mapCols = mapRows > 0 ? state.map.tiles[0].length : 0;
-    for (let y = 0; y < mapRows; y++) {
-      for (let x = 0; x < mapCols; x++) {
-        const tile = state.map.tiles[y][x];
-        tile.entityId = null;
-        tile.entity = null;
-        tile.item = null;
-        tile.colorOverride = null;
-        tile.building = null;
-      }
-    }
-
-    let shuttle = getRestrictedModeShuttleEntity();
-    if (!shuttle || shuttle.type !== ENTITY_TYPES.SHUTTLE) {
-      shuttle = state.entities.find((entity) => entity.type === ENTITY_TYPES.SHUTTLE) || null;
-    }
-
-    state.entities.length = 0;
-    if (!shuttle) {
-      state.shuttleEntityId = null;
-      spawnRestrictedModeShuttle(state);
-      shuttle = getRestrictedModeShuttleEntity();
-      if (!shuttle) {
-        throw new Error("Failed to spawn shuttle for restricted skip.");
-      }
-    } else {
-      shuttle.state.facing = shuttle.state.facing || "E";
-      state.entities.push(shuttle);
-      state.shuttleEntityId = shuttle.id;
-
-      const footprintTiles = getSafeFootprintTilesAt(
-        ENTITY_TYPES.SHUTTLE,
-        shuttle.tileX,
-        shuttle.tileY
+  function getRecipeInputCountOrThrow(outputType, inputType) {
+    const recipe = getRecipeOrThrow(outputType);
+    const ingredient = (recipe.inputs || []).find((entry) => entry && entry.type === inputType);
+    if (!ingredient) {
+      throw new Error(
+        `Missing input ${String(inputType)} in recipe for ${String(outputType)}`
       );
-      for (const entry of footprintTiles) {
-        const tile = state.map.tiles[entry.y] && state.map.tiles[entry.y][entry.x];
-        if (!tile) {
-          throw new Error("Shuttle footprint is out of bounds.");
-        }
-        tile.entityId = shuttle.id;
-        tile.entity = shuttle;
-        tile.item = ENTITY_TYPES.SHUTTLE;
-        tile.colorOverride = null;
-      }
-
-      const centerTile = state.map.tiles[shuttle.tileY] && state.map.tiles[shuttle.tileY][shuttle.tileX];
-      if (!centerTile) {
-        throw new Error("Shuttle center tile is invalid.");
-      }
-      centerTile.building = {
-        color: getEntityFillRgb(ENTITY_TYPES.SHUTTLE),
-        label: getEntityShortLabel(ENTITY_TYPES.SHUTTLE),
-        name: "Crashed Shuttle",
-        entityType: ENTITY_TYPES.SHUTTLE,
-        facing: shuttle.state.facing,
-        entityId: shuttle.id
-      };
     }
-
-    ironOre = 0;
-    ironBar = 0;
-    ironPlate = 0;
-    copperOre = 0;
-    copperBar = 0;
-    copperPlate = 0;
-    copperWire = 0;
-    helium = 0;
-    rocketFuel = 0;
-    modularComponent = 0;
-    shipAlloy = 0;
-    electronics = 0;
-
-    if (!shuttle.state || typeof shuttle.state !== "object") {
-      throw new Error("Shuttle state missing.");
+    const count = Number(ingredient.count);
+    if (!Number.isFinite(count) || count <= 0) {
+      throw new Error(`Invalid recipe input count for ${String(outputType)} -> ${String(inputType)}`);
     }
-    shuttle.state.inventory = {};
-    for (const resourceType of Object.values(RESOURCE_TYPES)) {
-      shuttle.state.inventory[resourceType] = 0;
-    }
-    shuttle.state.pipeIntakeAccumulators = {};
-
-    state.selectedBuilding = null;
-    if (state.feedback) {
-      state.feedback.buildCostBlinkUntil = 0;
-      state.feedback.buildCostEntityType = null;
-      state.feedback.buildCostMessageText = "";
-      state.feedback.buildCostMessageUntil = 0;
-    }
-
-    updateConnections(state.entities);
-    return shuttle;
+    return count;
   }
 
-  function placeDevEntity(type, tileX, tileY, options = {}) {
-    const state = drawGame.state;
-    if (!state || !state.map || !state.config || !Array.isArray(state.entities)) {
-      throw new Error("Cannot place dev entity without active game state.");
+  function normalizeDirection(dx, dy) {
+    const nx = Math.sign(dx);
+    const ny = Math.sign(dy);
+    if (nx !== 0 && ny !== 0) {
+      throw new Error(`Diagonal direction is unsupported: (${dx}, ${dy})`);
+    }
+    if (nx === 0 && ny === 0) {
+      throw new Error("Zero direction is unsupported.");
+    }
+    return { x: nx, y: ny };
+  }
+
+  function directionBetween(fromX, fromY, toX, toY) {
+    return normalizeDirection(toX - fromX, toY - fromY);
+  }
+
+  function getFootprintTilesAt(entityType, tileX, tileY) {
+    if (typeof getSafeFootprintTilesAt === "function") {
+      return getSafeFootprintTilesAt(entityType, tileX, tileY);
+    }
+    if (typeof getEntityFootprintTilesAt === "function") {
+      return getEntityFootprintTilesAt(entityType, tileX, tileY);
+    }
+    return [{ x: tileX, y: tileY }];
+  }
+
+  function isInsideMap(state, x, y) {
+    const rows = state.map && state.map.tiles ? state.map.tiles.length : 0;
+    const cols = rows > 0 && Array.isArray(state.map.tiles[0]) ? state.map.tiles[0].length : 0;
+    return x >= 0 && y >= 0 && x < cols && y < rows;
+  }
+
+  function tileAt(state, x, y) {
+    return state.map.tiles[y] && state.map.tiles[y][x];
+  }
+
+  function clearTileOccupancy(tile) {
+    tile.entityId = null;
+    tile.entity = null;
+    tile.item = null;
+    tile.colorOverride = null;
+    tile.building = null;
+  }
+
+  function clearNonShuttleEntities(state, shuttleId) {
+    const rows = state.map.tiles.length;
+    const cols = rows > 0 ? state.map.tiles[0].length : 0;
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const tile = state.map.tiles[y][x];
+        if (tile.entityId === shuttleId) {
+          if (tile.building && tile.building.entityId !== shuttleId) {
+            tile.building = null;
+          }
+          continue;
+        }
+        clearTileOccupancy(tile);
+      }
     }
 
-    const { mapCols, mapRows } = state.config;
-    const footprintTiles = getSafeFootprintTilesAt(type, tileX, tileY);
-    for (const entry of footprintTiles) {
-      if (
-        entry.x < 0 ||
-        entry.x >= mapCols ||
-        entry.y < 0 ||
-        entry.y >= mapRows
-      ) {
-        throw new Error(`Placement out of bounds for ${type} at (${tileX},${tileY}).`);
+    state.entities = state.entities.filter((entity) => entity.id === shuttleId);
+    state.selectedBuilding = null;
+  }
+
+  function getEntityPorts(entity, kind) {
+    if (typeof getEntityConnectionPorts !== "function") {
+      throw new Error("getEntityConnectionPorts is unavailable.");
+    }
+    const ports = getEntityConnectionPorts(entity);
+    const filtered = kind
+      ? ports.filter((port) => port.kind === kind)
+      : ports.slice();
+    filtered.sort((a, b) => {
+      if (a.worldY !== b.worldY) return a.worldY - b.worldY;
+      if (a.worldX !== b.worldX) return a.worldX - b.worldX;
+      const aName = a.name || "";
+      const bName = b.name || "";
+      return aName.localeCompare(bName);
+    });
+    return filtered;
+  }
+
+  function findPortOrThrow(entity, kind, worldX, worldY) {
+    const ports = getEntityPorts(entity, kind);
+    const match = ports.find((port) => port.worldX === worldX && port.worldY === worldY);
+    if (!match) {
+      throw new Error(
+        `No ${kind} port at (${worldX}, ${worldY}) for ${String(entity.type)}#${entity.id}`
+      );
+    }
+    return match;
+  }
+
+  function findPortByIndexOrThrow(entity, kind, index) {
+    const ports = getEntityPorts(entity, kind);
+    if (index < 0 || index >= ports.length) {
+      throw new Error(
+        `Port index out of range for ${String(entity.type)}#${entity.id}: ${kind}[${index}]`
+      );
+    }
+    return ports[index];
+  }
+
+  function stampEntityOnMap(state, entity, buildingName) {
+    const footprint = getFootprintTilesAt(entity.type, entity.tileX, entity.tileY);
+    for (const tilePos of footprint) {
+      if (!isInsideMap(state, tilePos.x, tilePos.y)) {
+        throw new Error(
+          `Footprint out of bounds for ${String(entity.type)} at (${entity.tileX}, ${entity.tileY})`
+        );
       }
-      const tile = state.map.tiles[entry.y][entry.x];
+      const tile = tileAt(state, tilePos.x, tilePos.y);
       if (tile.entityId != null) {
-        throw new Error(`Placement blocked for ${type} at (${tileX},${tileY}).`);
+        throw new Error(
+          `Tile already occupied at (${tilePos.x}, ${tilePos.y}) while placing ${String(entity.type)}`
+        );
       }
     }
 
-    const anchorTile = state.map.tiles[tileY] && state.map.tiles[tileY][tileX];
-    if (!anchorTile) {
-      throw new Error(`Missing anchor tile at (${tileX},${tileY}).`);
-    }
-
-    const baseOptions =
-      type === ENTITY_TYPES.MINER || type === ENTITY_TYPES.EXTRACTOR
-        ? getPlacementOptionsForTile(type, anchorTile)
-        : getPlacementOptionsForEntity(type, anchorTile);
-    const mergedOptions = {
-      ...(baseOptions || {}),
-      ...(options || {})
-    };
-
-    const entity = createEntity(type, tileX, tileY, mergedOptions);
-    if (mergedOptions.facing) {
-      entity.state.facing = mergedOptions.facing;
-    }
-    if (type === ENTITY_TYPES.TUBE && mergedOptions.shape) {
-      entity.state.shape = mergedOptions.shape;
-    }
-    if (type === ENTITY_TYPES.MINER && typeof entity.state.updateOutputRate === "function") {
-      entity.state.updateOutputRate();
-    }
-
-    state.entities.push(entity);
-    for (const entry of footprintTiles) {
-      const tile = state.map.tiles[entry.y][entry.x];
+    for (const tilePos of footprint) {
+      const tile = tileAt(state, tilePos.x, tilePos.y);
       tile.entityId = entity.id;
       tile.entity = entity;
-      tile.item = type;
+      tile.item = entity.type;
       tile.colorOverride = null;
     }
 
-    anchorTile.building = {
-      color: getEntityFillRgb(type),
-      label: getEntityShortLabel(type),
-      name: options.name || getEntityDisplayName(type),
-      entityType: type,
-      facing: entity.state.facing || "E",
-      entityId: entity.id
-    };
+    const anchor = tileAt(state, entity.tileX, entity.tileY);
+    if (anchor) {
+      const color = typeof getEntityFillRgb === "function"
+        ? getEntityFillRgb(entity.type)
+        : [190, 190, 190];
+      const label = typeof getEntityShortLabel === "function"
+        ? getEntityShortLabel(entity.type)
+        : String(entity.type || "?").slice(0, 2).toUpperCase();
+      anchor.building = {
+        color: color.slice(),
+        label,
+        name: buildingName || label,
+        entityType: entity.type,
+        facing: entity.state && entity.state.facing ? entity.state.facing : "E",
+        entityId: entity.id
+      };
+    }
+  }
 
+  function placeEntityOrThrow(state, type, tileX, tileY, config) {
+    if (typeof createEntity !== "function") {
+      throw new Error("createEntity is unavailable.");
+    }
+    const options = (config && config.options) || {};
+    const facing = (config && config.facing) || "E";
+    const buildingName = (config && config.name) || String(type);
+
+    const entity = createEntity(type, tileX, tileY, options);
+    if (!entity || !entity.state) {
+      throw new Error(`Failed to create entity ${String(type)} at (${tileX}, ${tileY})`);
+    }
+    entity.state.facing = facing;
+
+    stampEntityOnMap(state, entity, buildingName);
+    state.entities.push(entity);
     return entity;
   }
 
-  function getEntityPortTile(entity, kind, index = 0) {
-    const ports = getEntityConnectionPorts(entity).filter((port) => port.kind === kind);
-    if (index < 0 || index >= ports.length) {
-      throw new Error(`Missing ${kind} port index ${index} on entity ${entity?.id}.`);
+  function isWalkableForTube(state, x, y, allowStart, allowEnd) {
+    if (!isInsideMap(state, x, y)) {
+      return false;
     }
-    return {
-      x: ports[index].worldX,
-      y: ports[index].worldY
-    };
+    if (allowStart || allowEnd) {
+      return true;
+    }
+    const tile = tileAt(state, x, y);
+    return tile.entityId == null;
   }
 
-  function vectorKey(vec) {
-    return `${vec.x},${vec.y}`;
-  }
+  function findTubePathOrThrow(state, start, end) {
+    const startKey = `${start.x},${start.y}`;
+    const endKey = `${end.x},${end.y}`;
 
-  function normalizeCardinalVector(vec, label = "vector") {
-    if (!vec || !Number.isFinite(vec.x) || !Number.isFinite(vec.y)) {
-      throw new Error(`Invalid ${label}.`);
-    }
-    const x = Math.sign(vec.x);
-    const y = Math.sign(vec.y);
-    if ((x === 0 && y === 0) || (x !== 0 && y !== 0)) {
-      throw new Error(`Non-cardinal ${label}.`);
-    }
-    return { x, y };
-  }
-
-  function getTubeOptionsForConnectionVectors(vecA, vecB) {
-    const a = normalizeCardinalVector(vecA, "tube vector A");
-    const b = normalizeCardinalVector(vecB, "tube vector B");
-    if (a.x === b.x && a.y === b.y) {
-      throw new Error("Tube vectors cannot point in the same direction.");
+    if (!isInsideMap(state, start.x, start.y) || !isInsideMap(state, end.x, end.y)) {
+      throw new Error("Tube path endpoints are out of map bounds.");
     }
 
-    if (a.x === -b.x && a.y === -b.y) {
-      if (a.y === 0) {
-        return { shape: TUBE_SHAPES.STRAIGHT, facing: "E" };
+    if (start.x === end.x && start.y === end.y) {
+      const tile = tileAt(state, start.x, start.y);
+      if (tile.entityId != null) {
+        throw new Error(`Single-tile tube endpoint is occupied at (${start.x}, ${start.y})`);
       }
-      return { shape: TUBE_SHAPES.STRAIGHT, facing: "N" };
+      return [{ x: start.x, y: start.y }];
     }
 
-    const pair = new Set([vectorKey(a), vectorKey(b)]);
-    if (pair.has("-1,0") && pair.has("0,1")) {
-      return { shape: TUBE_SHAPES.CORNER, facing: "E" };
-    }
-    if (pair.has("0,1") && pair.has("1,0")) {
-      return { shape: TUBE_SHAPES.CORNER, facing: "N" };
-    }
-    if (pair.has("1,0") && pair.has("0,-1")) {
-      return { shape: TUBE_SHAPES.CORNER, facing: "W" };
-    }
-    if (pair.has("0,-1") && pair.has("-1,0")) {
-      return { shape: TUBE_SHAPES.CORNER, facing: "S" };
-    }
+    const queue = [{ x: start.x, y: start.y }];
+    const seen = new Set([startKey]);
+    const previous = new Map();
 
-    throw new Error(`Unsupported tube corner vectors: ${vectorKey(a)} + ${vectorKey(b)}`);
-  }
-
-  function getBlockedPortKeysForRouting(excludedKeys) {
-    const blocked = new Set();
-    if (!drawGame.state || !Array.isArray(drawGame.state.entities)) {
-      return blocked;
-    }
-    const excluded = excludedKeys || new Set();
-    for (const entity of drawGame.state.entities) {
-      const ports = getEntityConnectionPorts(entity);
-      for (const port of ports) {
-        const key = `${port.worldX},${port.worldY}`;
-        if (!excluded.has(key)) {
-          blocked.add(key);
-        }
-      }
-    }
-    return blocked;
-  }
-
-  function findDevTubePath(startTile, endTile, blockedPortKeys) {
-    const state = drawGame.state;
-    const { mapCols, mapRows } = state.config;
-    const map = state.map;
-    const startKey = `${startTile.x},${startTile.y}`;
-    const endKey = `${endTile.x},${endTile.y}`;
-    const blocked = blockedPortKeys || new Set();
-
-    const inBounds = (x, y) =>
-      x >= 0 && x < mapCols && y >= 0 && y < mapRows;
-
-    const canOccupy = (x, y) => {
-      if (!inBounds(x, y)) {
-        return false;
-      }
-      const key = `${x},${y}`;
-      if (key === startKey || key === endKey) {
-        const tile = map.tiles[y][x];
-        return tile && tile.entityId == null;
-      }
-      if (blocked.has(key)) {
-        return false;
-      }
-      const tile = map.tiles[y][x];
-      return !!tile && tile.entityId == null;
-    };
-
-    const queue = [startTile];
-    let head = 0;
-    const visited = new Set([startKey]);
-    const parent = new Map();
-    const directions = [
-      { x: 0, y: -1 },
-      { x: 1, y: 0 },
-      { x: 0, y: 1 },
-      { x: -1, y: 0 }
-    ];
-
-    while (head < queue.length) {
-      const current = queue[head++];
+    while (queue.length > 0) {
+      const current = queue.shift();
       const currentKey = `${current.x},${current.y}`;
       if (currentKey === endKey) {
         break;
       }
-      for (const dir of directions) {
-        const nx = current.x + dir.x;
-        const ny = current.y + dir.y;
-        const nextKey = `${nx},${ny}`;
-        if (visited.has(nextKey) || !canOccupy(nx, ny)) {
+
+      for (const step of CARDINAL_NEIGHBORS) {
+        const nx = current.x + step.x;
+        const ny = current.y + step.y;
+        const key = `${nx},${ny}`;
+        if (seen.has(key)) {
           continue;
         }
-        visited.add(nextKey);
-        parent.set(nextKey, currentKey);
+        const allowStart = key === startKey;
+        const allowEnd = key === endKey;
+        if (!isWalkableForTube(state, nx, ny, allowStart, allowEnd)) {
+          continue;
+        }
+        seen.add(key);
+        previous.set(key, currentKey);
         queue.push({ x: nx, y: ny });
       }
     }
 
-    if (!visited.has(endKey)) {
-      return null;
+    if (!seen.has(endKey)) {
+      throw new Error(`No tube path found from (${start.x}, ${start.y}) to (${end.x}, ${end.y})`);
     }
 
     const path = [];
-    let cursorKey = endKey;
-    while (cursorKey) {
-      const [cx, cy] = cursorKey.split(",").map(Number);
-      path.push({ x: cx, y: cy });
-      if (cursorKey === startKey) {
-        break;
-      }
-      cursorKey = parent.get(cursorKey);
+    let cursor = endKey;
+    while (cursor) {
+      const parts = cursor.split(",");
+      path.push({ x: Number(parts[0]), y: Number(parts[1]) });
+      cursor = previous.get(cursor);
     }
     path.reverse();
     return path;
   }
 
-  function routeAndPlaceTubePath(startTile, endTile, startVectorToEntity, endVectorToEntity) {
-    const start = { x: startTile.x, y: startTile.y };
-    const end = { x: endTile.x, y: endTile.y };
-    const startVector = normalizeCardinalVector(startVectorToEntity, "start vector");
-    const endVector = normalizeCardinalVector(endVectorToEntity, "end vector");
+  function setMatchesDirectionPair(offsetA, offsetB, dirA, dirB) {
+    const a = `${offsetA.x},${offsetA.y}`;
+    const b = `${offsetB.x},${offsetB.y}`;
+    const d1 = `${dirA.x},${dirA.y}`;
+    const d2 = `${dirB.x},${dirB.y}`;
+    return (a === d1 && b === d2) || (a === d2 && b === d1);
+  }
 
-    const excludedPortKeys = new Set([
-      `${start.x},${start.y}`,
-      `${end.x},${end.y}`
-    ]);
-    const blockedPortKeys = getBlockedPortKeysForRouting(excludedPortKeys);
-    const path = findDevTubePath(start, end, blockedPortKeys);
-    if (!path || path.length === 0) {
-      throw new Error(
-        `No tube path found from (${start.x},${start.y}) to (${end.x},${end.y}).`
-      );
+  function getTubeConfigForDirectionsOrThrow(dirA, dirB) {
+    if (typeof rotateOffsetFromEast !== "function" || typeof TUBE_PORT_DEFS === "undefined") {
+      throw new Error("Tube orientation helpers are unavailable.");
     }
 
-    const placed = [];
+    const facings = ["E", "S", "W", "N"];
+    const shapes = [TUBE_SHAPES.STRAIGHT, TUBE_SHAPES.CORNER];
+    for (const shape of shapes) {
+      const def = TUBE_PORT_DEFS[shape];
+      for (const facing of facings) {
+        const inputOffset = rotateOffsetFromEast(def.input, facing);
+        const outputOffset = rotateOffsetFromEast(def.output, facing);
+        if (setMatchesDirectionPair(inputOffset, outputOffset, dirA, dirB)) {
+          return { shape, facing };
+        }
+      }
+    }
+
+    throw new Error(
+      `Unable to orient tube for directions (${dirA.x},${dirA.y}) and (${dirB.x},${dirB.y})`
+    );
+  }
+
+  function placeTubePathBetweenPortsOrThrow(state, sourceEntity, sourcePort, sinkEntity, sinkPort) {
+    const start = { x: sourcePort.worldX, y: sourcePort.worldY };
+    const end = { x: sinkPort.worldX, y: sinkPort.worldY };
+
+    const path = findTubePathOrThrow(state, start, end);
+    const lastIndex = path.length - 1;
+
     for (let i = 0; i < path.length; i++) {
       const current = path[i];
-      const backVector = i === 0
-        ? startVector
-        : {
-            x: path[i - 1].x - current.x,
-            y: path[i - 1].y - current.y
-          };
-      const forwardVector = i === path.length - 1
-        ? endVector
-        : {
-            x: path[i + 1].x - current.x,
-            y: path[i + 1].y - current.y
-          };
 
-      const tubeOptions = getTubeOptionsForConnectionVectors(backVector, forwardVector);
-      const tube = placeDevEntity(ENTITY_TYPES.TUBE, current.x, current.y, {
-        shape: tubeOptions.shape,
-        facing: tubeOptions.facing
+      let dirOne;
+      let dirTwo;
+
+      if (i === 0) {
+        dirOne = directionBetween(current.x, current.y, sourceEntity.tileX, sourceEntity.tileY);
+        dirTwo = (path.length === 1)
+          ? directionBetween(current.x, current.y, sinkEntity.tileX, sinkEntity.tileY)
+          : directionBetween(current.x, current.y, path[i + 1].x, path[i + 1].y);
+      } else if (i === lastIndex) {
+        dirOne = directionBetween(current.x, current.y, path[i - 1].x, path[i - 1].y);
+        dirTwo = directionBetween(current.x, current.y, sinkEntity.tileX, sinkEntity.tileY);
+      } else {
+        dirOne = directionBetween(current.x, current.y, path[i - 1].x, path[i - 1].y);
+        dirTwo = directionBetween(current.x, current.y, path[i + 1].x, path[i + 1].y);
+      }
+
+      const tubeConfig = getTubeConfigForDirectionsOrThrow(dirOne, dirTwo);
+      placeEntityOrThrow(state, ENTITY_TYPES.TUBE, current.x, current.y, {
+        facing: tubeConfig.facing,
+        options: { shape: tubeConfig.shape, facing: tubeConfig.facing },
+        name: "Tube"
       });
-      placed.push(tube);
     }
-
-    return placed;
   }
 
-  function connectOutputToInput(sourceEntity, sinkEntity, sinkInputIndex = 0) {
-    const startPort = getEntityPortTile(sourceEntity, "output", 0);
-    const endPort = getEntityPortTile(sinkEntity, "input", sinkInputIndex);
-    const startVectorToEntity = {
-      x: sourceEntity.tileX - startPort.x,
-      y: sourceEntity.tileY - startPort.y
-    };
-    const endVectorToEntity = {
-      x: sinkEntity.tileX - endPort.x,
-      y: sinkEntity.tileY - endPort.y
-    };
-    return routeAndPlaceTubePath(
-      startPort,
-      endPort,
-      startVectorToEntity,
-      endVectorToEntity
-    );
+  function connectEntitiesByPortIndexOrThrow(
+    state,
+    sourceEntity,
+    sourceKind,
+    sourceIndex,
+    sinkEntity,
+    sinkKind,
+    sinkIndex
+  ) {
+    const sourcePort = findPortByIndexOrThrow(sourceEntity, sourceKind, sourceIndex);
+    const sinkPort = findPortByIndexOrThrow(sinkEntity, sinkKind, sinkIndex);
+    placeTubePathBetweenPortsOrThrow(state, sourceEntity, sourcePort, sinkEntity, sinkPort);
   }
 
-  function connectOutputToShuttlePort(sourceEntity, shuttleEntity, shuttlePortIndex = 0) {
-    return connectOutputToInput(sourceEntity, shuttleEntity, shuttlePortIndex);
+  function connectEntitiesByPortCoordinateOrThrow(
+    state,
+    sourceEntity,
+    sourceKind,
+    sourcePortX,
+    sourcePortY,
+    sinkEntity,
+    sinkKind,
+    sinkPortX,
+    sinkPortY
+  ) {
+    const sourcePort = findPortOrThrow(sourceEntity, sourceKind, sourcePortX, sourcePortY);
+    const sinkPort = findPortOrThrow(sinkEntity, sinkKind, sinkPortX, sinkPortY);
+    placeTubePathBetweenPortsOrThrow(state, sourceEntity, sourcePort, sinkEntity, sinkPort);
   }
 
-  function validateRestrictedLateGameSkip(state, shuttle) {
-    if (!state || !shuttle) {
-      return { ok: false, reason: "Missing state or shuttle." };
+  function ensureMineableNodeOrThrow(state, x, y) {
+    const tile = tileAt(state, x, y);
+    if (!tile) {
+      throw new Error(`Missing tile at (${x}, ${y})`);
+    }
+    if (typeof isMineableTile === "function" && isMineableTile(tile.type)) {
+      return;
+    }
+    throw new Error(`Tile (${x}, ${y}) is not a mineable node (type=${String(tile.type)})`);
+  }
+
+  function inferNodeResourceOrThrow(state, x, y) {
+    const tile = tileAt(state, x, y);
+    if (!tile) {
+      throw new Error(`Missing tile at (${x}, ${y})`);
+    }
+    if (typeof getResourceTypeForTile === "function") {
+      const value = getResourceTypeForTile(tile);
+      if (value) return value;
+    }
+    if (typeof getResourceForTileType === "function") {
+      const value = getResourceForTileType(tile.type);
+      if (value) return value;
+    }
+    if (tile.resource) {
+      return tile.resource;
+    }
+    throw new Error(`Unable to infer resource type for node at (${x}, ${y})`);
+  }
+
+  function configureDebugMinerOutput(entity, outputType, outputRate) {
+    if (!entity || entity.type !== ENTITY_TYPES.MINER || !entity.state) {
+      throw new Error("configureDebugMinerOutput expects a miner entity.");
     }
 
-    const incoming = getIncomingTubeInputs(state.entities, shuttle.id);
-    const hasIronPlateIncoming = incoming.some(
-      (entry) =>
-        entry.outputType === RESOURCE_TYPES.IRON_PLATE &&
-        (Number(entry.rate) || 0) > 0
-    );
-    const hasCopperPlateIncoming = incoming.some(
-      (entry) =>
-        entry.outputType === RESOURCE_TYPES.COPPER_PLATE &&
-        (Number(entry.rate) || 0) > 0
-    );
-    if (!hasIronPlateIncoming || !hasCopperPlateIncoming) {
-      return {
-        ok: false,
-        reason: "Shuttle is not receiving both iron plate and copper plate."
-      };
-    }
+    entity.state.isOn = true;
+    entity.state.isActive = true;
+    entity.state.isBroken = false;
+    entity.state.outputType = outputType;
+    entity.state.outputRate = outputRate;
+    entity.state.harvestAccumulator = 0;
+  }
 
-    const activeConstructors = state.entities.filter(
-      (entity) =>
-        entity.type === ENTITY_TYPES.CONSTRUCTOR &&
-        entity.state &&
-        entity.state.isActive &&
-        entity.state.outputType
+  function findExistingShuttleEntity(state) {
+    if (!state || !Array.isArray(state.entities)) {
+      return null;
+    }
+    if (state.shuttleEntityId != null) {
+      const byId = state.entities.find((entity) => entity.id === state.shuttleEntityId);
+      if (byId && byId.type === ENTITY_TYPES.SHUTTLE) {
+        return byId;
+      }
+    }
+    return state.entities.find((entity) => entity.type === ENTITY_TYPES.SHUTTLE) || null;
+  }
+
+  function ensureShuttleOrThrow(state) {
+    let shuttle = findExistingShuttleEntity(state);
+    if (!shuttle && typeof spawnRestrictedModeShuttle === "function") {
+      spawnRestrictedModeShuttle(state);
+      shuttle = findExistingShuttleEntity(state);
+    }
+    if (!shuttle) {
+      throw new Error("Restricted shuttle entity is missing.");
+    }
+    state.shuttleEntityId = shuttle.id;
+    return shuttle;
+  }
+
+  function buildRestrictedLateGameCheckpointOrThrow(state) {
+    const ironPlateBarCount = getRecipeInputCountOrThrow(
+      RESOURCE_TYPES.IRON_PLATE,
+      RESOURCE_TYPES.IRON_BAR
     );
-    const activeOutputs = new Set(
-      activeConstructors.map((entity) => entity.state.outputType)
+    const copperPlateBarCount = getRecipeInputCountOrThrow(
+      RESOURCE_TYPES.COPPER_PLATE,
+      RESOURCE_TYPES.COPPER_BAR
     );
-    const requiredOutputs = [
-      RESOURCE_TYPES.MODULAR_COMPONENT,
+    const electronicsWireCount = getRecipeInputCountOrThrow(
+      RESOURCE_TYPES.ELECTRONICS,
+      RESOURCE_TYPES.COPPER_WIRE
+    );
+    const electronicsModularCount = getRecipeInputCountOrThrow(
+      RESOURCE_TYPES.ELECTRONICS,
+      RESOURCE_TYPES.MODULAR_COMPONENT
+    );
+    const shipAlloyCopperPlateCount = getRecipeInputCountOrThrow(
       RESOURCE_TYPES.SHIP_ALLOY,
-      RESOURCE_TYPES.ELECTRONICS
-    ];
-    const missingOutputs = requiredOutputs.filter(
-      (outputType) => !activeOutputs.has(outputType)
+      RESOURCE_TYPES.COPPER_PLATE
     );
-    if (missingOutputs.length > 0) {
-      return {
-        ok: false,
-        reason: `Missing active outputs: ${missingOutputs.join(", ")}`
-      };
+    const shipAlloyIronPlateCount = getRecipeInputCountOrThrow(
+      RESOURCE_TYPES.SHIP_ALLOY,
+      RESOURCE_TYPES.IRON_PLATE
+    );
+    const smelterOrePerBar = 2;
+
+    const shuttle = ensureShuttleOrThrow(state);
+    clearNonShuttleEntities(state, shuttle.id);
+
+    // Real ore->bar lines into the shuttle.
+    ensureMineableNodeOrThrow(state, 18, 10);
+    ensureMineableNodeOrThrow(state, 31, 10);
+
+    const ironMiner = placeEntityOrThrow(state, ENTITY_TYPES.MINER, 18, 10, {
+      facing: "E",
+      options: {
+        resourceType: inferNodeResourceOrThrow(state, 18, 10),
+        isOnResourceNode: true
+      },
+      name: "Iron Miner"
+    });
+    const ironSmelter = placeEntityOrThrow(state, ENTITY_TYPES.SMELTER, 20, 10, {
+      facing: "E",
+      name: "Iron Smelter"
+    });
+    connectEntitiesByPortIndexOrThrow(state, ironMiner, "output", 0, ironSmelter, "input", 0);
+    connectEntitiesByPortCoordinateOrThrow(
+      state,
+      ironSmelter,
+      "output",
+      21,
+      10,
+      shuttle,
+      "input",
+      23,
+      6
+    );
+
+    const copperMiner = placeEntityOrThrow(state, ENTITY_TYPES.MINER, 31, 10, {
+      facing: "W",
+      options: {
+        resourceType: inferNodeResourceOrThrow(state, 31, 10),
+        isOnResourceNode: true
+      },
+      name: "Copper Miner"
+    });
+    const copperSmelter = placeEntityOrThrow(state, ENTITY_TYPES.SMELTER, 29, 10, {
+      facing: "W",
+      name: "Copper Smelter"
+    });
+    connectEntitiesByPortIndexOrThrow(state, copperMiner, "output", 0, copperSmelter, "input", 0);
+    connectEntitiesByPortCoordinateOrThrow(
+      state,
+      copperSmelter,
+      "output",
+      28,
+      10,
+      shuttle,
+      "input",
+      27,
+      6
+    );
+
+    // Debug miner source nodes for plate/electronics/ship-alloy recipe-rate feeds.
+    ensureMineableNodeOrThrow(state, 13, 24); // iron
+    ensureMineableNodeOrThrow(state, 16, 24); // iron
+    ensureMineableNodeOrThrow(state, 17, 24); // iron
+    ensureMineableNodeOrThrow(state, 33, 24); // copper
+    ensureMineableNodeOrThrow(state, 34, 24); // copper
+    ensureMineableNodeOrThrow(state, 37, 24); // copper
+
+    const ironBarPlateFeed = placeEntityOrThrow(state, ENTITY_TYPES.MINER, 13, 24, {
+      facing: "S",
+      options: {
+        resourceType: inferNodeResourceOrThrow(state, 13, 24),
+        isOnResourceNode: true
+      },
+      name: "Iron Bar Feed"
+    });
+    configureDebugMinerOutput(ironBarPlateFeed, RESOURCE_TYPES.IRON_BAR, ironPlateBarCount);
+
+    const copperBarPlateFeed = placeEntityOrThrow(state, ENTITY_TYPES.MINER, 37, 24, {
+      facing: "S",
+      options: {
+        resourceType: inferNodeResourceOrThrow(state, 37, 24),
+        isOnResourceNode: true
+      },
+      name: "Copper Bar Feed"
+    });
+    configureDebugMinerOutput(copperBarPlateFeed, RESOURCE_TYPES.COPPER_BAR, copperPlateBarCount);
+
+    const modularFeed = placeEntityOrThrow(state, ENTITY_TYPES.MINER, 17, 24, {
+      facing: "S",
+      options: {
+        resourceType: inferNodeResourceOrThrow(state, 17, 24),
+        isOnResourceNode: true
+      },
+      name: "Modular Feed"
+    });
+    configureDebugMinerOutput(modularFeed, RESOURCE_TYPES.MODULAR_COMPONENT, electronicsModularCount);
+
+    const wireFeed = placeEntityOrThrow(state, ENTITY_TYPES.MINER, 33, 24, {
+      facing: "S",
+      options: {
+        resourceType: inferNodeResourceOrThrow(state, 33, 24),
+        isOnResourceNode: true
+      },
+      name: "Wire Feed"
+    });
+    configureDebugMinerOutput(wireFeed, RESOURCE_TYPES.COPPER_WIRE, electronicsWireCount);
+
+    const ironPlateShipFeed = placeEntityOrThrow(state, ENTITY_TYPES.MINER, 16, 24, {
+      facing: "S",
+      options: {
+        resourceType: inferNodeResourceOrThrow(state, 16, 24),
+        isOnResourceNode: true
+      },
+      name: "Iron Plate Feed"
+    });
+    configureDebugMinerOutput(
+      ironPlateShipFeed,
+      RESOURCE_TYPES.IRON_PLATE,
+      shipAlloyIronPlateCount
+    );
+
+    const copperPlateShipFeed = placeEntityOrThrow(state, ENTITY_TYPES.MINER, 34, 24, {
+      facing: "S",
+      options: {
+        resourceType: inferNodeResourceOrThrow(state, 34, 24),
+        isOnResourceNode: true
+      },
+      name: "Copper Plate Feed"
+    });
+    configureDebugMinerOutput(
+      copperPlateShipFeed,
+      RESOURCE_TYPES.COPPER_PLATE,
+      shipAlloyCopperPlateCount
+    );
+
+    // Late-stage outputs.
+    const electronicsConstructor = placeEntityOrThrow(state, ENTITY_TYPES.CONSTRUCTOR, 23, 30, {
+      facing: "E",
+      name: "Electronics Constructor"
+    });
+    connectEntitiesByPortIndexOrThrow(
+      state,
+      modularFeed,
+      "output",
+      0,
+      electronicsConstructor,
+      "input",
+      0
+    );
+    connectEntitiesByPortIndexOrThrow(
+      state,
+      wireFeed,
+      "output",
+      0,
+      electronicsConstructor,
+      "input",
+      1
+    );
+
+    const shipAlloyConstructor = placeEntityOrThrow(state, ENTITY_TYPES.CONSTRUCTOR, 27, 30, {
+      facing: "W",
+      name: "Ship Alloy Constructor"
+    });
+    connectEntitiesByPortIndexOrThrow(
+      state,
+      ironPlateShipFeed,
+      "output",
+      0,
+      shipAlloyConstructor,
+      "input",
+      0
+    );
+    connectEntitiesByPortIndexOrThrow(
+      state,
+      copperPlateShipFeed,
+      "output",
+      0,
+      shipAlloyConstructor,
+      "input",
+      1
+    );
+
+    // Plate constructors feeding shuttle (valid 3-bar constructor recipes).
+    const ironPlateConstructor = placeEntityOrThrow(state, ENTITY_TYPES.CONSTRUCTOR, 20, 14, {
+      facing: "E",
+      name: "Iron Plate Constructor"
+    });
+    connectEntitiesByPortIndexOrThrow(
+      state,
+      ironBarPlateFeed,
+      "output",
+      0,
+      ironPlateConstructor,
+      "input",
+      0
+    );
+    connectEntitiesByPortCoordinateOrThrow(
+      state,
+      ironPlateConstructor,
+      "output",
+      21,
+      14,
+      shuttle,
+      "input",
+      25,
+      8
+    );
+
+    const copperPlateConstructor = placeEntityOrThrow(state, ENTITY_TYPES.CONSTRUCTOR, 30, 14, {
+      facing: "W",
+      name: "Copper Plate Constructor"
+    });
+    connectEntitiesByPortIndexOrThrow(
+      state,
+      copperBarPlateFeed,
+      "output",
+      0,
+      copperPlateConstructor,
+      "input",
+      0
+    );
+    connectEntitiesByPortCoordinateOrThrow(
+      state,
+      copperPlateConstructor,
+      "output",
+      29,
+      14,
+      shuttle,
+      "input",
+      25,
+      4
+    );
+
+    if (typeof updateConnections === "function") {
+      updateConnections(state.entities);
     }
 
-    return {
-      ok: true,
-      incoming,
-      activeOutputs: [...activeOutputs]
-    };
+    // Re-assert fixed debug source rates after connection recompute.
+    configureDebugMinerOutput(ironBarPlateFeed, RESOURCE_TYPES.IRON_BAR, ironPlateBarCount);
+    configureDebugMinerOutput(copperBarPlateFeed, RESOURCE_TYPES.COPPER_BAR, copperPlateBarCount);
+    configureDebugMinerOutput(modularFeed, RESOURCE_TYPES.MODULAR_COMPONENT, electronicsModularCount);
+    configureDebugMinerOutput(wireFeed, RESOURCE_TYPES.COPPER_WIRE, electronicsWireCount);
+    configureDebugMinerOutput(
+      ironPlateShipFeed,
+      RESOURCE_TYPES.IRON_PLATE,
+      shipAlloyIronPlateCount
+    );
+    configureDebugMinerOutput(
+      copperPlateShipFeed,
+      RESOURCE_TYPES.COPPER_PLATE,
+      shipAlloyCopperPlateCount
+    );
+
+    // Smelters should stay at valid per-recipe throughput (2 ore -> 1 bar).
+    ironSmelter.state.inputRate = smelterOrePerBar;
+    ironSmelter.state.outputRate = 1;
+    copperSmelter.state.inputRate = smelterOrePerBar;
+    copperSmelter.state.outputRate = 1;
   }
 
   function applyRestrictedLateGameSkip() {
-    if (!drawGame.state || !drawGame.state.isRestrictedMode) {
-      return false;
-    }
-
-    const state = drawGame.state;
-    const snapshot = captureRestrictedSkipSnapshot(state);
-
     try {
-      const shuttle = resetRestrictedDevLayoutState(state);
-
-      setTileResourceNodeForDevSkip(state, 20, 10, "iron");
-      setTileResourceNodeForDevSkip(state, 30, 10, "copper");
-      setTileResourceNodeForDevSkip(state, 13, 24, "iron");
-      setTileResourceNodeForDevSkip(state, 15, 24, "iron");
-      setTileResourceNodeForDevSkip(state, 17, 24, "iron");
-      setTileResourceNodeForDevSkip(state, 33, 24, "copper");
-      setTileResourceNodeForDevSkip(state, 35, 24, "copper");
-      setTileResourceNodeForDevSkip(state, 37, 24, "copper");
-
-      const placed = {};
-      placed.I_M1 = placeDevEntity(ENTITY_TYPES.MINER, 20, 10, { facing: "N" });
-      placed.I_S1 = placeDevEntity(ENTITY_TYPES.SMELTER, 20, 8, { facing: "N" });
-      placed.I_P1 = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 20, 6, { facing: "E" });
-
-      placed.C_M1 = placeDevEntity(ENTITY_TYPES.MINER, 30, 10, { facing: "N" });
-      placed.C_S1 = placeDevEntity(ENTITY_TYPES.SMELTER, 30, 8, { facing: "N" });
-      placed.C_P1 = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 30, 6, { facing: "W" });
-
-      placed.I_M2 = placeDevEntity(ENTITY_TYPES.MINER, 13, 24, { facing: "N" });
-      placed.I_S2 = placeDevEntity(ENTITY_TYPES.SMELTER, 13, 22, { facing: "N" });
-      placed.I_P2 = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 13, 20, { facing: "E" });
-
-      placed.I_M3 = placeDevEntity(ENTITY_TYPES.MINER, 15, 24, { facing: "N" });
-      placed.I_S3 = placeDevEntity(ENTITY_TYPES.SMELTER, 15, 22, { facing: "N" });
-
-      placed.I_M4 = placeDevEntity(ENTITY_TYPES.MINER, 17, 24, { facing: "N" });
-      placed.I_S4 = placeDevEntity(ENTITY_TYPES.SMELTER, 17, 22, { facing: "N" });
-      placed.I_P4 = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 17, 20, { facing: "E" });
-
-      placed.C_M2 = placeDevEntity(ENTITY_TYPES.MINER, 33, 24, { facing: "N" });
-      placed.C_S2 = placeDevEntity(ENTITY_TYPES.SMELTER, 33, 22, { facing: "N" });
-      placed.C_P2 = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 33, 20, { facing: "W" });
-
-      placed.C_M3 = placeDevEntity(ENTITY_TYPES.MINER, 35, 24, { facing: "N" });
-      placed.C_S3 = placeDevEntity(ENTITY_TYPES.SMELTER, 35, 22, { facing: "N" });
-      placed.C_P3 = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 35, 20, { facing: "W" });
-
-      placed.C_M4 = placeDevEntity(ENTITY_TYPES.MINER, 37, 24, { facing: "N" });
-      placed.C_S4 = placeDevEntity(ENTITY_TYPES.SMELTER, 37, 22, { facing: "N" });
-
-      placed.A_MOD = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 15, 18, { facing: "E" });
-      placed.A_SHIP = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 25, 18, { facing: "E" });
-      placed.A_WIRE = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 37, 18, { facing: "W" });
-      placed.A_ELEC = placeDevEntity(ENTITY_TYPES.CONSTRUCTOR, 25, 22, { facing: "E" });
-
-      connectOutputToInput(placed.I_M1, placed.I_S1, 0);
-      connectOutputToInput(placed.I_S1, placed.I_P1, 1);
-      connectOutputToShuttlePort(placed.I_P1, shuttle, 0);
-
-      connectOutputToInput(placed.C_M1, placed.C_S1, 0);
-      connectOutputToInput(placed.C_S1, placed.C_P1, 0);
-      connectOutputToShuttlePort(placed.C_P1, shuttle, 1);
-
-      connectOutputToInput(placed.I_M2, placed.I_S2, 0);
-      connectOutputToInput(placed.I_S2, placed.I_P2, 1);
-      connectOutputToInput(placed.I_M3, placed.I_S3, 0);
-      connectOutputToInput(placed.I_M4, placed.I_S4, 0);
-      connectOutputToInput(placed.I_S4, placed.I_P4, 1);
-
-      connectOutputToInput(placed.C_M2, placed.C_S2, 0);
-      connectOutputToInput(placed.C_S2, placed.C_P2, 0);
-      connectOutputToInput(placed.C_M3, placed.C_S3, 0);
-      connectOutputToInput(placed.C_S3, placed.C_P3, 0);
-      connectOutputToInput(placed.C_M4, placed.C_S4, 0);
-
-      connectOutputToInput(placed.I_S3, placed.A_MOD, 1);
-      connectOutputToInput(placed.I_P2, placed.A_MOD, 0);
-      connectOutputToInput(placed.I_P4, placed.A_SHIP, 1);
-      connectOutputToInput(placed.C_P2, placed.A_SHIP, 0);
-      connectOutputToInput(placed.C_S4, placed.A_WIRE, 0);
-      connectOutputToInput(placed.C_P3, placed.A_WIRE, 1);
-      connectOutputToInput(placed.A_MOD, placed.A_ELEC, 0);
-      connectOutputToInput(placed.A_WIRE, placed.A_ELEC, 1);
-
-      updateConnections(state.entities);
-
-      const validation = validateRestrictedLateGameSkip(state, shuttle);
-      if (!validation.ok) {
-        throw new Error(validation.reason || "Validation failed.");
+      if (!inGameRestrictedState()) {
+        console.warn("DevCheckpoint: restricted mode is required.");
+        return false;
       }
 
-      showDevSkipFeedback("Late-game dev skip applied.");
-      console.log("Restricted late-game skip success:", {
-        placedEntities: Object.keys(placed).length,
-        incoming: validation.incoming,
-        activeOutputs: validation.activeOutputs
-      });
+      const state = getStateOrThrow();
+      buildRestrictedLateGameCheckpointOrThrow(state);
+      console.log("DevCheckpoint: restricted late-game checkpoint applied.");
       return true;
     } catch (error) {
-      restoreRestrictedSkipSnapshot(state, snapshot);
-      updateConnections(state.entities);
-      const message = error && error.message ? error.message : "Unknown skip error.";
-      showDevSkipFeedback(`Dev skip failed: ${message}`);
-      console.error("Restricted late-game skip failed:", error);
+      console.error("DevCheckpoint failed:", error);
       return false;
     }
   }
 
-  return {
+  globalScope.DevCheckpoint = Object.freeze({
     applyRestrictedLateGameSkip
-  };
-})();
+  });
+})(typeof window !== "undefined" ? window : globalThis);
