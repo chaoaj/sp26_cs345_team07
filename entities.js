@@ -49,13 +49,13 @@ const TUBE_SHAPES = {
 
 // Tube port offsets for each shape (defined for east-facing rotation).
 const TUBE_PORT_DEFS = {
-  [TUBE_SHAPES.STRAIGHT]: {
-    input: { x: -1, y: 0 },
-    output: { x: 1, y: 0 }
+  [TUBE_SHAPES.STRAIGHT]: { 
+    input: { x: 0, y: -1 }, 
+    output: { x: 0, y: 1 } 
   },
-  [TUBE_SHAPES.CORNER]: {
-    input: { x: -1, y: 0 },
-    output: { x: 0, y: 1 }
+  [TUBE_SHAPES.CORNER]: { 
+    input: { x: 1, y: 0 }, 
+    output: { x: 0, y: 1 } 
   }
 };
 

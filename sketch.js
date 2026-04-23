@@ -22,8 +22,9 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
+let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg;
+
 let bgTiles = [];
-let pipeCurve1Offimg;
 let stars = [];
 
 let currentDirection = "front";
@@ -51,7 +52,7 @@ function getEntityFillRgb(entityType) {
   if (entityType === ENTITY_TYPES.MINER) return [90, 170, 90];
   if (entityType === ENTITY_TYPES.SMELTER) return [200, 120, 80];
   if (entityType === ENTITY_TYPES.CONSTRUCTOR) return [90, 140, 220];
-  if (entityType === ENTITY_TYPES.TUBE) return [120, 120, 120];
+  //if (entityType === ENTITY_TYPES.TUBE) return [120, 120, 120];
   if (entityType === ENTITY_TYPES.SHUTTLE) return [230, 230, 120];
   if (entityType === ENTITY_TYPES.ROCKET_SITE) return [180, 180, 255];
   if (entityType === ENTITY_TYPES.SPLITTER) return [180, 120, 220];
@@ -94,15 +95,15 @@ function setup() {
   textAlign(CENTER, CENTER);
 
   stars = [];
-  background(0);
-  for (let i = 0; i < 10000; i++) {
+  for (let i = 0; i < 1200; i++) {
     stars.push({
-      x: random(-1000, 2600),
-      y: random(-1000, 2600),
+      x: random(0, 2000), // Random starting seed pool
+      y: random(0, 2000),
       r: random(1, 3),
       alpha: random(100, 255)
     });
   }
+
   startButton = new Button (90, 350, 150, 55, "Start", () => {
     currentState = "GAME";
   });
@@ -127,7 +128,12 @@ function preload() {
   bgTiles[1] = loadImage('resources/tiles/tile2.png');
   bgTiles[2] = loadImage('resources/tiles/tile3.png');
   bgTiles[3] = loadImage('resources/tiles/tile4.png');
-  pipeCurve1Offimg = loadImage('resources/pipes/pipeCurve1Off.png');
+
+  pipeFrontOffImg = loadImage('resources/pipes/pipeFrontOff.png');
+  pipeCurve1OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
+  pipeCurve1OnImg = loadImage('resources/pipes/pipeCurve1On.png');
+  pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
+  pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve1On.png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -397,19 +403,24 @@ function drawGame() {
     floor((cameraY + height - mapOriginY) / tileSize) + 1
   );
 
-  push();
+push();
   noStroke();
+  let wrapW = width + 200;
+  let wrapH = height + 200;
   for (let star of stars) {
-    let sx = star.x - cameraX * 0.2;
-    let sy = star.y - cameraY * 0.2;
-    if (sx > -star.r && sx < width + star.r && sy > -star.r && sy < height + star.r) {
-      fill(255, star.alpha);
-      ellipse(sx, sy, star.r, star.r);
-    }
+    let sx = (star.x - cameraX * 0.2) % wrapW;
+    if (sx < 0) sx += wrapW;
+    sx -= 100;
+    let sy = (star.y - cameraY * 0.2) % wrapH;
+    if (sy < 0) sy += wrapH;
+    sy -= 100;
+    fill(255, star.alpha);
+    ellipse(sx, sy, star.r, star.r);
   }
   pop();
 
   push();
+  // FIXED: Round camera translations to prevent sub-pixel anti-aliasing gaps between tiles
   translate(-Math.round(cameraX), -Math.round(cameraY));
 
   const worldLayer = getOrBuildWorldLayer(drawGame.state);
@@ -440,28 +451,20 @@ function drawGame() {
 
   for (let y = visibleMinRow; y <= visibleMaxRow; y++) {
     for (let x = visibleMinCol; x <= visibleMaxCol; x++) {
-      const tile = map.tiles[y][x];
       const portType = portOverlay.get(`${x},${y}`);
-      const hasBuilding = !!tile.building;
-      if (!hasBuilding && !portType) {
-        continue;
-      }
-
-      if (portType === "output") {
-        fill(70, 200, 90);
-      } else if (portType === "input") {
-        fill(80, 130, 230);
-      } else if (portType === "both") {
-        fill(60, 190, 190);
-      } else {
-        const tileColor = getMiniMapTileColor(tile);
-        fill(tileColor[0], tileColor[1], tileColor[2]);
-      }
-      rect(x * tileSize, y * tileSize, tileSize, tileSize);
-      if (hasBuilding) {
-        const px = x * tileSize;
-        const py = y * tileSize;
-        drawPlacedBuildingLetter(px, py, tileSize, tile.building);
+      
+      // FIXED: Only draw the port connection highlights, and make them semi-transparent so the ground shows through!
+      // We removed the solid box that used to hide the tiles behind buildings.
+      if (portType) {
+        if (portType === "output") {
+          fill(70, 200, 90, 120);
+        } else if (portType === "input") {
+          fill(80, 130, 230, 120);
+        } else if (portType === "both") {
+          fill(60, 190, 190, 120);
+        }
+        noStroke();
+        rect(x * tileSize, y * tileSize, tileSize, tileSize);
       }
     }
   }
@@ -685,33 +688,72 @@ function drawEntities(entities, tileSize, map) {
     const px = entity.tileX * tileSize;
     const py = entity.tileY * tileSize;
 
-    stroke(50);
-    const rgb = getEntityFillRgb(entity.type);
-    fill(rgb[0], rgb[1], rgb[2]);
+    if (entity.type === ENTITY_TYPES.TUBE) {
+      push();
+      translate(px + tileSize / 2, py + tileSize / 2);
+      rotate(facingToAngle(entity.state.facing));
 
-    rect(px + 4, py + 4, tileSize - 8, tileSize - 8, 4);
+      let imgToDraw = null;
+      let isCorner = entity.state.shape === TUBE_SHAPES.CORNER;
+      let isFlowing = !!entity.state.carriedItem;
 
-    if (entity.state.isBroken) {
-      stroke(255, 0, 0);
-      strokeWeight(3);
-      line(px + 6, py + 6, px + tileSize - 6, py + tileSize - 6);
-      line(px + tileSize - 6, py + 6, px + 6, py + tileSize - 6);
-      strokeWeight(1);
+      if (isCorner) {
+        let useCurve2 = (entity.tileX + entity.tileY) % 2 === 0;
+        if (isFlowing) imgToDraw = useCurve2 ? (pipeCurve2OnImg || pipeCurve1OnImg) : pipeCurve1OnImg;
+        else imgToDraw = useCurve2 ? (pipeCurve2OffImg || pipeCurve1OffImg) : pipeCurve1OffImg;
+      } else {
+        imgToDraw = pipeFrontOffImg; 
+      }
+
+      if (imgToDraw && imgToDraw.width > 0) {
+        // FIXED: Explicitly define the number of frames based on the sprite sheet!
+        // pipeFrontOff is 8 frames, the curves are 16 frames. 
+        // This calculates the exact width of a single frame and stops the "2 tubes at a time" bug!
+        let numFrames = (imgToDraw === pipeFrontOffImg) ? 8 : 16;
+        let frameW = imgToDraw.width / numFrames;
+        let frameH = imgToDraw.height;
+        let currentFrame = 0;
+        
+        if (numFrames > 1 && entity.state.isConnected) {
+            currentFrame = Math.floor(millis() / 150) % numFrames;
+        }
+
+        imageMode(CORNER);
+        image(imgToDraw, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
+      } else {
+        stroke(50);
+        fill(120);
+        rect(-tileSize / 2 + 4, -tileSize / 2 + 4, tileSize - 8, tileSize - 8, 4);
+      }
+      pop();
+    } else {
+      // FIXED: Removed the solid grey background square from regular buildings
+      // Only draw the regular entity color square if there are no images
+      stroke(50);
+      const rgb = getEntityFillRgb(entity.type);
+      fill(rgb[0], rgb[1], rgb[2]);
+
+      rect(px + 4, py + 4, tileSize - 8, tileSize - 8, 4);
+
+      if (entity.state.isBroken) {
+        stroke(255, 0, 0);
+        strokeWeight(3);
+        line(px + 6, py + 6, px + tileSize - 6, py + tileSize - 6);
+        line(px + tileSize - 6, py + 6, px + 6, py + tileSize - 6);
+        strokeWeight(1);
+      }
+
+      noStroke();
+      const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
+      fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
+      circle(px + tileSize - 8, py + 8, 8);
+
+      fill(20);
+      noStroke();
+      text(getEntityShortLabel(entity.type), px + tileSize / 2, py + tileSize / 2);
     }
-
-    noStroke();
-    const powerOn =
-      entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
-    fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-    circle(px + tileSize - 8, py + 8, 8);
-
-    // Draw input/output arrows at ports
+    
     drawEntityPorts(entity, tileSize);
-
-    // Draw label
-    fill(20);
-    noStroke();
-    text(getEntityShortLabel(entity.type), px + tileSize / 2, py + tileSize / 2);
   }
 }
 
