@@ -300,7 +300,7 @@ function drawGame() {
       player: {
         x: tileSize * 5,
         y: tileSize * 5,
-        size: 220,
+        size: 54.4,
         speed: 180
       },
       feedback: {
