@@ -1444,24 +1444,24 @@ function drawEntities(entities, tileSize, map) {
       const rgb = getEntityFillRgb(entity.type);
       fill(rgb[0], rgb[1], rgb[2]);
 
-      rect(px + 4, py + 4, tileSize - 8, tileSize - 8, 4);
+      rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
 
       if (entity.state.isBroken) {
         stroke(255, 0, 0);
         strokeWeight(3);
-        line(px + 6, py + 6, px + tileSize - 6, py + tileSize - 6);
-        line(px + tileSize - 6, py + 6, px + 6, py + tileSize - 6);
+        line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
+        line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
         strokeWeight(1);
       }
 
       noStroke();
       const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
       fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-      circle(px + tileSize - 8, py + 8, 8);
+      circle(px + drawWidth - 8, py + 8, 8);
 
       fill(20);
       noStroke();
-      text(getEntityShortLabel(entity.type), px + tileSize / 2, py + tileSize / 2);
+      text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
     }
     
     drawEntityPorts(entity, tileSize);
