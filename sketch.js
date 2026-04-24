@@ -175,6 +175,11 @@ function preload() {
   playerSpriteSheetFrontMove = loadImage('resources/player/pFrontMove.png');
   playerSpriteSheetSideIdle = loadImage('resources/player/pSideIdle.png');
   playerSpriteSheetSideMove = loadImage('resources/player/pSideMove.png');
+  hotbarOutlineImg = loadImage('resources/UI/hotbarFrame.png');
+  copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
+  ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
+  // heliumDepositImg = loadImage();
+  moonTile1 = loadImage('resources/tiles/tile1.png');
 }
 
 function centerCanvas() {
@@ -1690,9 +1695,22 @@ function getOrBuildWorldLayer(state) {
       const tile = map.tiles[y][x];
       const px = x * tileSize;
       const py = y * tileSize;
-      if ((tile.type === "empty" || tile.type === "dirt") && bgTiles[tile.bgIndex] && bgTiles[tile.bgIndex].width > 0) {
-        layer.image(bgTiles[tile.bgIndex], px, py, tileSize, tileSize);
+
+      if (moonTile1) {
+        layer.image(moonTile1, px, py, tileSize, tileSize);
+      }
+
+      // Then draw specific resource node deposit images on top if they exist
+      let depositImg = null; // Reset depositImg for each tile
+      if (tile.type === "iron") depositImg = ironDepositImg;
+      else if (tile.type === "copper") depositImg = copperDepositImg;
+      // else if (tile.type === "helium3") depositImg = heliumDepositImg;
+
+      if (depositImg) {
+        // Draw the image exclusively (this covers the tile area)
+        layer.image(depositImg, px, py, tileSize, tileSize);
       } else {
+        // Draw standard tile background
         const tileColor = getTileBaseColor(tile);
         layer.fill(tileColor[0], tileColor[1], tileColor[2]);
         layer.rect(px, py, tileSize, tileSize);
@@ -3102,6 +3120,19 @@ function drawModificationRangeIndicator(config, feedback) {
 function drawHotbar() {
   push();
   const { slotSize, gap, startX, y } = getHotbarLayout();
+
+  if (hotbarOutlineImg) {
+    const framePadding = 14;
+    const frameW = 320;
+    const frameH = 80;
+    image(
+      hotbarOutlineImg,
+      startX - framePadding,
+      y - 27,
+      frameW,
+      frameH
+    );
+  }
 
   for (let i = 0; i < hotbarSlots; i++) {
     let x = startX + i * (slotSize + gap);
