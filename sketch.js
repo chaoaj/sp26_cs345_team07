@@ -98,8 +98,13 @@ const SIDEBAR_RESOURCE_TYPES = [
   RESOURCE_TYPES.COPPER_WIRE,
   RESOURCE_TYPES.HELIUM3,
   RESOURCE_TYPES.ELECTRONICS,
-  RESOURCE_TYPES.MODULAR_COMPONENT
+  RESOURCE_TYPES.MODULAR_COMPONENT,
+  RESOURCE_TYPES.SHIP_ALLOY,
+  RESOURCE_TYPES.ROCKET_FUEL
 ];
+
+let sidebarScrollOffset = 0;
+let sidebarMaxVisibleItems = 12;
 
 const RESTRICTED_SHUTTLE_COL = 25;
 const RESTRICTED_SHUTTLE_ROW = 6;
@@ -577,8 +582,8 @@ push();
 
   drawMiniMap(map, player, config, feedback);
   backButtonGame.draw();
-  drawSideBar();
   drawHotbar();
+  drawSideBar();
   if (drawGame.state.isRestrictedMode) {
     drawHotbarCostTooltip();
     const drewHologramCostTooltip = drawHologramBuildCostTooltip(hologramTooltipItem);
@@ -847,6 +852,10 @@ function getResourceIconForType(resourceType) {
       return electronicsImg;
     case RESOURCE_TYPES.HELIUM3:
       return heliumImg;
+    case RESOURCE_TYPES.SHIP_ALLOY:
+      return shipAlloyImg;
+    case RESOURCE_TYPES.ROCKET_FUEL:
+      return rocketFuelImg;
     default:
       return null;
   }
@@ -1859,10 +1868,14 @@ function getHoveredSidebarResourceItem() {
 
   const mapY = drawGame.state.config.topMargin;
   const rX = sidebarX + 17.5;
-  const rSize = 35;
-  let rY = mapY + 20;
+  const contentStartY = mapY + 5;
+  const visibleHeight = 490;
+  const itemSpacing = Math.floor(visibleHeight / SIDEBAR_RESOURCE_TYPES.length);
+  const rSize = Math.min(35, itemSpacing - 5);
 
-  for (const resourceType of SIDEBAR_RESOURCE_TYPES) {
+  for (let i = 0; i < SIDEBAR_RESOURCE_TYPES.length; i++) {
+    let rY = contentStartY + i * itemSpacing;
+
     if (
       mouseX >= rX &&
       mouseX <= rX + rSize &&
@@ -1870,11 +1883,10 @@ function getHoveredSidebarResourceItem() {
       mouseY <= rY + rSize
     ) {
       return {
-        resourceType,
-        icon: getResourceIconForType(resourceType)
+        resourceType: SIDEBAR_RESOURCE_TYPES[i],
+        icon: getResourceIconForType(SIDEBAR_RESOURCE_TYPES[i])
       };
     }
-    rY += 40;
   }
 
   return null;
@@ -2006,22 +2018,17 @@ function drawSideBar() {
 
   image(sideBarFrameImg, sidebarX, mapY - 15, sidebarWidth + 7, 510);
 
-  // Clip to map area so sidebar doesn't draw over hotbar or back button
   drawingContext.save();
   drawingContext.beginPath();
   drawingContext.rect(mapX, mapY, mapW, mapH);
   drawingContext.clip();
 
-  // 1. Define our sidebar data dynamically each frame
+  // Restricted mode inventory
   const restrictedInventory = getRestrictedModeShuttleInventory();
   const restrictedMode = !!(drawGame.state && drawGame.state.isRestrictedMode);
   const getCount = (resourceType, fallback) => {
-    if (!restrictedMode) {
-      return fallback;
-    }
-    if (!restrictedInventory) {
-      return 0;
-    }
+    if (!restrictedMode) return fallback;
+    if (!restrictedInventory) return 0;
     const value = Number(restrictedInventory[resourceType]);
     return Number.isFinite(value) ? value : 0;
   };
@@ -2032,33 +2039,37 @@ function drawSideBar() {
     count: getCount(resourceType, getGlobalResourceCount(resourceType))
   }));
 
+  // Fit all items by calculating spacing from available height
+  const contentStartY = mapY + 5;
+  const visibleHeight = 490;
+  const itemSpacing = Math.floor(visibleHeight / sidebarItems.length);
+  const rSize = Math.min(35, itemSpacing - 5);
+
   fill(255, 200, 100);
   noStroke();
-  let h = mapY + 5;
-
-  // 2. Loop through the array directly, removing all the if/else chains
+  
   for (let i = 0; i < sidebarItems.length; i++) {
     let item = sidebarItems[i];
     let rX = sidebarX + 17.5;
-    let rY = h;
-    let rSize = 35;
-    
+    let rY = contentStartY + i * itemSpacing;
+
     // Draw Icon
-    image(item.img, rX, rY, rSize, rSize);
+    if (item.img) {
+      image(item.img, rX, rY, rSize, rSize);
+    }
 
     // Draw Text
     textAlign(RIGHT, BOTTOM);
     let centerX = rX + (rSize / 2) + 17;
     let centerY = rY + (rSize / 2) + 17;
-    
+
     sideBarText(item.count);
     text(item.count, centerX, centerY);
 
-    // Reset styles for next item
+    // Reset styles
     noStroke();
     textStyle(NORMAL);
     fill(255, 200, 100);
-    h += 40;
   }
 
   drawingContext.restore();
