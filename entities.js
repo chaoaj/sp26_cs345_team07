@@ -123,7 +123,11 @@ const ENTITY_PORT_DEFS = {
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.ROCKET_SITE]: [
-    { name: "input", kind: "input", offset: { x: -1, y: 0 } }
+    // 3x5 rocket footprint (centered on entity tile):
+    // ports are on left-middle, right-middle, and bottom-middle ship tiles.
+    { name: RESOURCE_TYPES.ELECTRONICS, kind: "input", offset: { x: -1, y: 0 } },
+    { name: RESOURCE_TYPES.SHIP_ALLOY, kind: "input", offset: { x: 1, y: 0 } },
+    { name: RESOURCE_TYPES.ROCKET_FUEL, kind: "input", offset: { x: 0, y: 2 } }
   ],
   [ENTITY_TYPES.EXTRACTOR]: [
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }

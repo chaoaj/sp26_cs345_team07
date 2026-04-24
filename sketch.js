@@ -27,6 +27,8 @@ let currentAnimation = "idle";
 let currentFrame = 0;
 let facingLeft = false;
 const animationFPS = 10;
+const ROCKET_HALF_WIDTH_TILES = 1;   // 3 tiles wide
+const ROCKET_HALF_HEIGHT_TILES = 2;  // 5 tiles tall
 
 const spriteDimensions = {
   front: {
@@ -154,6 +156,9 @@ function draw() {
   } else if (currentState == "GAME") {
     drawGame();
     hideSettingsUI();
+  } else if (currentState == "ENDGAME") {
+    drawEndGame();
+    hideSettingsUI();
   } else if (currentState == "SETTINGS") {
     drawSettings();
   }
@@ -189,6 +194,38 @@ function drawMenu() {
     2
   );
 
+  pop();
+}
+
+function getRocketFootprintTiles(centerTileX, centerTileY) {
+  const tiles = [];
+  for (let dy = -ROCKET_HALF_HEIGHT_TILES; dy <= ROCKET_HALF_HEIGHT_TILES; dy++) {
+    for (let dx = -ROCKET_HALF_WIDTH_TILES; dx <= ROCKET_HALF_WIDTH_TILES; dx++) {
+      tiles.push({
+        x: centerTileX + dx,
+        y: centerTileY + dy,
+        isCenter: dx === 0 && dy === 0
+      });
+    }
+  }
+  return tiles;
+}
+
+function drawEndGame() {
+  background(20, 28, 44);
+
+  push();
+  fill(235, 242, 255);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(44);
+  text("Rocket Completed!", width / 2, height / 2 - 40);
+  textStyle(NORMAL);
+  textSize(18);
+  text("End-game screen stub", width / 2, height / 2 + 6);
+  textSize(14);
+  fill(200, 214, 245);
+  text("Press Enter, Space, or Esc to return to menu", width / 2, height / 2 + 44);
   pop();
 }
 
@@ -259,6 +296,46 @@ function drawGame() {
     tiles[19][18].type = "helium3";
 
     const entities = [];
+    const rocketTileX = 32;
+    const rocketTileY = 24;
+    const rocketEntity = createEntity(
+      ENTITY_TYPES.ROCKET_SITE,
+      rocketTileX,
+      rocketTileY,
+      {}
+    );
+    rocketEntity.state.facing = "E";
+    rocketEntity.state.isOn = true;
+
+    entities.push(rocketEntity);
+
+    const rocketInputPortSet = new Set(
+      getEntityConnectionPorts(rocketEntity)
+        .filter((port) => port.kind === "input")
+        .map((port) => `${port.worldX},${port.worldY}`)
+    );
+
+    // Occupy a 3x5 footprint centered on the rocket tile.
+    // Leave input-port tiles placeable so tubes can connect on-port.
+    for (const fp of getRocketFootprintTiles(rocketTileX, rocketTileY)) {
+      const row = tiles[fp.y];
+      const tile = row ? row[fp.x] : null;
+      if (!tile) continue;
+      const isRocketInputPort = rocketInputPortSet.has(`${fp.x},${fp.y}`);
+      if (!isRocketInputPort) {
+        tile.entityId = rocketEntity.id;
+        tile.entity = rocketEntity;
+        tile.item = ENTITY_TYPES.ROCKET_SITE;
+      }
+      tile.building = {
+        color: getEntityFillRgb(ENTITY_TYPES.ROCKET_SITE),
+        label: fp.isCenter ? "RO" : "",
+        name: "Rocket Ship",
+        entityType: ENTITY_TYPES.ROCKET_SITE,
+        facing: "E",
+        entityId: rocketEntity.id
+      };
+    }
 
     drawGame.state = {
       config: {
@@ -294,6 +371,8 @@ function drawGame() {
       },
       animationTimer: 0
     };
+
+    updateConnections(entities);
   }
 
   const { config, map, player, feedback, entities } = drawGame.state;
@@ -359,6 +438,10 @@ function drawGame() {
   // --- Miner harvesting tick ---
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
+  if (updateRocketConstructionProgress(entities, dt)) {
+    currentState = "ENDGAME";
+    return;
+  }
 
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
@@ -468,7 +551,7 @@ function drawGame() {
 
   pop();
 
-  drawMiniMap(map, player, config, feedback);
+  drawMiniMap(map, player, config, feedback, entities);
   backButtonGame.draw();
   drawSideBar();
   drawHotbar();
@@ -581,6 +664,80 @@ function updateFactoryProduction(entities, dt) {
   }
 }
 
+function updateRocketConstructionProgress(entities, dt) {
+  const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
+  if (!rocket || !rocket.state) {
+    return false;
+  }
+
+  const rocketState = rocket.state;
+  if (rocketState.completed) {
+    return true;
+  }
+
+  const required = rocketState.required || {};
+  const delivered = rocketState.delivered || {};
+  const rocketPorts = getEntityConnectionPorts(rocket).filter((port) => port.kind === "input");
+  const portByCoord = new Map();
+  for (const port of rocketPorts) {
+    portByCoord.set(`${port.worldX},${port.worldY}`, port.name);
+  }
+
+  const entitiesById = new Map(entities.map((entity) => [entity.id, entity]));
+  const increments = {
+    [RESOURCE_TYPES.ELECTRONICS]: 0,
+    [RESOURCE_TYPES.SHIP_ALLOY]: 0,
+    [RESOURCE_TYPES.ROCKET_FUEL]: 0
+  };
+
+  for (const tube of entities) {
+    if (tube.type !== ENTITY_TYPES.TUBE) continue;
+    if (tube.state?.toEntityId !== rocket.id) continue;
+    if (!(tube.state?.isConnected)) continue;
+
+    const sourceEntity = entitiesById.get(tube.state.fromEntityId);
+    const outputType = sourceEntity?.state?.outputType || tube.state.carriedItem || null;
+    const outputRate = Number(tube.state.outputRate) || 0;
+    if (!outputType || outputRate <= 0) continue;
+
+    const touchedPortNames = new Set();
+    const tubePortTiles = getTubePortTiles(tube);
+    for (const portTile of tubePortTiles) {
+      const portName = portByCoord.get(`${portTile.worldX},${portTile.worldY}`);
+      if (portName) {
+        touchedPortNames.add(portName);
+      }
+    }
+
+    for (const portName of touchedPortNames) {
+      if (portName === outputType && increments[portName] != null) {
+        increments[portName] += outputRate * dt;
+      }
+    }
+  }
+
+  for (const [resourceType, amount] of Object.entries(increments)) {
+    if (amount <= 0 || required[resourceType] == null) continue;
+    const current = Number(delivered[resourceType]) || 0;
+    delivered[resourceType] = min(required[resourceType], current + amount);
+  }
+
+  const requiredTotal = Object.values(required).reduce((sum, value) => sum + Number(value || 0), 0);
+  const deliveredTotal = Object.entries(required).reduce((sum, [type, value]) => {
+    return sum + min(Number(value || 0), Number(delivered[type] || 0));
+  }, 0);
+  rocketState.buildProgress = requiredTotal > 0 ? deliveredTotal / requiredTotal : 0;
+
+  const complete = Object.entries(required).every(([type, value]) => {
+    return Number(delivered[type] || 0) >= Number(value || 0);
+  });
+  rocketState.completed = complete;
+  rocketState.isActive = !complete && deliveredTotal > 0;
+  rocketState.isOn = complete;
+
+  return complete;
+}
+
 function drawPlayerSprite(player, tileSize) {
   const dims = spriteDimensions[currentDirection] &&
                spriteDimensions[currentDirection][currentAnimation];
@@ -652,14 +809,29 @@ function drawEntities(entities, tileSize, map) {
     stroke(50);
     const rgb = getEntityFillRgb(entity.type);
     fill(rgb[0], rgb[1], rgb[2]);
+    let bodyX = px + 4;
+    let bodyY = py + 4;
+    let bodyW = tileSize - 8;
+    let bodyH = tileSize - 8;
+    let labelX = px + tileSize / 2;
+    let labelY = py + tileSize / 2;
 
-    rect(px + 4, py + 4, tileSize - 8, tileSize - 8, 4);
+    if (entity.type === ENTITY_TYPES.ROCKET_SITE) {
+      bodyX = (entity.tileX - ROCKET_HALF_WIDTH_TILES) * tileSize + 4;
+      bodyY = (entity.tileY - ROCKET_HALF_HEIGHT_TILES) * tileSize + 4;
+      bodyW = tileSize * (ROCKET_HALF_WIDTH_TILES * 2 + 1) - 8;
+      bodyH = tileSize * (ROCKET_HALF_HEIGHT_TILES * 2 + 1) - 8;
+      labelX = entity.tileX * tileSize + tileSize / 2;
+      labelY = entity.tileY * tileSize + tileSize / 2;
+    }
+
+    rect(bodyX, bodyY, bodyW, bodyH, 4);
 
     if (entity.state.isBroken) {
       stroke(255, 0, 0);
       strokeWeight(3);
-      line(px + 6, py + 6, px + tileSize - 6, py + tileSize - 6);
-      line(px + tileSize - 6, py + 6, px + 6, py + tileSize - 6);
+      line(bodyX + 2, bodyY + 2, bodyX + bodyW - 2, bodyY + bodyH - 2);
+      line(bodyX + bodyW - 2, bodyY + 2, bodyX + 2, bodyY + bodyH - 2);
       strokeWeight(1);
     }
 
@@ -667,7 +839,7 @@ function drawEntities(entities, tileSize, map) {
     const powerOn =
       entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
     fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-    circle(px + tileSize - 8, py + 8, 8);
+    circle(bodyX + bodyW - 8, bodyY + 8, 8);
 
     // Draw input/output arrows at ports
     drawEntityPorts(entity, tileSize);
@@ -675,7 +847,7 @@ function drawEntities(entities, tileSize, map) {
     // Draw label
     fill(20);
     noStroke();
-    text(getEntityShortLabel(entity.type), px + tileSize / 2, py + tileSize / 2);
+    text(getEntityShortLabel(entity.type), labelX, labelY);
   }
 }
 
@@ -776,7 +948,7 @@ function getEntityShortLabel(type) {
   }
 }
 
-function drawMiniMap(map, player, config, feedback) {
+function drawMiniMap(map, player, config, feedback, entities) {
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
 
   const miniMaxSize = 140;
@@ -797,6 +969,35 @@ function drawMiniMap(map, player, config, feedback) {
     miniTile
   );
   image(minimapLayer, miniX, miniY);
+
+  // Overlay dynamic placed items / buildings (including the pre-placed rocket footprint).
+  noStroke();
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tile = map.tiles[y][x];
+      if (!tile || !tile.building || !tile.building.color) continue;
+      const c = tile.building.color;
+      fill(c[0], c[1], c[2]);
+      rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
+    }
+  }
+
+  // Keep rocket readable on minimap even when some port tiles are occupied by tubes.
+  if (entities && entities.length) {
+    for (const entity of entities) {
+      if (entity.type !== ENTITY_TYPES.ROCKET_SITE) continue;
+      fill(180, 180, 255, 180);
+      const footprint = getRocketFootprintTiles(entity.tileX, entity.tileY);
+      for (const fp of footprint) {
+        rect(
+          miniX + fp.x * miniTile,
+          miniY + fp.y * miniTile,
+          miniTile,
+          miniTile
+        );
+      }
+    }
+  }
 
   noStroke();
   
@@ -1062,6 +1263,10 @@ function pickContrastingTextColor(rgb) {
 }
 
 function drawPlacedBuildingLetter(px, py, tileSize, building) {
+  const label = building.label || building.letter || "";
+  if (!label) {
+    return;
+  }
   const rgb = building.color;
   const tc = pickContrastingTextColor(rgb);
   const cx = px + tileSize / 2;
@@ -1074,7 +1279,7 @@ function drawPlacedBuildingLetter(px, py, tileSize, building) {
   textSize(14);
   textStyle(BOLD);
   textAlign(CENTER, CENTER);
-  text(building.label || building.letter || "??", 0, 0);
+  text(label, 0, 0);
   pop();
   textStyle(NORMAL);
 }
@@ -1349,12 +1554,47 @@ function getPlacedBuildingDisplayName(tile) {
   return et != null ? String(et) : null;
 }
 
-function getMapHoverTooltipLabel(tile) {
-  const buildingName = getPlacedBuildingDisplayName(tile);
+function getRocketPortHoverLabelAtTile(col, row) {
+  if (!drawGame.state) {
+    return null;
+  }
+  const entities = drawGame.state.entities || [];
+  const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
+  if (!rocket) {
+    return null;
+  }
+  const ports = getEntityConnectionPorts(rocket).filter((port) => port.kind === "input");
+  const matched = ports.find((port) => port.worldX === col && port.worldY === row);
+  if (!matched) {
+    return null;
+  }
+
+  if (matched.name === RESOURCE_TYPES.ELECTRONICS) {
+    return "Electronics Port";
+  }
+  if (matched.name === RESOURCE_TYPES.SHIP_ALLOY) {
+    return "Ship Alloy Port";
+  }
+  if (matched.name === RESOURCE_TYPES.ROCKET_FUEL) {
+    return "Rocket Fuel Port";
+  }
+  return "Rocket Port";
+}
+
+function getMapHoverTooltipLabel(hit) {
+  if (!hit) {
+    return null;
+  }
+  const portLabel = getRocketPortHoverLabelAtTile(hit.col, hit.row);
+  if (portLabel) {
+    return portLabel;
+  }
+
+  const buildingName = getPlacedBuildingDisplayName(hit.tile);
   if (buildingName) {
     return buildingName;
   }
-  return getResourceDisplayName(tile);
+  return getResourceDisplayName(hit.tile);
 }
 
 function getResourceDisplayName(tile) {
@@ -1432,7 +1672,7 @@ function drawResourceHoverTooltip() {
   }
 
   const hit = getTileAtScreenPosition(mouseX, mouseY);
-  const label = hit ? getMapHoverTooltipLabel(hit.tile) : null;
+  const label = getMapHoverTooltipLabel(hit);
   if (!label) {
     return;
   }
@@ -1762,6 +2002,13 @@ function getPlacementOptionsForTile(type, tile) {
 
 
 function keyPressed() {
+  if (currentState === "ENDGAME") {
+    if (keyCode === ENTER || key === " " || keyCode === ESCAPE) {
+      currentState = "MENU";
+    }
+    return;
+  }
+
   if (currentState != "GAME") {
     return;
   }
@@ -1852,15 +2099,34 @@ function deleteEntityUnderMouse() {
   }
 
   if (targetId != null) {
+    const targetEntity = entities.find((entry) => entry.id === targetId) || null;
+    // Rocket is pre-placed and should not be removable.
+    if (targetEntity && targetEntity.type === ENTITY_TYPES.ROCKET_SITE) {
+      return;
+    }
+
     const index = entities.findIndex((entry) => entry.id === targetId);
     if (index !== -1) {
       entities.splice(index, 1);
     }
-    hit.tile.entityId = null;
-    hit.tile.item = null;
+
+    for (let y = 0; y < map.tiles.length; y++) {
+      const row = map.tiles[y];
+      for (let x = 0; x < row.length; x++) {
+        const tile = row[x];
+        if (tile.entityId === targetId) {
+          tile.entityId = null;
+          tile.entity = null;
+          tile.item = null;
+        }
+        if (tile.building && tile.building.entityId === targetId) {
+          tile.building = null;
+        }
+      }
+    }
   }
 
-  if (hit.tile.building) {
+  if (targetId == null && hit.tile.building) {
     hit.tile.building = null;
   }
 
@@ -1878,14 +2144,30 @@ function syncTileBuildingFacing(entity) {
   if (!drawGame.state || !entity) {
     return;
   }
-  const tile = drawGame.state.map.tiles[entity.tileY]?.[entity.tileX];
-  if (!tile || !tile.building) {
-    return;
+  const tiles = drawGame.state.map.tiles;
+  let updatedAny = false;
+  for (let y = 0; y < tiles.length; y++) {
+    for (let x = 0; x < tiles[y].length; x++) {
+      const tile = tiles[y][x];
+      if (!tile || !tile.building) continue;
+      if (tile.entityId === entity.id || tile.building.entityId === entity.id) {
+        tile.building.facing = entity.state.facing || "E";
+        updatedAny = true;
+      }
+    }
   }
-  if (tile.entityId !== entity.id) {
-    return;
+
+  // Backward-compatible fallback for single-tile entities without entityId in building metadata.
+  if (!updatedAny) {
+    const tile = drawGame.state.map.tiles[entity.tileY]?.[entity.tileX];
+    if (!tile || !tile.building) {
+      return;
+    }
+    if (tile.entityId !== entity.id) {
+      return;
+    }
+    tile.building.facing = entity.state.facing || "E";
   }
-  tile.building.facing = entity.state.facing || "E";
 }
 
 function repairEntityUnderMouse() {
