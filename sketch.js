@@ -179,7 +179,6 @@ function preload() {
   copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
   ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
   // heliumDepositImg = loadImage();
-  moonTile1 = loadImage('resources/tiles/tile1.png');
 }
 
 function centerCanvas() {
@@ -1696,8 +1695,14 @@ function getOrBuildWorldLayer(state) {
       const px = x * tileSize;
       const py = y * tileSize;
 
-      if (moonTile1) {
-        layer.image(moonTile1, px, py, tileSize, tileSize);
+      const bgIndex = Number.isInteger(tile.bgIndex) ? tile.bgIndex : 0;
+      const baseTileImg = bgTiles[bgIndex] || bgTiles[0] || null;
+      if (baseTileImg && baseTileImg.width > 0) {
+        layer.image(baseTileImg, px, py, tileSize, tileSize);
+      } else {
+        const fallbackColor = getTileBaseColor(tile);
+        layer.fill(fallbackColor[0], fallbackColor[1], fallbackColor[2]);
+        layer.rect(px, py, tileSize, tileSize);
       }
 
       // Then draw specific resource node deposit images on top if they exist
@@ -1707,13 +1712,8 @@ function getOrBuildWorldLayer(state) {
       // else if (tile.type === "helium3") depositImg = heliumDepositImg;
 
       if (depositImg) {
-        // Draw the image exclusively (this covers the tile area)
+        // Draw deposit overlay on top of the base terrain tile.
         layer.image(depositImg, px, py, tileSize, tileSize);
-      } else {
-        // Draw standard tile background
-        const tileColor = getTileBaseColor(tile);
-        layer.fill(tileColor[0], tileColor[1], tileColor[2]);
-        layer.rect(px, py, tileSize, tileSize);
       }
     }
   }
