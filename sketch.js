@@ -3584,7 +3584,7 @@ function getIncomingTubeInputs(entities, targetId) {
 
 function updateSmelterInputs(entities) {
   const EPSILON = 1e-6;
-  const SMELTER_INPUTS_PER_BAR = 2;
+  const SMELTER_VALID_INPUT_RATES = [1, 2];
 
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.SMELTER) continue;
@@ -3603,18 +3603,22 @@ function updateSmelterInputs(entities) {
           0
         )
       : 0;
-    const isExactBatch =
-      !!inputType &&
-      Math.abs(totalRate - SMELTER_INPUTS_PER_BAR) <= EPSILON;
+    const matchedInputRate = !!inputType
+      ? SMELTER_VALID_INPUT_RATES.find(
+          (allowedRate) => Math.abs(totalRate - allowedRate) <= EPSILON
+        )
+      : null;
+    const hasSupportedIntake = matchedInputRate != null;
     const outputType = smelterState.recipes?.get(inputType) || null;
 
     smelterState.inputType = inputType;
     smelterState.currentRecipe = inputType;
-    smelterState.isActive = isExactBatch && !!outputType;
+    smelterState.isActive = hasSupportedIntake && !!outputType;
     smelterState.isOn = smelterState.isActive;
     smelterState.outputType = outputType;
-    smelterState.inputRate = isExactBatch ? SMELTER_INPUTS_PER_BAR : 0;
-    smelterState.outputRate = isExactBatch && outputType ? 1 : 0;
+    // Expose observed intake (1 or 2 ore/sec), while output remains fixed at 1 bar/sec.
+    smelterState.inputRate = hasSupportedIntake ? matchedInputRate : 0;
+    smelterState.outputRate = hasSupportedIntake && outputType ? 1 : 0;
 
     if (!inputType) {
       smelterState.storedInput = 0;
