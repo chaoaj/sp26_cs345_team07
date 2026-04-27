@@ -171,14 +171,14 @@ const ENTITY_PORT_DEFS = {
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.MERGER]: [
-    { name: "input", kind: "input", offset: { x: 0, y: -1 } },
-    { name: "input", kind: "input", offset: { x: 0, y: 1 } },
+    { name: "inputNorth", kind: "input", offset: { x: -1, y: -1 } },
+    { name: "inputSouth", kind: "input", offset: { x: -1, y: 1 } },
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.SPLITTER]: [
     { name: "input", kind: "input", offset: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 0, y: -1 } },
-    { name: "output", kind: "output", offset: { x: 0, y: 1 } }
+    { name: "outputNorth", kind: "output", offset: { x: 1, y: -1 } },
+    { name: "outputSouth", kind: "output", offset: { x: 1, y: 1 } }
   ],
   [ENTITY_TYPES.SHUTTLE]: [
     { name: "inputLeft", kind: "input", offset: { x: -2, y: 0 } },
@@ -195,6 +195,16 @@ const ENTITY_PORT_DEFS = {
 };
 
 const ENTITY_FOOTPRINT_DEFS = {
+  [ENTITY_TYPES.SPLITTER]: [
+    { x: 0, y: -1 },
+    { x: 0, y: 0 },
+    { x: 0, y: 1 }
+  ],
+  [ENTITY_TYPES.MERGER]: [
+    { x: 0, y: -1 },
+    { x: 0, y: 0 },
+    { x: 0, y: 1 }
+  ],
   [ENTITY_TYPES.SHUTTLE]: [
     { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
     { x: -1, y: 0 },  { x: 0, y: 0 },  { x: 1, y: 0 },
@@ -586,6 +596,29 @@ function getTubeConnectionOffsets(tube) {
   return [offsets.input, offsets.output];
 }
 
+function getEntityFootprintOffsetsForFacing(entity) {
+  const facing = entity.state?.facing || "E";
+  const offsets = getEntityFootprintOffsets(entity.type);
+  return offsets.map((offset) => rotateOffsetFromEast(offset, facing));
+}
+
+function getAdjacentFootprintOffsetsFromTube(entity, tubeTileX, tubeTileY) {
+  const footprintOffsets = getEntityFootprintOffsetsForFacing(entity);
+  const adjacentOffsets = new Set();
+
+  for (const offset of footprintOffsets) {
+    const tileX = entity.tileX + offset.x;
+    const tileY = entity.tileY + offset.y;
+    const dx = tileX - tubeTileX;
+    const dy = tileY - tubeTileY;
+    if (Math.abs(dx) + Math.abs(dy) === 1) {
+      adjacentOffsets.add(`${dx},${dy}`);
+    }
+  }
+
+  return adjacentOffsets;
+}
+
 function getTubePortConnections(entities, tube) {
   const offsets = getTubeConnectionOffsets(tube);
   const offsetKeys = new Set(offsets.map((offset) => `${offset.x},${offset.y}`));
@@ -593,17 +626,13 @@ function getTubePortConnections(entities, tube) {
   const connections = [];
 
   for (const match of portMatches) {
-    const dx = match.entity.tileX - tube.tileX;
-    const dy = match.entity.tileY - tube.tileY;
-    const normalizedDx = Math.sign(dx);
-    const normalizedDy = Math.sign(dy);
-    if (
-      (normalizedDx === 0 && normalizedDy === 0) ||
-      (normalizedDx !== 0 && normalizedDy !== 0)
-    ) {
-      continue;
-    }
-    if (offsetKeys.has(`${normalizedDx},${normalizedDy}`)) {
+    const adjacentOffsets = getAdjacentFootprintOffsetsFromTube(
+      match.entity,
+      tube.tileX,
+      tube.tileY
+    );
+    const hasValidOffset = [...adjacentOffsets].some((key) => offsetKeys.has(key));
+    if (hasValidOffset) {
       connections.push({ kind: match.port.kind, entityId: match.entity.id });
     }
   }
@@ -616,17 +645,14 @@ function getTubeEntityOffsetConnections(entities, tube) {
   const offsets = new Set();
 
   for (const match of portMatches) {
-    const dx = match.entity.tileX - tube.tileX;
-    const dy = match.entity.tileY - tube.tileY;
-    const normalizedDx = Math.sign(dx);
-    const normalizedDy = Math.sign(dy);
-    if (
-      (normalizedDx === 0 && normalizedDy === 0) ||
-      (normalizedDx !== 0 && normalizedDy !== 0)
-    ) {
-      continue;
+    const adjacentOffsets = getAdjacentFootprintOffsetsFromTube(
+      match.entity,
+      tube.tileX,
+      tube.tileY
+    );
+    for (const key of adjacentOffsets) {
+      offsets.add(key);
     }
-    offsets.add(`${normalizedDx},${normalizedDy}`);
   }
 
   return offsets;

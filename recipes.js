@@ -63,7 +63,7 @@ const RESOURCE_TOOLTIP_RECIPES = Object.freeze({
     { building: "constructor", ingredients: [{ type: "copperBar", count: 3 }] }
   ],
   copperWire: [
-    { building: "constructor", ingredients: [{ type: "copperPlate", count: 0.33 }] }
+    { building: "constructor", ingredients: [{ type: "copperPlate", count: 2 }, { type: "copperBar", count: 1 }] }
   ],
   electronics: [
     {
@@ -78,8 +78,8 @@ const RESOURCE_TOOLTIP_RECIPES = Object.freeze({
     {
       building: "constructor",
       ingredients: [
-        { type: "copperPlate", count: 2 },
-        { type: "ironPlate", count: 1 }
+        { type: "ironBar", count: 1 },
+        { type: "ironPlate", count: 2 }
       ]
     }
   ],

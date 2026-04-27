@@ -22,7 +22,7 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOnMiniImg, minerSpriteSheetImg;
+let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOnMiniImg, minerSpriteSheetImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
 
 let bgTiles = [];
 let stars = [];
@@ -157,6 +157,12 @@ function preload() {
   pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve1On.png');
   pipeSideOnMiniImg = loadImage('resources/pipes/pipeSideOn.png');
   minerSpriteSheetImg = loadImage('resources/miner/miner.png');
+  splitterFrontImg = loadImage('resources/splitter/merger/splitterFront.png');
+  splitterBackImg = loadImage('resources/splitter/merger/splitterBack.png');
+  splitterSideImg = loadImage('resources/splitter/merger/splitterSide.png');
+  mergerFrontImg = loadImage('resources/splitter/merger/mergerFront.png');
+  mergerBackImg = loadImage('resources/splitter/merger/mergerBack.png');
+  mergerSideImg = loadImage('resources/splitter/merger/mergerSide.png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -1096,7 +1102,7 @@ function addProducedResource(resourceType, count) {
   }
 }
 
-function getSafeFootprintOffsets(entityType) {
+function getSafeFootprintOffsets(entityType, facing = "E") {
   const fallback = [{ x: 0, y: 0 }];
   if (typeof getEntityFootprintOffsets !== "function") {
     return fallback;
@@ -1114,11 +1120,15 @@ function getSafeFootprintOffsets(entityType) {
       Number.isFinite(offset.y)
   );
 
-  return normalized.length > 0 ? normalized : fallback;
+  const baseOffsets = normalized.length > 0 ? normalized : fallback;
+  if (facing !== "E" && typeof rotateOffsetFromEast === "function") {
+    return baseOffsets.map((offset) => rotateOffsetFromEast(offset, facing));
+  }
+  return baseOffsets;
 }
 
-function getSafeFootprintTilesAt(entityType, tileX, tileY) {
-  const offsets = getSafeFootprintOffsets(entityType);
+function getSafeFootprintTilesAt(entityType, tileX, tileY, facing = "E") {
+  const offsets = getSafeFootprintOffsets(entityType, facing);
   return offsets.map((offset) => ({
     x: tileX + offset.x,
     y: tileY + offset.y
@@ -1426,13 +1436,92 @@ function drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, minerSta
   return true;
 }
 
+function getSplitterSpriteForFacing(facing, options = {}) {
+  const preferSideForEast = !!options.preferSideForEast;
+  const dir = facing || "E";
+  if (dir === "E") {
+    if (preferSideForEast) {
+      return splitterSideImg || splitterFrontImg || splitterBackImg || null;
+    }
+    return splitterFrontImg || splitterBackImg || splitterSideImg || null;
+  }
+  if (dir === "W") {
+    return splitterSideImg || splitterBackImg || splitterFrontImg || null;
+  }
+  if (dir === "N") {
+    return splitterFrontImg || splitterBackImg || splitterSideImg || null;
+  }
+  if (dir === "S") {
+    return splitterBackImg || splitterFrontImg || splitterSideImg || null;
+  }
+  return splitterSideImg || splitterFrontImg || splitterBackImg || null;
+}
+
+function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
+  const sprite = getSplitterSpriteForFacing(facing, options);
+  if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
+    return false;
+  }
+
+  const spriteX = px;
+  const spriteY = py;
+  const targetWidth = drawWidth;
+  const targetHeight = drawHeight;
+
+  imageMode(CORNER);
+  tint(255, alpha);
+  image(sprite, spriteX, spriteY, targetWidth, targetHeight);
+  noTint();
+  return true;
+}
+
+function getMergerSpriteForFacing(facing, options = {}) {
+  const preferSideForEast = !!options.preferSideForEast;
+  const dir = facing || "E";
+  if (dir === "E") {
+    if (preferSideForEast) {
+      return mergerSideImg || mergerFrontImg || mergerBackImg || null;
+    }
+    return mergerFrontImg || mergerBackImg || mergerSideImg || null;
+  }
+  if (dir === "W") {
+    return mergerSideImg || mergerBackImg || mergerFrontImg || null;
+  }
+  if (dir === "N") {
+    return mergerFrontImg || mergerBackImg || mergerSideImg || null;
+  }
+  if (dir === "S") {
+    return mergerBackImg || mergerFrontImg || mergerSideImg || null;
+  }
+  return mergerSideImg || mergerFrontImg || mergerBackImg || null;
+}
+
+function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
+  const sprite = getMergerSpriteForFacing(facing, options);
+  if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
+    return false;
+  }
+
+  const spriteX = px;
+  const spriteY = py;
+  const targetWidth = drawWidth;
+  const targetHeight = drawHeight;
+
+  imageMode(CORNER);
+  tint(255, alpha);
+  image(sprite, spriteX, spriteY, targetWidth, targetHeight);
+  noTint();
+  return true;
+}
+
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
   const nowSeconds = millis() / 1000;
 
   for (const entity of entities) {
-    const footprintOffsets = getSafeFootprintOffsets(entity.type);
+    const footprintFacing = entity.state?.facing || "E";
+    const footprintOffsets = getSafeFootprintOffsets(entity.type, footprintFacing);
     let minOffsetX = Infinity;
     let maxOffsetX = -Infinity;
     let minOffsetY = Infinity;
@@ -1493,8 +1582,31 @@ function drawEntities(entities, tileSize, map) {
       const drewMinerSprite =
         entity.type === ENTITY_TYPES.MINER &&
         drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
+      const drewSplitterSprite =
+        entity.type === ENTITY_TYPES.SPLITTER &&
+        drawPlacedSplitterSprite(
+          px,
+          py,
+          drawWidth,
+          drawHeight,
+          entity.state?.facing || "E",
+          255,
+          { preferSideForEast: true }
+        );
+      const drewMergerSprite =
+        entity.type === ENTITY_TYPES.MERGER &&
+        drawPlacedMergerSprite(
+          px,
+          py,
+          drawWidth,
+          drawHeight,
+          entity.state?.facing || "E",
+          255,
+          { preferSideForEast: true }
+        );
+      const drewCustomSprite = drewMinerSprite || drewSplitterSprite || drewMergerSprite;
 
-      if (!drewMinerSprite) {
+      if (!drewCustomSprite) {
         // Regular building fallback rendering when no custom sprite is used.
         stroke(50);
         const rgb = getEntityFillRgb(entity.type);
@@ -1510,14 +1622,14 @@ function drawEntities(entities, tileSize, map) {
         strokeWeight(1);
       }
 
-      if (!drewMinerSprite) {
+      if (!drewCustomSprite) {
         noStroke();
         const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
         fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
         circle(px + drawWidth - 8, py + 8, 8);
       }
 
-      if (!drewMinerSprite) {
+      if (!drewCustomSprite) {
         fill(20);
         noStroke();
         text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
@@ -1639,6 +1751,12 @@ function drawEntityPorts(entity, tileSize) {
   const centerX = entity.tileX * tileSize + tileSize / 2;
   const centerY = entity.tileY * tileSize + tileSize / 2;
   const arrowLen = tileSize * 0.45;
+  const splitterForward = entity.type === ENTITY_TYPES.SPLITTER
+    ? rotateOffsetFromEast({ x: 1, y: 0 }, entity.state?.facing || "E")
+    : null;
+  const mergerForward = entity.type === ENTITY_TYPES.MERGER
+    ? rotateOffsetFromEast({ x: 1, y: 0 }, entity.state?.facing || "E")
+    : null;
 
   for (const port of ports) {
     const forceExposeOutput = shouldExposeConstructorOutputPort(entity, port);
@@ -1660,10 +1778,19 @@ function drawEntityPorts(entity, tileSize) {
     let dirY = dy / len;
 
     if (port.kind === "input") {
-      dirX = -dirX;
-      dirY = -dirY;
+      if (mergerForward) {
+        dirX = mergerForward.x;
+        dirY = mergerForward.y;
+      } else {
+        dirX = -dirX;
+        dirY = -dirY;
+      }
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [255, 210, 0], arrowLen);
     } else if (port.kind === "output") {
+      if (splitterForward) {
+        dirX = splitterForward.x;
+        dirY = splitterForward.y;
+      }
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [230, 60, 60], arrowLen);
       if (forceExposeOutput) {
         drawConstructorOutputItemBadge(
@@ -2554,11 +2681,19 @@ function drawPlacementPorts(
   originX = 0,
   originY = 0,
   baseCol = null,
-  baseRow = null
+  baseRow = null,
+  entityType = null,
+  facing = "E"
 ) {
   const arrowLen = tileSize * 0.45;
   const headLen = 6;
   const headWidth = 6;
+  const splitterForward = entityType === ENTITY_TYPES.SPLITTER
+    ? rotateOffsetFromEast({ x: 1, y: 0 }, facing || "E")
+    : null;
+  const mergerForward = entityType === ENTITY_TYPES.MERGER
+    ? rotateOffsetFromEast({ x: 1, y: 0 }, facing || "E")
+    : null;
 
   const drawArrow = (cx, cy, dirX, dirY, rgb) => {
     const half = arrowLen / 2;
@@ -2605,10 +2740,19 @@ function drawPlacementPorts(
     let dirY = port.offset.y / len;
 
     if (port.kind === "input") {
-      dirX = -dirX;
-      dirY = -dirY;
+      if (mergerForward) {
+        dirX = mergerForward.x;
+        dirY = mergerForward.y;
+      } else {
+        dirX = -dirX;
+        dirY = -dirY;
+      }
       drawArrow(portPx, portPy, dirX, dirY, [255, 165, 0]);
     } else if (port.kind === "output") {
+      if (splitterForward) {
+        dirX = splitterForward.x;
+        dirY = splitterForward.y;
+      }
       drawArrow(portPx, portPy, dirX, dirY, [0, 200, 0]);
     } else if (port.kind === "both") {
       drawArrow(portPx, portPy, dirX, dirY, [60, 190, 190]);
@@ -2669,7 +2813,14 @@ function drawBuildingPlacementHologram(
 ) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
-  const footprintOffsets = getSafeFootprintOffsets(entityType);
+  const previewOptions = {
+    ...(options || {}),
+    facing: facing || ((options && options.facing) || "E")
+  };
+  const previewFacing = previewOptions.facing || "E";
+  const footprintOffsets = getSafeFootprintOffsets(entityType).map((offset) =>
+    rotateOffsetFromEast(offset, previewFacing)
+  );
   let minOffsetX = Infinity;
   let maxOffsetX = -Infinity;
   let minOffsetY = Infinity;
@@ -2687,10 +2838,6 @@ function drawBuildingPlacementHologram(
   const footprintTop = (minOffsetY - 0.5) * tileSize;
   const footprintWidth = footprintWidthTiles * tileSize;
   const footprintHeight = footprintHeightTiles * tileSize;
-  const previewOptions = {
-    ...(options || {}),
-    facing: facing || ((options && options.facing) || "E")
-  };
   const ports = getPlacementPreviewPorts(entityType, previewOptions);
 
   if (ports.length) {
@@ -2699,27 +2846,96 @@ function drawBuildingPlacementHologram(
 
   push();
   translate(cx, cy);
-  rotate(facingToAngle(facing));
-  stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
-  strokeWeight(2);
-  fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
-  rect(
-    footprintLeft + 3,
-    footprintTop + 3,
-    footprintWidth - 6,
-    footprintHeight - 6,
-    4
-  );
-  fill(35, 35, 42, 200);
-  noStroke();
-  textSize(14);
-  textStyle(BOLD);
-  textAlign(CENTER, CENTER);
-  text(label, 0, 0);
+  const useMinerOffHologram =
+    entityType === ENTITY_TYPES.MINER &&
+    minerSpriteSheetImg &&
+    minerSpriteSheetImg.width > 0;
+  const useSplitterHologram =
+    entityType === ENTITY_TYPES.SPLITTER &&
+    getSplitterSpriteForFacing(previewFacing, { preferSideForEast: true });
+  const useMergerHologram =
+    entityType === ENTITY_TYPES.MERGER &&
+    getMergerSpriteForFacing(previewFacing, { preferSideForEast: true });
+
+  if (!useMinerOffHologram && !useSplitterHologram && !useMergerHologram) {
+    stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
+    strokeWeight(2);
+    fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
+    rect(
+      footprintLeft + 3,
+      footprintTop + 3,
+      footprintWidth - 6,
+      footprintHeight - 6,
+      4
+    );
+  }
+
+  if (useMinerOffHologram) {
+    // Match the off-state miner visual (frame 8 / index 7).
+    const frameW = 18;
+    const frameH = 32;
+    const totalFrames = max(1, floor(minerSpriteSheetImg.width / frameW));
+    const offFrameIndex = min(7, totalFrames - 1);
+    const spriteHeight = max(footprintHeight + 8, tileSize * 1.35);
+    const spriteWidth = spriteHeight * (frameW / frameH);
+    const spriteX = footprintLeft + (footprintWidth - spriteWidth) / 2;
+    const spriteBottomY = footprintTop + footprintHeight - 1;
+    const spriteY = spriteBottomY - spriteHeight - 6;
+    imageMode(CORNER);
+    tint(255, 225);
+    image(
+      minerSpriteSheetImg,
+      spriteX,
+      spriteY,
+      spriteWidth,
+      spriteHeight,
+      offFrameIndex * frameW,
+      0,
+      frameW,
+      frameH
+    );
+    noTint();
+  } else if (useSplitterHologram) {
+    drawPlacedSplitterSprite(
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      previewFacing,
+      225,
+      { preferSideForEast: true }
+    );
+  } else if (useMergerHologram) {
+    drawPlacedMergerSprite(
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      previewFacing,
+      225,
+      { preferSideForEast: true }
+    );
+  } else {
+    fill(35, 35, 42, 200);
+    noStroke();
+    textSize(14);
+    textStyle(BOLD);
+    textAlign(CENTER, CENTER);
+    text(label, 0, 0);
+  }
   pop();
 
   if (ports.length) {
-    drawPlacementPorts(ports, tileSize, cx, cy, baseCol, baseRow);
+    drawPlacementPorts(
+      ports,
+      tileSize,
+      cx,
+      cy,
+      baseCol,
+      baseRow,
+      entityType,
+      previewOptions.facing
+    );
   }
   textStyle(NORMAL);
 }
@@ -2775,7 +2991,8 @@ function drawSelectedBuildingHighlight(map, tileSize) {
     drawGame.state.selectedBuilding = null;
     return;
   }
-  const footprintOffsets = getSafeFootprintOffsets(tile.building.entityType);
+  const facing = tile.building.facing || "E";
+  const footprintOffsets = getSafeFootprintOffsets(tile.building.entityType, facing);
   let minOffsetX = Infinity;
   let maxOffsetX = -Infinity;
   let minOffsetY = Infinity;
@@ -3227,6 +3444,18 @@ function drawHotbar() {
         pipeSideOnMiniImg &&
         pipeSideOnMiniImg.width > 0
       );
+      const useSplitterFrontIcon = (
+        i === 4 &&
+        item.entityType === ENTITY_TYPES.SPLITTER &&
+        splitterFrontImg &&
+        splitterFrontImg.width > 0
+      );
+      const useMergerFrontIcon = (
+        i === 5 &&
+        item.entityType === ENTITY_TYPES.MERGER &&
+        mergerFrontImg &&
+        mergerFrontImg.width > 0
+      );
 
       if (useMinerSpriteIcon) {
         // resources/miner/info.txt: 28 frames, each frame 18x32. Frame 4 => index 3.
@@ -3254,6 +3483,18 @@ function drawHotbar() {
         const iconAspect = pipeSideOnMiniImg.height / pipeSideOnMiniImg.width;
         const iconWidth = iconSize + 4;
         image(pipeSideOnMiniImg, cx, cy, iconWidth, iconWidth * iconAspect);
+        imageMode(CORNER);
+      } else if (useSplitterFrontIcon) {
+        imageMode(CENTER);
+        const iconWidth = iconSize + 8;
+        const iconHeight = iconWidth * (splitterFrontImg.height / splitterFrontImg.width);
+        image(splitterFrontImg, cx, cy + 1, iconWidth, iconHeight);
+        imageMode(CORNER);
+      } else if (useMergerFrontIcon) {
+        imageMode(CENTER);
+        const iconWidth = iconSize + 8;
+        const iconHeight = iconWidth * (mergerFrontImg.height / mergerFrontImg.width);
+        image(mergerFrontImg, cx, cy + 1, iconWidth, iconHeight);
         imageMode(CORNER);
       } else if (item.shape === "circle") {
         ellipse(cx, cy, iconSize, iconSize);
@@ -3343,7 +3584,8 @@ function placeSelectedEntityAtMouse() {
 
   const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
   if (!type) return;
-  const footprintTiles = getSafeFootprintTilesAt(type, tileX, tileY);
+  const placementFacing = drawGame.state.placementFacing || "E";
+  const footprintTiles = getSafeFootprintTilesAt(type, tileX, tileY, placementFacing);
 
   for (const entry of footprintTiles) {
     if (
@@ -3380,7 +3622,7 @@ function placeSelectedEntityAtMouse() {
   }
 
   const newEntity = createEntity(type, tileX, tileY, options);
-  newEntity.state.facing = drawGame.state.placementFacing || "E";
+  newEntity.state.facing = placementFacing;
 
   entities.push(newEntity);
 
@@ -3565,7 +3807,8 @@ function deleteEntityUnderMouse() {
       const footprintTiles = getSafeFootprintTilesAt(
         targetEntity.type,
         targetEntity.tileX,
-        targetEntity.tileY
+        targetEntity.tileY,
+        targetEntity.state?.facing || "E"
       );
       for (const entry of footprintTiles) {
         const tile = map.tiles[entry.y]?.[entry.x];
@@ -3973,6 +4216,10 @@ function updateSplitterMergerRates(entities) {
     }
 
     const inputs = incoming.get(entity.id) || [];
+    const inputConnectionCount = inputs.length;
+    const outputConnectionCount = outgoingCount.get(entity.id) || 0;
+    const hasValidIoConnection =
+      inputConnectionCount > 0 && outputConnectionCount > 0;
     const totalRate = inputs.reduce((sum, entry) => sum + entry.rate, 0);
     const types = inputs.map((entry) => entry.outputType).filter(Boolean);
     const sharedType = types.length > 0 && types.every((type) => type === types[0])
@@ -3980,17 +4227,24 @@ function updateSplitterMergerRates(entities) {
       : null;
 
     if (entity.type === ENTITY_TYPES.SPLITTER) {
-      const outputCount = outgoingCount.get(entity.id) || 0;
-      const perOutputRate = outputCount > 0 ? totalRate / outputCount : 0;
-      entity.state.inputRate = totalRate;
-      entity.state.outputRate = sharedType ? perOutputRate : 0;
-      entity.state.outputType = sharedType;
-      entity.state.isActive = !!sharedType && totalRate > 0;
+      const perOutputRate = outputConnectionCount > 0
+        ? totalRate / outputConnectionCount
+        : 0;
+      entity.state.inputRate = hasValidIoConnection ? totalRate : 0;
+      entity.state.outputRate =
+        hasValidIoConnection && sharedType ? perOutputRate : 0;
+      entity.state.outputType = hasValidIoConnection ? sharedType : null;
+      entity.state.isOn = hasValidIoConnection;
+      entity.state.isActive =
+        hasValidIoConnection && !!sharedType && totalRate > 0;
     } else {
-      entity.state.inputRate = totalRate;
-      entity.state.outputRate = sharedType ? totalRate : 0;
-      entity.state.outputType = sharedType;
-      entity.state.isActive = !!sharedType && totalRate > 0;
+      entity.state.inputRate = hasValidIoConnection ? totalRate : 0;
+      entity.state.outputRate =
+        hasValidIoConnection && sharedType ? totalRate : 0;
+      entity.state.outputType = hasValidIoConnection ? sharedType : null;
+      entity.state.isOn = hasValidIoConnection;
+      entity.state.isActive =
+        hasValidIoConnection && !!sharedType && totalRate > 0;
     }
   }
 }
