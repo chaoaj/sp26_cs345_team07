@@ -22,7 +22,7 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg;
+let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOnMiniImg;
 
 let bgTiles = [];
 let stars = [];
@@ -155,6 +155,7 @@ function preload() {
   pipeCurve1OnImg = loadImage('resources/pipes/pipeCurve1On.png');
   pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
   pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve1On.png');
+  pipeSideOnMiniImg = loadImage('resources/pipes/pipeSideOn.png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -3168,8 +3169,20 @@ function drawHotbar() {
       let cx = x + slotSize / 2;
       let cy = y + slotSize / 2;
       let iconSize = 18;
+      const usePipeMiniIcon = (
+        i === 3 &&
+        item.entityType === ENTITY_TYPES.TUBE &&
+        pipeSideOnMiniImg &&
+        pipeSideOnMiniImg.width > 0
+      );
 
-      if (item.shape === "circle") {
+      if (usePipeMiniIcon) {
+        imageMode(CENTER);
+        const iconAspect = pipeSideOnMiniImg.height / pipeSideOnMiniImg.width;
+        const iconWidth = iconSize + 4;
+        image(pipeSideOnMiniImg, cx, cy, iconWidth, iconWidth * iconAspect);
+        imageMode(CORNER);
+      } else if (item.shape === "circle") {
         ellipse(cx, cy, iconSize, iconSize);
       } else if (item.shape === "triangle") {
         triangle(
@@ -3186,15 +3199,11 @@ function drawHotbar() {
     fill(30);
     noStroke();
     textSize(12);
-    textStyle(NORMAL);
-    text(i + 1, x + slotSize / 2, y + slotSize - 8);
+    textStyle(BOLD);
+    textAlign(LEFT, TOP);
+    text(i + 1, x + 4, y + 3);
+    textAlign(CENTER, CENTER);
 
-    // Draw entity type label below slot number
-    if (HOTBAR_ENTITY_TYPES[i]) {
-      fill(80);
-      textSize(7);
-      text(getEntityShortLabel(HOTBAR_ENTITY_TYPES[i]), x + slotSize / 2, y - 6);
-    }
   }
   pop();
 }
