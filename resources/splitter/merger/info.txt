@@ -1,0 +1,8 @@
+DIMENSONS:
+merger back, splitter front: 48 x 29
+
+splitter back, merger front: 48 x 28
+
+splitter side, merger side: 16 x 52
+
+*all mergers/splitters are 3x1
