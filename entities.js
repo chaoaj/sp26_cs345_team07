@@ -110,10 +110,11 @@ const TUBE_SHAPES = {
 };
 
 // Tube port offsets for each shape (defined for east-facing rotation).
+// FIXED: Reverted straight tubes so their logical connection ports are Horizontal (Left-to-Right)
 const TUBE_PORT_DEFS = {
   [TUBE_SHAPES.STRAIGHT]: { 
-    input: { x: 0, y: -1 }, 
-    output: { x: 0, y: 1 } 
+    input: { x: -1, y: 0 }, 
+    output: { x: 1, y: 0 } 
   },
   [TUBE_SHAPES.CORNER]: { 
     input: { x: 1, y: 0 }, 
@@ -163,13 +164,15 @@ function getConstructorRecipeForInputs(inputSlots) {
 // The input is now firmly on the Left edge (-1, 0) and output on the Right edge (2, 0).
 // FIXED: Smelter ports returned to the long edges, utilizing custom 'dir' to stay perfectly straight!
 // FIXED: Placed both the Smelter's input and output on the exact same long edge (bottom)
+// FIXED: Removed the center output from the Splitter (now 1-in/2-out) 
+// and the center input from the Merger (now 2-in/1-out).
 const ENTITY_PORT_DEFS = {
   [ENTITY_TYPES.MINER]: [ 
     { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } } 
   ],
   [ENTITY_TYPES.SMELTER]: [
     { name: "input", kind: "input", offset: { x: 0, y: 1 }, dir: { x: 0, y: 1 } },   // Left tile, Bottom edge
-    { name: "output", kind: "output", offset: { x: 1, y: -1 }, dir: { x: 0, y: 1 } }  // Right tile, Bottom edge
+    { name: "output", kind: "output", offset: { x: 1, y: -1 }, dir: { x: 0, y: 1 } }
   ],
   [ENTITY_TYPES.CONSTRUCTOR]: [
     { name: "input", kind: "input", offset: { x: 0, y: -1 }, dir: { x: 0, y: -1 } },
@@ -177,16 +180,14 @@ const ENTITY_PORT_DEFS = {
     { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.MERGER]: [
-    { name: "input", kind: "input", offset: { x: -1, y: -1 }, dir: { x: -1, y: 0 } },
-    { name: "input", kind: "input", offset: { x: -1, y: 0 }, dir: { x: -1, y: 0 } },
-    { name: "input", kind: "input", offset: { x: -1, y: 1 }, dir: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } }
+    { name: "input", kind: "input", offset: { x: -1, y: -1 }, dir: { x: -1, y: 0 } }, // Top Left Input
+    { name: "input", kind: "input", offset: { x: -1, y: 1 }, dir: { x: -1, y: 0 } },  // Bottom Left Input
+    { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } }   // Center Right Output
   ],
   [ENTITY_TYPES.SPLITTER]: [
-    { name: "input", kind: "input", offset: { x: -1, y: 0 }, dir: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 1, y: -1 }, dir: { x: 1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 1 }, dir: { x: 1, y: 0 } }
+    { name: "input", kind: "input", offset: { x: -1, y: 0 }, dir: { x: -1, y: 0 } },  // Center Left Input
+    { name: "output", kind: "output", offset: { x: 1, y: -1 }, dir: { x: 1, y: 0 } }, // Top Right Output
+    { name: "output", kind: "output", offset: { x: 1, y: 1 }, dir: { x: 1, y: 0 } }   // Bottom Right Output
   ],
   [ENTITY_TYPES.SHUTTLE]: [
     { name: "input", kind: "input", offset: { x: -1, y: 0 }, dir: { x: -1, y: 0 } },
@@ -592,18 +593,37 @@ function getTubeConnectionOffsets(tube) {
   return [offsets.input, offsets.output];
 }
 
+// FIXED: Tubes now use the 'dir' vector to connect to multi-tile buildings!
 function getTubePortConnections(entities, tube) {
   const offsets = getTubeConnectionOffsets(tube);
-  const offsetKeys = new Set(offsets.map((offset) => `${offset.x},${offset.y}`));
   const portMatches = getPortsAtTile(entities, tube.tileX, tube.tileY);
   const connections = [];
 
   for (const match of portMatches) {
-    const dx = match.entity.tileX - tube.tileX;
-    const dy = match.entity.tileY - tube.tileY;
-    
-    // FIXED: The missing closing brace was right here, breaking the loop!
-    if (offsetKeys.has(`${dx},${dy}`)) {
+    let connected = false;
+
+    // Use the custom port direction if it exists
+    if (match.port.dirX !== undefined && match.port.dirY !== undefined) {
+      for (const offset of offsets) {
+        // A tube connects to a machine if it points in the opposite direction of the port's outward facing arrow
+        if (offset.x === -match.port.dirX && offset.y === -match.port.dirY) {
+          connected = true;
+          break;
+        }
+      }
+    } else {
+      // Fallback for old 1x1 buildings without a dir vector
+      const dx = match.entity.tileX - tube.tileX;
+      const dy = match.entity.tileY - tube.tileY;
+      for (const offset of offsets) {
+        if (offset.x === Math.sign(dx) && offset.y === Math.sign(dy)) {
+          connected = true;
+          break;
+        }
+      }
+    }
+
+    if (connected) {
       connections.push({ kind: match.port.kind, entityId: match.entity.id });
     }
   }
@@ -611,27 +631,36 @@ function getTubePortConnections(entities, tube) {
   return connections;
 }
 
+// FIXED: Prevents tubes connected to multi-tile buildings from registering as "open/loose" ends
 function getTubeEntityOffsetConnections(entities, tube) {
   const portMatches = getPortsAtTile(entities, tube.tileX, tube.tileY);
-  const offsets = new Set();
+  const validOffsets = new Set();
 
   for (const match of portMatches) {
-    const dx = match.entity.tileX - tube.tileX;
-    const dy = match.entity.tileY - tube.tileY;
-    const normalizedDx = Math.sign(dx);
-    const normalizedDy = Math.sign(dy);
-    if (
-      (normalizedDx === 0 && normalizedDy === 0) ||
-      (normalizedDx !== 0 && normalizedDy !== 0)
-    ) {
-      continue;
+    if (match.port.dirX !== undefined && match.port.dirY !== undefined) {
+      // Register the exact port direction as a sealed connection
+      validOffsets.add(`${-match.port.dirX},${-match.port.dirY}`);
+    } else {
+      const dx = match.entity.tileX - tube.tileX;
+      const dy = match.entity.tileY - tube.tileY;
+      const normalizedDx = Math.sign(dx);
+      const normalizedDy = Math.sign(dy);
+      
+      // Ignore diagonal center-math errors
+      if (
+        (normalizedDx === 0 && normalizedDy === 0) ||
+        (normalizedDx !== 0 && normalizedDy !== 0)
+      ) {
+        continue;
+      }
+      validOffsets.add(`${normalizedDx},${normalizedDy}`);
     }
-    offsets.add(`${normalizedDx},${normalizedDy}`);
   }
 
-  return offsets;
+  return validOffsets;
 }
 
+// FIXED: Grabs the custom 'dir' vector and rotates it so sketch.js can draw the arrow straight
 function getEntityConnectionPorts(entity) {
   const portDefs = ENTITY_PORT_DEFS[entity.type];
   if (!portDefs) return [];
@@ -640,14 +669,16 @@ function getEntityConnectionPorts(entity) {
 
   return portDefs.map((port) => {
     const rotated = rotateOffsetFromEast(port.offset, facing);
+    const rotatedDir = port.dir ? rotateOffsetFromEast(port.dir, facing) : null;
     return {
       ...port,
       worldX: entity.tileX + rotated.x,
-      worldY: entity.tileY + rotated.y
+      worldY: entity.tileY + rotated.y,
+      dirX: rotatedDir ? rotatedDir.x : undefined,
+      dirY: rotatedDir ? rotatedDir.y : undefined
     };
   });
 }
-
 function getEntityFootprintOffsets(entityType) {
   const custom = ENTITY_FOOTPRINT_DEFS[entityType];
   if (Array.isArray(custom) && custom.length > 0) {

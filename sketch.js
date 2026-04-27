@@ -2526,6 +2526,7 @@ function drawPlacedBuildingLetter(px, py, tileSize, building) {
   textStyle(NORMAL);
 }
 
+// FIXED: Passes the 'dir' vector through to the hologram rendering pipeline
 function getPlacementPreviewPorts(entityType, options = {}) {
   if (!entityType) {
     return [];
@@ -2548,12 +2549,18 @@ function getPlacementPreviewPorts(entityType, options = {}) {
   if (!defs) {
     return [];
   }
-  return defs.map((port) => ({
-    kind: port.kind,
-    offset: rotateOffset(port.offset)
-  }));
+  return defs.map((port) => {
+    const rotatedDir = port.dir ? rotateOffset(port.dir) : null;
+    return {
+      kind: port.kind,
+      offset: rotateOffset(port.offset),
+      dir: rotatedDir
+    };
+  });
 }
 
+// FIXED: Instructs the hologram arrows to draw perfectly straight if a 'dir' is provided
+// FIXED: Instructs the hologram arrows to draw perfectly straight if a 'dir' is provided
 function drawPlacementPorts(
   ports,
   tileSize,
@@ -2606,9 +2613,16 @@ function drawPlacementPorts(
     const portPx = originX + port.offset.x * tileSize;
     const portPy = originY + port.offset.y * tileSize;
 
-    const len = Math.hypot(port.offset.x, port.offset.y) || 1;
-    let dirX = port.offset.x / len;
-    let dirY = port.offset.y / len;
+    let dirX, dirY;
+    // Uses the custom vector if it exists!
+    if (port.dir) {
+      dirX = port.dir.x;
+      dirY = port.dir.y;
+    } else {
+      const len = Math.hypot(port.offset.x, port.offset.y) || 1;
+      dirX = port.offset.x / len;
+      dirY = port.offset.y / len;
+    }
 
     if (port.kind === "input") {
       dirX = -dirX;
@@ -3797,9 +3811,9 @@ function findConstructorRecipeByTypes(types) {
   return null;
 }
 
+// FIXED: Constructor now scales its speed based on the resources it receives 
+// instead of breaking if it doesn't get the exact perfect rate!
 function updateConstructorInputs(entities) {
-  const EPSILON = 1e-6;
-
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.CONSTRUCTOR) continue;
     const constructorState = entity.state;
@@ -3849,36 +3863,42 @@ function updateConstructorInputs(entities) {
       continue;
     }
 
-    let hasExactRecipeInputs = true;
+    // Calculate how fast the machine can run based on the slowest incoming ingredient
+    let limitingRatio = Infinity;
     for (const input of recipe.inputs) {
       const requiredCount = Number(input.count) || 0;
       const availableRate = incomingRatesByType.get(input.type) || 0;
-      if (
-        requiredCount <= 0 ||
-        Math.abs(availableRate - requiredCount) > EPSILON
-      ) {
-        hasExactRecipeInputs = false;
-        break;
+      
+      if (requiredCount > 0) {
+        const ratio = availableRate / requiredCount;
+        if (ratio < limitingRatio) {
+          limitingRatio = ratio;
+        }
       }
     }
+
+    // Prevent bugs if division resulted in infinity or 0
+    if (limitingRatio === Infinity || limitingRatio <= 0) {
+      limitingRatio = 0;
+    }
+
+    // Cap at 1.0 (100% efficiency) so you can't infinitely overclock it
+    limitingRatio = Math.min(limitingRatio, 1.0);
 
     const recipeOutputCount = Number(recipe.output?.count) || 0;
     const totalRequiredPerCraft = recipe.inputs.reduce(
       (sum, input) => sum + (Number(input.count) || 0),
       0
     );
-    const outputRate = hasExactRecipeInputs ? recipeOutputCount : 0;
 
+    // Apply the scaling ratio to the output!
     constructorState.outputType = recipe.output?.type || null;
     constructorState.outputCount = recipeOutputCount;
-    constructorState.inputRate = hasExactRecipeInputs
-      ? totalRequiredPerCraft
-      : 0;
-    constructorState.outputRate = outputRate;
-    constructorState.isActive =
-      !!constructorState.outputType &&
-      hasExactRecipeInputs &&
-      outputRate > 0;
+    constructorState.inputRate = limitingRatio * totalRequiredPerCraft;
+    constructorState.outputRate = limitingRatio * recipeOutputCount;
+    
+    // Turn the machine ON if it has ANY ingredients to process
+    constructorState.isActive = limitingRatio > 0;
   }
 }
 
