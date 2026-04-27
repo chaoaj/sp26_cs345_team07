@@ -22,7 +22,7 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg;
+let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOnImg;
 
 let bgTiles = [];
 let stars = [];
@@ -155,6 +155,7 @@ function preload() {
   pipeCurve1OnImg = loadImage('resources/pipes/pipeCurve1On.png');
   pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
   pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve1On.png');
+  pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -1094,6 +1095,21 @@ function addProducedResource(resourceType, count) {
   }
 }
 
+// FIXED: Removed the T-shape stem, making it a pure 3x1 straight footprint
+function getEntityFootprint(entityType, facing) {
+  let baseFootprint = [{ x: 0, y: 0 }];
+
+  if (entityType === ENTITY_TYPES.SMELTER) {
+    baseFootprint = [{ x: 0, y: 0 }, { x: 1, y: 0 }];
+  } else if (entityType === ENTITY_TYPES.SPLITTER || entityType === ENTITY_TYPES.MERGER) {
+    // 3x1 straight vertical line when facing East
+    baseFootprint = [{ x: 0, y: -1 }, { x: 0, y: 0 }, { x: 0, y: 1 }];
+  }
+
+  // Engine automatically rotates the base footprint coordinates to match the facing
+  return baseFootprint.map(pt => rotateOffsetFromEast(pt, facing));
+}
+
 function getSafeFootprintOffsets(entityType) {
   const fallback = [{ x: 0, y: 0 }];
   if (typeof getEntityFootprintOffsets !== "function") {
@@ -1387,94 +1403,131 @@ function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
   return wave < 0.34;
 }
 
+// FIXED: DYNAMIC MULTI-TILE BUILDING RENDERING
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
-  const nowSeconds = millis() / 1000;
 
   for (const entity of entities) {
-    const footprintOffsets = getSafeFootprintOffsets(entity.type);
-    let minOffsetX = Infinity;
-    let maxOffsetX = -Infinity;
-    let minOffsetY = Infinity;
-    let maxOffsetY = -Infinity;
-    for (const offset of footprintOffsets) {
-      minOffsetX = min(minOffsetX, offset.x);
-      maxOffsetX = max(maxOffsetX, offset.x);
-      minOffsetY = min(minOffsetY, offset.y);
-      maxOffsetY = max(maxOffsetY, offset.y);
-    }
-
-    const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
-    const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
-    const px = (entity.tileX + minOffsetX) * tileSize;
-    const py = (entity.tileY + minOffsetY) * tileSize;
-    const drawWidth = footprintWidthTiles * tileSize;
-    const drawHeight = footprintHeightTiles * tileSize;
+    const px = entity.tileX * tileSize;
+    const py = entity.tileY * tileSize;
 
     if (entity.type === ENTITY_TYPES.TUBE) {
       push();
       translate(px + tileSize / 2, py + tileSize / 2);
-      rotate(facingToAngle(entity.state.facing));
-
-      let imgToDraw = null;
+      
       let isCorner = entity.state.shape === TUBE_SHAPES.CORNER;
       let isFlowing = !!entity.state.carriedItem;
 
       if (isCorner) {
+        rotate(facingToAngle(entity.state.facing));
         let useCurve2 = (entity.tileX + entity.tileY) % 2 === 0;
+        let imgToDraw = null;
         if (isFlowing) imgToDraw = useCurve2 ? (pipeCurve2OnImg || pipeCurve1OnImg) : pipeCurve1OnImg;
         else imgToDraw = useCurve2 ? (pipeCurve2OffImg || pipeCurve1OffImg) : pipeCurve1OffImg;
-      } else {
-        imgToDraw = pipeFrontOffImg; 
-      }
-
-      if (imgToDraw && imgToDraw.width > 0) {
-        // FIXED: Explicitly define the number of frames based on the sprite sheet!
-        // pipeFrontOff is 8 frames, the curves are 16 frames. 
-        // This calculates the exact width of a single frame and stops the "2 tubes at a time" bug!
-        let numFrames = (imgToDraw === pipeFrontOffImg) ? 8 : 16;
-        let frameW = imgToDraw.width / numFrames;
-        let frameH = imgToDraw.height;
-        let currentFrame = 0;
         
-        if (numFrames > 1 && entity.state.isConnected) {
-            currentFrame = Math.floor(millis() / 150) % numFrames;
+        if (imgToDraw && imgToDraw.width > 0) {
+          let frameH = imgToDraw.height;
+          let frameW = frameH; 
+          let numFrames = Math.floor(imgToDraw.width / frameW) || 1;
+          let currentFrame = 0;
+          if (numFrames > 1 && entity.state.isConnected) {
+              currentFrame = Math.floor(millis() / 150) % numFrames;
+          }
+          imageMode(CORNER);
+          image(imgToDraw, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
+        }
+      } else {
+        let isVertical = (entity.state.facing === "N" || entity.state.facing === "S");
+        let isHorizontal = !isVertical;
+        
+        let isConnectedOutput = false;
+        if (entity.state.isConnected) {
+            const connectedPorts = getTubePortConnections(entities, entity);
+            for(let p of connectedPorts) {
+                if(p.kind === "output" || p.kind === "both") isConnectedOutput = true;
+            }
         }
 
-        imageMode(CORNER);
-        image(imgToDraw, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
-      } else {
-        stroke(50);
-        fill(120);
-        rect(-tileSize / 2 + 4, -tileSize / 2 + 4, tileSize - 8, tileSize - 8, 4);
+        if (isVertical && entity.state.facing === "S" && !isConnectedOutput && pipeFrontOffImg && pipeFrontOffImg.width > 0) {
+            let frameH = pipeFrontOffImg.height;
+            let frameW = frameH; 
+            let numFrames = Math.floor(pipeFrontOffImg.width / frameW) || 1;
+            let currentFrame = (numFrames > 1 && entity.state.isConnected) ? Math.floor(millis() / 150) % numFrames : 0;
+            imageMode(CORNER);
+            image(pipeFrontOffImg, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
+        } else {
+            if (isHorizontal) rotate(HALF_PI); 
+            
+            let imgToDraw = null;
+            if (isFlowing) {
+                imgToDraw = pipeSideOnImg;
+            } else {
+                imgToDraw = (typeof pipeSideOffImg !== 'undefined' && pipeSideOffImg && pipeSideOffImg.width > 0) ? pipeSideOffImg : pipeSideOnImg;
+            }
+
+            if (imgToDraw && imgToDraw.width > 0) {
+                let frameH = imgToDraw.height;
+                let frameW = frameH; 
+                let numFrames = Math.floor(imgToDraw.width / frameW) || 1;
+                let currentFrame = (numFrames > 1 && entity.state.isConnected) ? Math.floor(millis() / 150) % numFrames : 0;
+                imageMode(CORNER);
+                image(imgToDraw, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
+            } else {
+                stroke(50); fill(120);
+                rect(-tileSize / 2 + 4, -tileSize / 2 + 4, tileSize - 8, tileSize - 8, 4);
+            }
+        }
       }
       pop();
     } else {
-      // FIXED: Removed the solid grey background square from regular buildings
-      // Only draw the regular entity color square if there are no images
+      push();
+      translate(px + tileSize / 2, py + tileSize / 2);
+      rotate(facingToAngle(entity.state.facing));
+
       stroke(50);
       const rgb = getEntityFillRgb(entity.type);
       fill(rgb[0], rgb[1], rgb[2]);
 
-      rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
+      let w = tileSize - 8;
+      let h = tileSize - 8;
+      let drawX = -tileSize / 2 + 4;
+      let drawY = -tileSize / 2 + 4;
+
+      if (entity.type === ENTITY_TYPES.SMELTER) {
+        rect(drawX, drawY, tileSize * 2 - 8, h, 4);
+      } else if (entity.type === ENTITY_TYPES.SPLITTER || entity.type === ENTITY_TYPES.MERGER) {
+        // Just a 3x1 straight line
+        rect(drawX, -tileSize * 1.5 + 4, w, tileSize * 3 - 8, 4); 
+      } else {
+        rect(drawX, drawY, w, h, 4);
+      }
 
       if (entity.state.isBroken) {
         stroke(255, 0, 0);
         strokeWeight(3);
-        line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
-        line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
+        line(-tileSize/2 + 6, -tileSize/2 + 6, tileSize/2 - 6, tileSize/2 - 6);
+        line(tileSize/2 - 6, -tileSize/2 + 6, -tileSize/2 + 6, tileSize/2 - 6);
         strokeWeight(1);
       }
 
       noStroke();
       const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
       fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-      circle(px + drawWidth - 8, py + 8, 8);
+      
+      // Keep the power light on the top right of the 3x1 block
+      if (entity.type === ENTITY_TYPES.SMELTER) {
+         circle(tileSize * 1.5 - 8, -tileSize / 2 + 8, 8); 
+      } else if (entity.type === ENTITY_TYPES.SPLITTER || entity.type === ENTITY_TYPES.MERGER) {
+         circle(tileSize / 2 - 8, -tileSize * 1.5 + 8, 8); 
+      } else {
+         circle(tileSize / 2 - 8, -tileSize / 2 + 8, 8); 
+      }
 
       fill(20);
       noStroke();
-      text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+      text(getEntityShortLabel(entity.type), 0, 0);
+      pop();
     }
     
     drawEntityPorts(entity, tileSize);
@@ -2608,38 +2661,12 @@ function drawPlacementPortTileHighlights(
   }
 }
 
+// FIXED: Holograms dynamically stretch for 3x1 buildings
 function drawBuildingPlacementHologram(
-  px,
-  py,
-  tileSize,
-  colorRgb,
-  label,
-  facing,
-  entityType,
-  options,
-  baseCol = null,
-  baseRow = null
+  px, py, tileSize, colorRgb, label, facing, entityType, options, baseCol = null, baseRow = null
 ) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
-  const footprintOffsets = getSafeFootprintOffsets(entityType);
-  let minOffsetX = Infinity;
-  let maxOffsetX = -Infinity;
-  let minOffsetY = Infinity;
-  let maxOffsetY = -Infinity;
-  for (const offset of footprintOffsets) {
-    minOffsetX = min(minOffsetX, offset.x);
-    maxOffsetX = max(maxOffsetX, offset.x);
-    minOffsetY = min(minOffsetY, offset.y);
-    maxOffsetY = max(maxOffsetY, offset.y);
-  }
-  const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
-  const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
-  // Offsets are in tile-center coordinates; convert to local rect top-left.
-  const footprintLeft = (minOffsetX - 0.5) * tileSize;
-  const footprintTop = (minOffsetY - 0.5) * tileSize;
-  const footprintWidth = footprintWidthTiles * tileSize;
-  const footprintHeight = footprintHeightTiles * tileSize;
   const previewOptions = {
     ...(options || {}),
     facing: facing || ((options && options.facing) || "E")
@@ -2653,16 +2680,24 @@ function drawBuildingPlacementHologram(
   push();
   translate(cx, cy);
   rotate(facingToAngle(facing));
+  
   stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
   strokeWeight(2);
   fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
-  rect(
-    footprintLeft + 3,
-    footprintTop + 3,
-    footprintWidth - 6,
-    footprintHeight - 6,
-    4
-  );
+
+  let w = tileSize - 6;
+  let h = tileSize - 6;
+  let drawX = -tileSize / 2 + 3;
+  let drawY = -tileSize / 2 + 3;
+
+  if (entityType === ENTITY_TYPES.SMELTER) {
+    rect(drawX, drawY, tileSize * 2 - 6, h, 4);
+  } else if (entityType === ENTITY_TYPES.SPLITTER || entityType === ENTITY_TYPES.MERGER) {
+    rect(drawX, -tileSize * 1.5 + 3, w, tileSize * 3 - 6, 4);
+  } else {
+    rect(drawX, drawY, w, h, 4);
+  }
+
   fill(35, 35, 42, 200);
   noStroke();
   textSize(14);

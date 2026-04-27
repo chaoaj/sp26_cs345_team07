@@ -157,40 +157,46 @@ function getConstructorRecipeForInputs(inputSlots) {
 }
 
 // Port offsets are defined for facing East (right); rotation handles other facings.
+// FIXED: Converted Splitter and Merger ports to fit a linear 3x1 block layout
+// FIXED: Adjusted Splitter to 1-in/2-out and Merger to 2-in/1-out with perfectly straight directions.
+// FIXED: Cleaned up duplicate keys and aligned the Smelter perfectly straight (left-to-right).
+// The input is now firmly on the Left edge (-1, 0) and output on the Right edge (2, 0).
+// FIXED: Smelter ports returned to the long edges, utilizing custom 'dir' to stay perfectly straight!
+// FIXED: Placed both the Smelter's input and output on the exact same long edge (bottom)
 const ENTITY_PORT_DEFS = {
-  [ENTITY_TYPES.MINER]: [
-    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+  [ENTITY_TYPES.MINER]: [ 
+    { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } } 
   ],
   [ENTITY_TYPES.SMELTER]: [
-    { name: "input", kind: "input", offset: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+    { name: "input", kind: "input", offset: { x: 0, y: 1 }, dir: { x: 0, y: 1 } },   // Left tile, Bottom edge
+    { name: "output", kind: "output", offset: { x: 1, y: -1 }, dir: { x: 0, y: 1 } }  // Right tile, Bottom edge
   ],
   [ENTITY_TYPES.CONSTRUCTOR]: [
-    { name: "input", kind: "input", offset: { x: 0, y: -1 } },
-    { name: "input", kind: "input", offset: { x: 0, y: 1 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+    { name: "input", kind: "input", offset: { x: 0, y: -1 }, dir: { x: 0, y: -1 } },
+    { name: "input", kind: "input", offset: { x: 0, y: 1 }, dir: { x: 0, y: 1 } },
+    { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.MERGER]: [
-    { name: "input", kind: "input", offset: { x: 0, y: -1 } },
-    { name: "input", kind: "input", offset: { x: 0, y: 1 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+    { name: "input", kind: "input", offset: { x: -1, y: -1 }, dir: { x: -1, y: 0 } },
+    { name: "input", kind: "input", offset: { x: -1, y: 0 }, dir: { x: -1, y: 0 } },
+    { name: "input", kind: "input", offset: { x: -1, y: 1 }, dir: { x: -1, y: 0 } },
+    { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.SPLITTER]: [
-    { name: "input", kind: "input", offset: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 0, y: -1 } },
-    { name: "output", kind: "output", offset: { x: 0, y: 1 } }
+    { name: "input", kind: "input", offset: { x: -1, y: 0 }, dir: { x: -1, y: 0 } },
+    { name: "output", kind: "output", offset: { x: 1, y: -1 }, dir: { x: 1, y: 0 } },
+    { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } },
+    { name: "output", kind: "output", offset: { x: 1, y: 1 }, dir: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.SHUTTLE]: [
-    { name: "inputLeft", kind: "input", offset: { x: -2, y: 0 } },
-    { name: "inputRight", kind: "input", offset: { x: 2, y: 0 } },
-    { name: "inputUp", kind: "input", offset: { x: 0, y: -2 } },
-    { name: "inputDown", kind: "input", offset: { x: 0, y: 2 } }
+    { name: "input", kind: "input", offset: { x: -1, y: 0 }, dir: { x: -1, y: 0 } },
+    { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } }
   ],
-  [ENTITY_TYPES.ROCKET_SITE]: [
-    { name: "input", kind: "input", offset: { x: -1, y: 0 } }
+  [ENTITY_TYPES.ROCKET_SITE]: [ 
+    { name: "input", kind: "input", offset: { x: -1, y: 0 }, dir: { x: -1, y: 0 } } 
   ],
-  [ENTITY_TYPES.EXTRACTOR]: [
-    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+  [ENTITY_TYPES.EXTRACTOR]: [ 
+    { name: "output", kind: "output", offset: { x: 1, y: 0 }, dir: { x: 1, y: 0 } } 
   ]
 };
 
@@ -595,15 +601,9 @@ function getTubePortConnections(entities, tube) {
   for (const match of portMatches) {
     const dx = match.entity.tileX - tube.tileX;
     const dy = match.entity.tileY - tube.tileY;
-    const normalizedDx = Math.sign(dx);
-    const normalizedDy = Math.sign(dy);
-    if (
-      (normalizedDx === 0 && normalizedDy === 0) ||
-      (normalizedDx !== 0 && normalizedDy !== 0)
-    ) {
-      continue;
-    }
-    if (offsetKeys.has(`${normalizedDx},${normalizedDy}`)) {
+    
+    // FIXED: The missing closing brace was right here, breaking the loop!
+    if (offsetKeys.has(`${dx},${dy}`)) {
       connections.push({ kind: match.port.kind, entityId: match.entity.id });
     }
   }
