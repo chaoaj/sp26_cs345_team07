@@ -82,5 +82,22 @@ const RESOURCE_TOOLTIP_RECIPES = Object.freeze({
         { type: "ironPlate", count: 1 }
       ]
     }
-  ]
+  ],
+  shipAlloy: [
+    {
+      building: "constructor",
+      ingredients: [
+        { type: "copperPlate", count: 2 },
+        { type: "ironPlate", count: 4 }
+      ]
+    }
+  ],
+  rocketFuel: [
+    {
+      building: "constructor",
+      ingredients: [
+        { type: "helium3", count: 4 }
+      ]
+    }
+  ] 
 });

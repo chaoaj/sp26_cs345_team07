@@ -24,12 +24,74 @@ const RESOURCE_TYPES = {
   IRON_BAR: "ironBar",
   IRON_PLATE: "ironPlate",
   MODULAR_COMPONENT: "modularComponent",
-  GEAR: "gear",
   SHIP_ALLOY: "shipAlloy",
   ELECTRONICS: "electronics",
   HELIUM3: "helium3",
   ROCKET_FUEL: "rocketFuel",
 };
+
+// Relative tube propagation speed by carried item (1.0 = baseline).
+const TUBE_FLOW_SPEED_BY_RESOURCE = Object.freeze({
+  [RESOURCE_TYPES.IRON_ORE]: 0.9,
+  [RESOURCE_TYPES.IRON_BAR]: 1.0,
+  [RESOURCE_TYPES.IRON_PLATE]: 0.7,
+  [RESOURCE_TYPES.COPPER_ORE]: 0.9,
+  [RESOURCE_TYPES.COPPER_BAR]: 1.0,
+  [RESOURCE_TYPES.COPPER_PLATE]: 0.7,
+  [RESOURCE_TYPES.COPPER_WIRE]: 1.5,
+  [RESOURCE_TYPES.HELIUM3]: 0.7,
+  [RESOURCE_TYPES.MODULAR_COMPONENT]: 0.5,
+  [RESOURCE_TYPES.ELECTRONICS]: 0.5,
+  [RESOURCE_TYPES.SHIP_ALLOY]: 0.5,
+  [RESOURCE_TYPES.ROCKET_FUEL]: 0.3
+});
+
+function getTubeFlowSpeedForResource(resourceType) {
+  if (!resourceType) {
+    return 1;
+  }
+
+  const speed = Number(TUBE_FLOW_SPEED_BY_RESOURCE[resourceType]);
+  return Number.isFinite(speed) && speed > 0 ? speed : 1;
+}
+
+// Build costs per placeable building entity.
+const ENTITY_BUILD_COSTS = Object.freeze({
+  [ENTITY_TYPES.TUBE]: Object.freeze({
+    [RESOURCE_TYPES.IRON_BAR]: 3,
+    [RESOURCE_TYPES.COPPER_BAR]: 3
+  }),
+  [ENTITY_TYPES.MINER]: Object.freeze({
+    [RESOURCE_TYPES.IRON_PLATE]: 3,
+    [RESOURCE_TYPES.COPPER_BAR]: 3
+  }),
+  [ENTITY_TYPES.SMELTER]: Object.freeze({
+    [RESOURCE_TYPES.IRON_BAR]: 2,
+    [RESOURCE_TYPES.COPPER_PLATE]: 2
+  }),
+  [ENTITY_TYPES.SPLITTER]: Object.freeze({
+    [RESOURCE_TYPES.IRON_PLATE]: 2
+  }),
+  [ENTITY_TYPES.MERGER]: Object.freeze({
+    [RESOURCE_TYPES.COPPER_PLATE]: 2
+  }),
+  [ENTITY_TYPES.CONSTRUCTOR]: Object.freeze({
+    [RESOURCE_TYPES.IRON_PLATE]: 3,
+    [RESOURCE_TYPES.COPPER_PLATE]: 2,
+    [RESOURCE_TYPES.MODULAR_COMPONENT]: 1
+  })
+});
+
+// Hotbar tooltip descriptions per entity type.
+// Replace placeholder strings with player-facing descriptions as needed.
+const ENTITY_HOTBAR_DESCRIPTIONS = Object.freeze({
+  [ENTITY_TYPES.TUBE]: "Transports resources.",
+  [ENTITY_TYPES.MINER]: "Extracts resources from nodes.",
+  [ENTITY_TYPES.SMELTER]: "Processes ores into bars.",
+  [ENTITY_TYPES.SPLITTER]: "Splits one input into two outputs.",
+  [ENTITY_TYPES.MERGER]: "Merges two inputs into one output.",
+  [ENTITY_TYPES.CONSTRUCTOR]: "Constructs advanced items from basic resources.",
+});
 
 // Tile types that count as mineable resource nodes
 const MINEABLE_TILE_TYPES = new Set(["iron", "copper", "helium3"]);
@@ -119,14 +181,24 @@ const ENTITY_PORT_DEFS = {
     { name: "output", kind: "output", offset: { x: 0, y: 1 } }
   ],
   [ENTITY_TYPES.SHUTTLE]: [
-    { name: "input", kind: "input", offset: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+    { name: "inputLeft", kind: "input", offset: { x: -2, y: 0 } },
+    { name: "inputRight", kind: "input", offset: { x: 2, y: 0 } },
+    { name: "inputUp", kind: "input", offset: { x: 0, y: -2 } },
+    { name: "inputDown", kind: "input", offset: { x: 0, y: 2 } }
   ],
   [ENTITY_TYPES.ROCKET_SITE]: [
     { name: "input", kind: "input", offset: { x: -1, y: 0 } }
   ],
   [ENTITY_TYPES.EXTRACTOR]: [
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+  ]
+};
+
+const ENTITY_FOOTPRINT_DEFS = {
+  [ENTITY_TYPES.SHUTTLE]: [
+    { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
+    { x: -1, y: 0 },  { x: 0, y: 0 },  { x: 1, y: 0 },
+    { x: -1, y: 1 },  { x: 0, y: 1 },  { x: 1, y: 1 }
   ]
 };
 
@@ -341,9 +413,14 @@ class TubeState extends EntityState {
     this.isOn = true;
     this.isActive = true;
     this.shape = shape === TUBE_SHAPES.CORNER ? shape : TUBE_SHAPES.STRAIGHT;
-    this.facing = "E";
+    this.facing = facing || "E";
     this.carriedItem = null;
     this.isConnected = false;
+    this.flowState = "off"; // off | blocked | flowing
+    this.flowDistance = Infinity;
+    this.flowPhaseOffset = 0;
+    this.flowProgress = 0;
+    this.flowSpeed = 1;
   }
 }
 
@@ -353,9 +430,18 @@ class ShuttleState extends EntityState {
     this.isOn = true;
     this.isActive = true;
     this.inventory = {
-      ironPlate: 10,
-      copperPlate: 6,
-      gear: 4
+      [RESOURCE_TYPES.IRON_ORE]: 0,
+      [RESOURCE_TYPES.IRON_BAR]: 75,
+      [RESOURCE_TYPES.IRON_PLATE]: 20,
+      [RESOURCE_TYPES.COPPER_ORE]: 0,
+      [RESOURCE_TYPES.COPPER_BAR]: 75,
+      [RESOURCE_TYPES.COPPER_PLATE]: 20,
+      [RESOURCE_TYPES.COPPER_WIRE]: 0,
+      [RESOURCE_TYPES.MODULAR_COMPONENT]: 5,
+      [RESOURCE_TYPES.SHIP_ALLOY]: 0,
+      [RESOURCE_TYPES.ELECTRONICS]: 0,
+      [RESOURCE_TYPES.HELIUM3]: 0,
+      [RESOURCE_TYPES.ROCKET_FUEL]: 0
     };
 
     this.isConnected = false;
@@ -509,7 +595,15 @@ function getTubePortConnections(entities, tube) {
   for (const match of portMatches) {
     const dx = match.entity.tileX - tube.tileX;
     const dy = match.entity.tileY - tube.tileY;
-    if (offsetKeys.has(`${dx},${dy}`)) {
+    const normalizedDx = Math.sign(dx);
+    const normalizedDy = Math.sign(dy);
+    if (
+      (normalizedDx === 0 && normalizedDy === 0) ||
+      (normalizedDx !== 0 && normalizedDy !== 0)
+    ) {
+      continue;
+    }
+    if (offsetKeys.has(`${normalizedDx},${normalizedDy}`)) {
       connections.push({ kind: match.port.kind, entityId: match.entity.id });
     }
   }
@@ -524,7 +618,15 @@ function getTubeEntityOffsetConnections(entities, tube) {
   for (const match of portMatches) {
     const dx = match.entity.tileX - tube.tileX;
     const dy = match.entity.tileY - tube.tileY;
-    offsets.add(`${dx},${dy}`);
+    const normalizedDx = Math.sign(dx);
+    const normalizedDy = Math.sign(dy);
+    if (
+      (normalizedDx === 0 && normalizedDy === 0) ||
+      (normalizedDx !== 0 && normalizedDy !== 0)
+    ) {
+      continue;
+    }
+    offsets.add(`${normalizedDx},${normalizedDy}`);
   }
 
   return offsets;
@@ -544,6 +646,22 @@ function getEntityConnectionPorts(entity) {
       worldY: entity.tileY + rotated.y
     };
   });
+}
+
+function getEntityFootprintOffsets(entityType) {
+  const custom = ENTITY_FOOTPRINT_DEFS[entityType];
+  if (Array.isArray(custom) && custom.length > 0) {
+    return custom;
+  }
+  return [{ x: 0, y: 0 }];
+}
+
+function getEntityFootprintTilesAt(entityType, tileX, tileY) {
+  const offsets = getEntityFootprintOffsets(entityType);
+  return offsets.map((offset) => ({
+    x: tileX + offset.x,
+    y: tileY + offset.y
+  }));
 }
 
 function getPortsAtTile(entities, tileX, tileY) {
@@ -713,6 +831,40 @@ function refreshEntityConnectionStates(entities) {
       baseRate = Math.min(baseRate, sinkRate);
     }
 
+    const flowDistanceByTubeId = new Map();
+    if (fromEntityId != null) {
+      const frontier = [];
+      for (const member of component) {
+        const portConnections = getTubePortConnections(entities, member);
+        const isSourceFacingTube = portConnections.some(
+          (connection) =>
+            connection.kind === "output" && connection.entityId === fromEntityId
+        );
+        if (isSourceFacingTube) {
+          flowDistanceByTubeId.set(member.id, 0);
+          frontier.push(member.id);
+        }
+      }
+
+      if (frontier.length === 0 && component.length > 0) {
+        flowDistanceByTubeId.set(component[0].id, 0);
+        frontier.push(component[0].id);
+      }
+
+      while (frontier.length > 0) {
+        const currentId = frontier.shift();
+        const currentDistance = flowDistanceByTubeId.get(currentId) || 0;
+        const neighbors = adjacency.get(currentId) || new Set();
+        for (const neighborId of neighbors) {
+          if (flowDistanceByTubeId.has(neighborId)) {
+            continue;
+          }
+          flowDistanceByTubeId.set(neighborId, currentDistance + 1);
+          frontier.push(neighborId);
+        }
+      }
+    }
+
     for (const member of component) {
       const connections = tubeConnections.get(member.id);
       const entityOffsets = connections.entityOffsetConnections;
@@ -739,6 +891,37 @@ function refreshEntityConnectionStates(entities) {
       member.state.inputRate = tubeRate;
       member.state.outputRate = tubeRate;
       member.state.carriedItem = hasOpenPort ? null : sourceItem;
+      member.state.flowSpeed = getTubeFlowSpeedForResource(member.state.carriedItem);
+      const flowDistance = flowDistanceByTubeId.has(member.id)
+        ? flowDistanceByTubeId.get(member.id)
+        : Infinity;
+      member.state.flowDistance = flowDistance;
+      member.state.flowPhaseOffset = Number.isFinite(flowDistance)
+        ? flowDistance * 0.18
+        : 0;
+      const isFlowing = connected &&
+        !hasOpenPort &&
+        !!sourceItem &&
+        tubeRate > 0;
+      if (isFlowing) {
+        member.state.flowState = "flowing";
+      } else if (connected || !!fromEntityId || !!toEntityId || !!sourceItem) {
+        member.state.flowState = "blocked";
+      } else {
+        member.state.flowState = "off";
+      }
+      member.state.isActive = member.state.flowState === "flowing";
+
+      if (member.state.flowState === "flowing") {
+        const nowSeconds = Date.now() / 1000;
+        const flowSpeed = Number(member.state.flowSpeed) || 1;
+        const phaseDistance = Number.isFinite(flowDistance) ? flowDistance : 0;
+        let progress = (nowSeconds * (1.35 * flowSpeed) - phaseDistance * 0.08) % 1;
+        if (progress < 0) progress += 1;
+        member.state.flowProgress = progress;
+      } else {
+        member.state.flowProgress = 0;
+      }
     }
 
     for (const entityId of attachedInComponent) {

@@ -88,6 +88,27 @@ const hotbarItems = HOTBAR_ENTITY_TYPES.map((entityType, i) => ({
   shape: "square"
 }));
 
+const SIDEBAR_RESOURCE_TYPES = [
+  RESOURCE_TYPES.IRON_ORE,
+  RESOURCE_TYPES.IRON_BAR,
+  RESOURCE_TYPES.IRON_PLATE,
+  RESOURCE_TYPES.COPPER_ORE,
+  RESOURCE_TYPES.COPPER_BAR,
+  RESOURCE_TYPES.COPPER_PLATE,
+  RESOURCE_TYPES.COPPER_WIRE,
+  RESOURCE_TYPES.HELIUM3,
+  RESOURCE_TYPES.ELECTRONICS,
+  RESOURCE_TYPES.MODULAR_COMPONENT,
+  RESOURCE_TYPES.SHIP_ALLOY,
+  RESOURCE_TYPES.ROCKET_FUEL
+];
+
+let sidebarScrollOffset = 0;
+let sidebarMaxVisibleItems = 12;
+
+const RESTRICTED_SHUTTLE_COL = 25;
+const RESTRICTED_SHUTTLE_ROW = 6;
+
 
 function setup() {
   canvas = createCanvas(600, 600);
@@ -159,6 +180,10 @@ function preload() {
   playerSpriteSheetFrontMove = loadImage('resources/player/pFrontMove.png');
   playerSpriteSheetSideIdle = loadImage('resources/player/pSideIdle.png');
   playerSpriteSheetSideMove = loadImage('resources/player/pSideMove.png');
+  hotbarOutlineImg = loadImage('resources/UI/hotbarFrame.png');
+  copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
+  ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
+  // heliumDepositImg = loadImage();
 }
 
 function centerCanvas() {
@@ -222,6 +247,17 @@ function drawMenu() {
 }
 
 function drawGame() {
+  const restrictedMode = (typeof isRestrictedModeEnabled === "function")
+    ? isRestrictedModeEnabled()
+    : false;
+
+  if (
+    drawGame.state &&
+    drawGame.state.isRestrictedMode !== restrictedMode
+  ) {
+    drawGame.state = null;
+  }
+
   if (!drawGame.state) {
     const tileSize = 32;
     const mapCols = 50;
@@ -270,23 +306,27 @@ function drawGame() {
       }
     };
 
-    // Resource patches for testing
-    for (let y = 6; y <= 7; y++) {
-      for (let x = 6; x <= 10; x++) {
-        setResourceNode(x, y, "iron");
+    if (restrictedMode) {
+      applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceNode);
+    } else {
+      // Resource patches for testing in creative mode
+      for (let y = 6; y <= 7; y++) {
+        for (let x = 6; x <= 10; x++) {
+          setResourceNode(x, y, "iron");
+        }
       }
-    }
 
-    for (let y = 10; y <= 12; y++) {
-      for (let x = 12; x <= 16; x++) {
-        setResourceNode(x, y, "copper");
+      for (let y = 10; y <= 12; y++) {
+        for (let x = 12; x <= 16; x++) {
+          setResourceNode(x, y, "copper");
+        }
       }
-    }
 
-    tiles[18][17].type = "helium3";
-    tiles[18][18].type = "helium3";
-    tiles[19][17].type = "helium3";
-    tiles[19][18].type = "helium3";
+      setResourceNode(17, 18, "helium3");
+      setResourceNode(18, 18, "helium3");
+      setResourceNode(17, 19, "helium3");
+      setResourceNode(18, 19, "helium3");
+    }
 
     const entities = [];
 
@@ -310,7 +350,11 @@ function drawGame() {
         speed: 180
       },
       feedback: {
-        rangeBlinkUntil: 0
+        rangeBlinkUntil: 0,
+        buildCostBlinkUntil: 0,
+        buildCostMessageUntil: 0,
+        buildCostEntityType: null,
+        buildCostMessageText: ""
       },
       placementFacing: "E",
       placementTubeShape: TUBE_SHAPES.STRAIGHT,
@@ -324,6 +368,13 @@ function drawGame() {
       },
       animationTimer: 0
     };
+
+    drawGame.state.isRestrictedMode = restrictedMode;
+    drawGame.state.shuttleEntityId = null;
+
+    if (restrictedMode) {
+      spawnRestrictedModeShuttle(drawGame.state);
+    }
   }
 
   const { config, map, player, feedback, entities } = drawGame.state;
@@ -337,6 +388,18 @@ function drawGame() {
   }
   if (drawGame.state.selectedBuilding === undefined) {
     drawGame.state.selectedBuilding = null;
+  }
+  if (feedback.buildCostBlinkUntil == null) {
+    feedback.buildCostBlinkUntil = 0;
+  }
+  if (feedback.buildCostMessageUntil == null) {
+    feedback.buildCostMessageUntil = 0;
+  }
+  if (feedback.buildCostEntityType === undefined) {
+    feedback.buildCostEntityType = null;
+  }
+  if (feedback.buildCostMessageText == null) {
+    feedback.buildCostMessageText = "";
   }
 
   if (drawGame.state.player.facing === undefined) {
@@ -389,6 +452,7 @@ function drawGame() {
   // --- Miner harvesting tick ---
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
+  updateRestrictedModeShuttleIntake(entities, dt);
 
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
@@ -475,6 +539,7 @@ push();
   drawEntities(entities, tileSize);
 
   const item = selectedHotbarSlot >= 0 ? getSelectedHotbarItem() : null;
+  let hologramTooltipItem = null;
   if (item && !isMouseOverHotbarArea()) {
     const holoHit = getTileAtScreenPosition(mouseX, mouseY);
     if (holoHit) {
@@ -489,18 +554,26 @@ push();
           item.entityType,
           holoHit.tile
         );
-        drawBuildingPlacementHologram(
-          hpx,
-          hpy,
-          tileSize,
-          item.color,
-          hotbarItemLabel(item),
-          drawGame.state.placementFacing || "E",
-          item.entityType,
-          previewOptions,
-          holoHit.col,
-          holoHit.row
-        );
+        try {
+          const hologramColor = shouldBlinkBuildHologram(item.entityType)
+            ? [240, 70, 70]
+            : item.color;
+          drawBuildingPlacementHologram(
+            hpx,
+            hpy,
+            tileSize,
+            hologramColor,
+            hotbarItemLabel(item),
+            drawGame.state.placementFacing || "E",
+            item.entityType,
+            previewOptions,
+            holoHit.col,
+            holoHit.row
+          );
+          hologramTooltipItem = item;
+        } catch (error) {
+          console.error("Placement hologram draw failed:", error);
+        }
       }
     }
   }
@@ -509,10 +582,172 @@ push();
 
   drawMiniMap(map, player, config, feedback);
   backButtonGame.draw();
-  drawSideBar();
   drawHotbar();
-  drawResourceHoverTooltip();
+  drawSideBar();
+  if (drawGame.state.isRestrictedMode) {
+    drawHotbarCostTooltip();
+    const drewHologramCostTooltip = drawHologramBuildCostTooltip(hologramTooltipItem);
+    if (!drewHologramCostTooltip) {
+      drawResourceHoverTooltip();
+    }
+  }
+  drawBuildCostFeedbackMessage();
+  drawActiveTubeFlowTooltip();
   updatePlayerAnimation();
+}
+
+function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceNode) {
+  if (!Array.isArray(tiles) || typeof setResourceNode !== "function") {
+    return;
+  }
+
+  const reserved = new Set();
+  const reserve = (x, y) => reserved.add(`${x},${y}`);
+  const isReserved = (x, y) => reserved.has(`${x},${y}`);
+  const isInside = (x, y) => x >= 0 && x < mapCols && y >= 0 && y < mapRows;
+
+  const clearResourceNode = (tile) => {
+    if (!tile) return;
+    if (tile.type === "iron" || tile.type === "copper" || tile.type === "helium3") {
+      tile.type = "empty";
+    }
+    if (
+      tile.resource === RESOURCE_TYPES.IRON_ORE ||
+      tile.resource === RESOURCE_TYPES.COPPER_ORE ||
+      tile.resource === RESOURCE_TYPES.HELIUM3
+    ) {
+      tile.resource = null;
+    }
+  };
+
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      clearResourceNode(tiles[y][x]);
+    }
+  }
+
+  // Reserve shuttle footprint so random scatter stays clear of it.
+  for (let y = RESTRICTED_SHUTTLE_ROW - 1; y <= RESTRICTED_SHUTTLE_ROW + 1; y++) {
+    for (let x = RESTRICTED_SHUTTLE_COL - 1; x <= RESTRICTED_SHUTTLE_COL + 1; x++) {
+      if (isInside(x, y)) {
+        reserve(x, y);
+      }
+    }
+  }
+
+  const placeDepositPatch = (centerX, centerY, radiusX, radiusY, type) => {
+    for (let dy = -radiusY; dy <= radiusY; dy++) {
+      for (let dx = -radiusX; dx <= radiusX; dx++) {
+        const x = centerX + dx;
+        const y = centerY + dy;
+        if (!isInside(x, y) || isReserved(x, y)) {
+          continue;
+        }
+        setResourceNode(x, y, type);
+        reserve(x, y);
+      }
+    }
+  };
+
+  // Small starter patches near the shuttle.
+  const nearShuttleRow = RESTRICTED_SHUTTLE_ROW + 4;
+  placeDepositPatch(RESTRICTED_SHUTTLE_COL - 6, nearShuttleRow, 1, 0, "iron");
+  placeDepositPatch(RESTRICTED_SHUTTLE_COL + 6, nearShuttleRow, 1, 0, "copper");
+
+  // Large center-left and center-right deposits.
+  const centerRow = Math.floor(mapRows / 2);
+  const leftCenterCol = Math.floor(mapCols * 0.3);
+  const rightCenterCol = Math.floor(mapCols * 0.7);
+  placeDepositPatch(leftCenterCol, centerRow, 2, 2, "iron");
+  placeDepositPatch(rightCenterCol, centerRow, 2, 2, "copper");
+
+  // Helium-3 near center-bottom.
+  const heliumRow = mapRows - 8;
+  const heliumCenterCol = Math.floor(mapCols / 2);
+  placeDepositPatch(heliumCenterCol, heliumRow, 1, 1, "helium3");
+
+  // Sparse scatter across the map to keep exploration useful.
+  const sparseScatterPlan = [
+    { type: "iron", count: 3 },
+    { type: "copper", count: 3 },
+    { type: "helium3", count: 2 }
+  ];
+
+  for (const group of sparseScatterPlan) {
+    let placed = 0;
+    let attempts = 0;
+    const maxAttempts = 500;
+
+    while (placed < group.count && attempts < maxAttempts) {
+      attempts++;
+      const x = Math.floor(Math.random() * mapCols);
+      const y = Math.floor(Math.random() * mapRows);
+      if (!isInside(x, y) || isReserved(x, y)) {
+        continue;
+      }
+
+      const tile = tiles[y] && tiles[y][x];
+      if (!tile || tile.entityId != null || tile.type !== "empty") {
+        continue;
+      }
+
+      setResourceNode(x, y, group.type);
+      reserve(x, y);
+      placed++;
+    }
+  }
+}
+
+function spawnRestrictedModeShuttle(state) {
+  if (!state || !state.map || !state.entities) {
+    return;
+  }
+
+  // Keep shuttle close to spawn and off current resource nodes.
+  const shuttleCol = RESTRICTED_SHUTTLE_COL;
+  const shuttleRow = RESTRICTED_SHUTTLE_ROW;
+  const footprintTiles = getSafeFootprintTilesAt(
+    ENTITY_TYPES.SHUTTLE,
+    shuttleCol,
+    shuttleRow
+  );
+
+  for (const entry of footprintTiles) {
+    const tile = state.map.tiles[entry.y] && state.map.tiles[entry.y][entry.x];
+    if (!tile || tile.entityId != null) {
+      return;
+    }
+  }
+
+  const centerTile = state.map.tiles[shuttleRow] && state.map.tiles[shuttleRow][shuttleCol];
+  if (!centerTile) {
+    return;
+  }
+
+  const shuttle = createEntity(ENTITY_TYPES.SHUTTLE, shuttleCol, shuttleRow, {});
+  shuttle.state.facing = "E";
+
+  state.entities.push(shuttle);
+
+  for (const entry of footprintTiles) {
+    const tile = state.map.tiles[entry.y][entry.x];
+    tile.entityId = shuttle.id;
+    tile.entity = shuttle;
+    tile.item = ENTITY_TYPES.SHUTTLE;
+    tile.colorOverride = null;
+  }
+
+  centerTile.building = {
+    color: getEntityFillRgb(ENTITY_TYPES.SHUTTLE),
+    label: getEntityShortLabel(ENTITY_TYPES.SHUTTLE),
+    name: "Crashed Shuttle",
+    entityType: ENTITY_TYPES.SHUTTLE,
+    facing: shuttle.state.facing,
+    entityId: shuttle.id
+  };
+  state.shuttleEntityId = shuttle.id;
+
+  updateConnections(state.entities);
 }
 
 /**
@@ -526,18 +761,291 @@ function updateMinerHarvesting(entities, dt) {
     const produced = entity.state.harvest(dt);
     if (produced <= 0) continue;
 
-    // Add to global resource counters
-    switch (entity.state.outputType) {
-      case RESOURCE_TYPES.IRON_ORE:
-        ironOre += produced;
-        break;
-      case RESOURCE_TYPES.COPPER_ORE:
-        copperOre += produced;
-        break;
-      case RESOURCE_TYPES.HELIUM3:
-        helium += produced;
-        break;
+    addProducedResource(entity.state.outputType, produced);
+  }
+}
+
+function getRestrictedModeShuttleEntity() {
+  if (!drawGame.state || !drawGame.state.isRestrictedMode) {
+    return null;
+  }
+
+  const { entities, shuttleEntityId } = drawGame.state;
+  let shuttle = shuttleEntityId != null
+    ? getEntityById(entities, shuttleEntityId)
+    : null;
+
+  if (!shuttle || shuttle.type !== ENTITY_TYPES.SHUTTLE) {
+    shuttle = entities.find((entity) => entity.type === ENTITY_TYPES.SHUTTLE) || null;
+  }
+
+  return shuttle && shuttle.type === ENTITY_TYPES.SHUTTLE ? shuttle : null;
+}
+
+function getRestrictedModeShuttleInventory() {
+  const shuttle = getRestrictedModeShuttleEntity();
+  const inventory = shuttle?.state?.inventory;
+  if (!inventory || typeof inventory !== "object") {
+    return null;
+  }
+
+  return inventory;
+}
+
+function getBuildCostForEntity(entityType) {
+  if (typeof ENTITY_BUILD_COSTS === "undefined" || !entityType) {
+    return null;
+  }
+  return ENTITY_BUILD_COSTS[entityType] || null;
+}
+
+function getResourceTypeLabel(resourceType) {
+  switch (resourceType) {
+    case RESOURCE_TYPES.IRON_ORE:
+      return "Iron Ore";
+    case RESOURCE_TYPES.IRON_BAR:
+      return "Iron Bar";
+    case RESOURCE_TYPES.IRON_PLATE:
+      return "Iron Plate";
+    case RESOURCE_TYPES.COPPER_ORE:
+      return "Copper Ore";
+    case RESOURCE_TYPES.COPPER_BAR:
+      return "Copper Bar";
+    case RESOURCE_TYPES.COPPER_PLATE:
+      return "Copper Plate";
+    case RESOURCE_TYPES.COPPER_WIRE:
+      return "Copper Wire";
+    case RESOURCE_TYPES.MODULAR_COMPONENT:
+      return "Modular Component";
+    case RESOURCE_TYPES.ELECTRONICS:
+      return "Electronics";
+    case RESOURCE_TYPES.SHIP_ALLOY:
+      return "Ship Alloy";
+    case RESOURCE_TYPES.ROCKET_FUEL:
+      return "Rocket Fuel";
+    case RESOURCE_TYPES.HELIUM3:
+      return "Helium-3";
+    default:
+      return String(resourceType || "Resource");
+  }
+}
+
+function getResourceIconForType(resourceType) {
+  switch (resourceType) {
+    case RESOURCE_TYPES.IRON_ORE:
+      return ironOreImg;
+    case RESOURCE_TYPES.IRON_BAR:
+      return ironBarImg;
+    case RESOURCE_TYPES.IRON_PLATE:
+      return ironPlateImg;
+    case RESOURCE_TYPES.COPPER_ORE:
+      return copperOreImg;
+    case RESOURCE_TYPES.COPPER_BAR:
+      return copperBarImg;
+    case RESOURCE_TYPES.COPPER_PLATE:
+      return copperPlateImg;
+    case RESOURCE_TYPES.COPPER_WIRE:
+      return copperWireImg;
+    case RESOURCE_TYPES.MODULAR_COMPONENT:
+      return modularComponentImg;
+    case RESOURCE_TYPES.ELECTRONICS:
+      return electronicsImg;
+    case RESOURCE_TYPES.HELIUM3:
+      return heliumImg;
+    case RESOURCE_TYPES.SHIP_ALLOY:
+      return shipAlloyImg;
+    case RESOURCE_TYPES.ROCKET_FUEL:
+      return rocketFuelImg;
+    default:
+      return null;
+  }
+}
+
+function getGlobalResourceCount(resourceType) {
+  switch (resourceType) {
+    case RESOURCE_TYPES.IRON_ORE:
+      return ironOre;
+    case RESOURCE_TYPES.IRON_BAR:
+      return ironBar;
+    case RESOURCE_TYPES.IRON_PLATE:
+      return ironPlate;
+    case RESOURCE_TYPES.COPPER_ORE:
+      return copperOre;
+    case RESOURCE_TYPES.COPPER_BAR:
+      return copperBar;
+    case RESOURCE_TYPES.COPPER_PLATE:
+      return copperPlate;
+    case RESOURCE_TYPES.COPPER_WIRE:
+      return copperWire;
+    case RESOURCE_TYPES.HELIUM3:
+      return helium;
+    case RESOURCE_TYPES.ELECTRONICS:
+      return electronics;
+    case RESOURCE_TYPES.MODULAR_COMPONENT:
+      return modularComponent;
+    case RESOURCE_TYPES.SHIP_ALLOY:
+      return shipAlloy;
+    case RESOURCE_TYPES.ROCKET_FUEL:
+      return rocketFuel;
+    default:
+      return 0;
+  }
+}
+
+function getMissingBuildResources(entityType, inventory) {
+  const cost = getBuildCostForEntity(entityType);
+  if (!cost) {
+    return [];
+  }
+
+  const missing = [];
+  const source = inventory || {};
+  for (const [resourceType, required] of Object.entries(cost)) {
+    const have = Number(source[resourceType]) || 0;
+    if (have < required) {
+      missing.push({
+        resourceType,
+        needed: required - have
+      });
     }
+  }
+  return missing;
+}
+
+function spendBuildResources(inventory, entityType) {
+  const cost = getBuildCostForEntity(entityType);
+  if (!cost || !inventory) {
+    return;
+  }
+
+  for (const [resourceType, required] of Object.entries(cost)) {
+    const have = Number(inventory[resourceType]) || 0;
+    inventory[resourceType] = Math.max(0, have - required);
+  }
+}
+
+function refundBuildResources(inventory, entityType) {
+  const cost = getBuildCostForEntity(entityType);
+  if (!cost || !inventory) {
+    return;
+  }
+
+  for (const [resourceType, required] of Object.entries(cost)) {
+    const have = Number(inventory[resourceType]) || 0;
+    inventory[resourceType] = have + required;
+  }
+}
+
+function triggerBuildCostFeedback(entityType, missingResources) {
+  if (!drawGame.state || !drawGame.state.feedback) {
+    return;
+  }
+
+  const feedback = drawGame.state.feedback;
+  feedback.buildCostEntityType = entityType || null;
+  feedback.buildCostBlinkUntil = millis() + 900;
+
+  if (!Array.isArray(missingResources) || missingResources.length === 0) {
+    feedback.buildCostMessageText = "Insufficient resources.";
+  } else {
+    const details = missingResources
+      .map((entry) => `${entry.needed} ${getResourceTypeLabel(entry.resourceType)}`)
+      .join(", ");
+    feedback.buildCostMessageText = `Missing: ${details}`;
+  }
+
+  feedback.buildCostMessageUntil = millis() + 1600;
+}
+
+function shouldBlinkBuildHologram(entityType) {
+  if (!drawGame.state || !drawGame.state.feedback || !entityType) {
+    return false;
+  }
+
+  const feedback = drawGame.state.feedback;
+  if (feedback.buildCostEntityType !== entityType) {
+    return false;
+  }
+
+  const remaining = feedback.buildCostBlinkUntil - millis();
+  if (remaining <= 0) {
+    return false;
+  }
+
+  const phase = Math.floor((900 - remaining) / 120);
+  return phase % 2 === 0;
+}
+
+function drawBuildCostFeedbackMessage() {
+  if (!drawGame.state || !drawGame.state.feedback) {
+    return;
+  }
+
+  const feedback = drawGame.state.feedback;
+  const remaining = feedback.buildCostMessageUntil - millis();
+  if (remaining <= 0 || !feedback.buildCostMessageText) {
+    return;
+  }
+
+  push();
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(12);
+  const padX = 10;
+  const boxH = 24;
+  const contentW = textWidth(feedback.buildCostMessageText) + padX * 2;
+  const boxW = constrain(contentW, 160, width - 20);
+  const boxX = width / 2;
+  const boxY = 20;
+
+  rectMode(CENTER);
+  fill(255, 235, 235, 245);
+  stroke(210, 70, 70);
+  strokeWeight(1.5);
+  rect(boxX, boxY, boxW, boxH, 5);
+
+  noStroke();
+  fill(120, 25, 25);
+  text(feedback.buildCostMessageText, boxX, boxY + 0.5);
+  pop();
+}
+
+function updateRestrictedModeShuttleIntake(entities, dt) {
+  const shuttle = getRestrictedModeShuttleEntity();
+  if (!shuttle || !Number.isFinite(dt) || dt <= 0) {
+    return;
+  }
+
+  const shuttleState = shuttle.state;
+  const inventory = shuttleState?.inventory;
+  if (!inventory || typeof inventory !== "object") {
+    return;
+  }
+
+  if (!shuttleState.pipeIntakeAccumulators || typeof shuttleState.pipeIntakeAccumulators !== "object") {
+    shuttleState.pipeIntakeAccumulators = {};
+  }
+
+  const inputs = getIncomingTubeInputs(entities, shuttle.id);
+  for (const input of inputs) {
+    const resourceType = input.outputType;
+    const rate = Number(input.rate) || 0;
+    if (!resourceType || rate <= 0) {
+      continue;
+    }
+
+    const accumulators = shuttleState.pipeIntakeAccumulators;
+    const previous = Number(accumulators[resourceType]) || 0;
+    const total = previous + rate * dt;
+    const wholeUnits = Math.floor(total);
+    accumulators[resourceType] = total - wholeUnits;
+
+    if (wholeUnits <= 0) {
+      continue;
+    }
+
+    const current = Number(inventory[resourceType]) || 0;
+    inventory[resourceType] = current + wholeUnits;
   }
 }
 
@@ -584,6 +1092,35 @@ function addProducedResource(resourceType, count) {
     default:
       break;
   }
+}
+
+function getSafeFootprintOffsets(entityType) {
+  const fallback = [{ x: 0, y: 0 }];
+  if (typeof getEntityFootprintOffsets !== "function") {
+    return fallback;
+  }
+
+  const offsets = getEntityFootprintOffsets(entityType);
+  if (!Array.isArray(offsets) || offsets.length === 0) {
+    return fallback;
+  }
+
+  const normalized = offsets.filter(
+    (offset) =>
+      offset &&
+      Number.isFinite(offset.x) &&
+      Number.isFinite(offset.y)
+  );
+
+  return normalized.length > 0 ? normalized : fallback;
+}
+
+function getSafeFootprintTilesAt(entityType, tileX, tileY) {
+  const offsets = getSafeFootprintOffsets(entityType);
+  return offsets.map((offset) => ({
+    x: tileX + offset.x,
+    y: tileY + offset.y
+  }));
 }
 
 function updateFactoryProduction(entities, dt) {
@@ -680,13 +1217,200 @@ function updatePlayerAnimation() {
   }
 }
 
+function getTubeRenderPathData(entity, tileSize) {
+  if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
+    return null;
+  }
+
+  const offsets = getTubePortOffsets(entity);
+  const centerX = entity.tileX * tileSize + tileSize / 2;
+  const centerY = entity.tileY * tileSize + tileSize / 2;
+  const endpointDistance = tileSize * 0.42;
+  const inputPoint = {
+    x: centerX + offsets.input.x * endpointDistance,
+    y: centerY + offsets.input.y * endpointDistance
+  };
+  const outputPoint = {
+    x: centerX + offsets.output.x * endpointDistance,
+    y: centerY + offsets.output.y * endpointDistance
+  };
+
+  const segments = [
+    {
+      x1: inputPoint.x,
+      y1: inputPoint.y,
+      x2: centerX,
+      y2: centerY
+    },
+    {
+      x1: centerX,
+      y1: centerY,
+      x2: outputPoint.x,
+      y2: outputPoint.y
+    }
+  ].map((segment) => ({
+    ...segment,
+    len: Math.hypot(segment.x2 - segment.x1, segment.y2 - segment.y1)
+  }));
+
+  const totalLength = segments.reduce((sum, segment) => sum + segment.len, 0);
+  return { segments, totalLength, centerX, centerY };
+}
+
+function getPointAlongTubePath(pathData, t) {
+  if (!pathData || !Array.isArray(pathData.segments) || pathData.totalLength <= 0) {
+    return { x: 0, y: 0 };
+  }
+
+  let normalized = Number.isFinite(t) ? t : 0;
+  normalized = normalized % 1;
+  if (normalized < 0) normalized += 1;
+  let distance = normalized * pathData.totalLength;
+
+  for (const segment of pathData.segments) {
+    if (segment.len <= 0) {
+      continue;
+    }
+
+    if (distance <= segment.len) {
+      const ratio = distance / segment.len;
+      return {
+        x: lerp(segment.x1, segment.x2, ratio),
+        y: lerp(segment.y1, segment.y2, ratio)
+      };
+    }
+
+    distance -= segment.len;
+  }
+
+  const last = pathData.segments[pathData.segments.length - 1];
+  return { x: last.x2, y: last.y2 };
+}
+
+function getTubeItemGlowColor(resourceType) {
+  switch (resourceType) {
+    case RESOURCE_TYPES.IRON_ORE: return [120, 120, 125];
+    case RESOURCE_TYPES.IRON_BAR: return [180, 180, 190];
+    case RESOURCE_TYPES.IRON_PLATE: return [210, 210, 220];
+    case RESOURCE_TYPES.COPPER_ORE: return [190, 120, 70];
+    case RESOURCE_TYPES.COPPER_BAR: return [210, 130, 60];
+    case RESOURCE_TYPES.COPPER_PLATE: return [232, 160, 82];
+    case RESOURCE_TYPES.COPPER_WIRE: return [244, 186, 90];
+    case RESOURCE_TYPES.HELIUM3: return [95, 220, 255];
+    case RESOURCE_TYPES.MODULAR_COMPONENT: return [165, 215, 255];
+    case RESOURCE_TYPES.ELECTRONICS: return [120, 255, 180];
+    default: return [235, 235, 235];
+  }
+}
+
+function drawTubeFlowEffects(entity, tileSize) {
+  if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
+    return;
+  }
+
+  const pathData = getTubeRenderPathData(entity, tileSize);
+  if (!pathData) {
+    return;
+  }
+
+  const state = entity.state || {};
+  const flowState = state.flowState || "off";
+  const flowDistance = Number.isFinite(state.flowDistance) ? state.flowDistance : 0;
+  const phaseOffset = Number(state.flowPhaseOffset) || 0;
+  const now = millis() / 1000;
+
+  noFill();
+  stroke(40, 40, 48, 220);
+  strokeWeight(tileSize * 0.22);
+  strokeCap(ROUND);
+  for (const segment of pathData.segments) {
+    line(segment.x1, segment.y1, segment.x2, segment.y2);
+  }
+
+  let signalRgb = [190, 70, 70];
+  if (flowState === "flowing") {
+    signalRgb = [60, 235, 110];
+  }
+
+  const staticSlots = [0.2, 0.5, 0.8];
+  for (let i = 0; i < staticSlots.length; i++) {
+    let t = staticSlots[i];
+    if (flowState === "flowing") {
+      t = (now * 0.85 - flowDistance * 0.07 - i * 0.22 - phaseOffset * 0.04) % 1;
+      if (t < 0) t += 1;
+    }
+
+    const point = getPointAlongTubePath(pathData, t);
+    const pulse = flowState === "flowing"
+      ? 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(now * 7 - flowDistance * 0.8 - phaseOffset - i * 1.6))
+      : 1;
+    const alpha = flowState === "flowing"
+      ? Math.floor(90 + 120 * pulse)
+      : 170;
+    const radius = tileSize * (flowState === "flowing" ? 0.19 : 0.16);
+    noStroke();
+    fill(signalRgb[0], signalRgb[1], signalRgb[2], alpha);
+    circle(point.x, point.y, radius);
+  }
+
+  if (flowState === "flowing") {
+    const progress = Number.isFinite(state.flowProgress)
+      ? state.flowProgress
+      : ((now * 1.35 - flowDistance * 0.08 - phaseOffset * 0.03) % 1 + 1) % 1;
+    const itemPoint = getPointAlongTubePath(pathData, progress);
+    const itemRgb = getTubeItemGlowColor(state.carriedItem || null);
+
+    noStroke();
+    fill(itemRgb[0], itemRgb[1], itemRgb[2], 180);
+    circle(itemPoint.x, itemPoint.y, tileSize * 0.24);
+    fill(itemRgb[0], itemRgb[1], itemRgb[2], 245);
+    circle(itemPoint.x, itemPoint.y, tileSize * 0.12);
+  }
+}
+
+function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
+  if (!tubeState || tubeState.flowState !== "flowing") {
+    return false;
+  }
+
+  const flowSpeed = Number(tubeState.flowSpeed) || 1;
+  const flowDistance = Number.isFinite(tubeState.flowDistance)
+    ? tubeState.flowDistance
+    : 0;
+  const phaseOffset = Number(tubeState.flowPhaseOffset) || 0;
+  let wave = (nowSeconds * (1.7 * flowSpeed) - flowDistance * 0.18 - phaseOffset) % 1;
+  if (wave < 0) {
+    wave += 1;
+  }
+
+  // Short duty cycle gives a clear source-to-sink propagation.
+  return wave < 0.34;
+}
+
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
+  const nowSeconds = millis() / 1000;
 
   for (const entity of entities) {
-    const px = entity.tileX * tileSize;
-    const py = entity.tileY * tileSize;
+    const footprintOffsets = getSafeFootprintOffsets(entity.type);
+    let minOffsetX = Infinity;
+    let maxOffsetX = -Infinity;
+    let minOffsetY = Infinity;
+    let maxOffsetY = -Infinity;
+    for (const offset of footprintOffsets) {
+      minOffsetX = min(minOffsetX, offset.x);
+      maxOffsetX = max(maxOffsetX, offset.x);
+      minOffsetY = min(minOffsetY, offset.y);
+      maxOffsetY = max(maxOffsetY, offset.y);
+    }
+
+    const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
+    const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
+    const px = (entity.tileX + minOffsetX) * tileSize;
+    const py = (entity.tileY + minOffsetY) * tileSize;
+    const drawWidth = footprintWidthTiles * tileSize;
+    const drawHeight = footprintHeightTiles * tileSize;
 
     if (entity.type === ENTITY_TYPES.TUBE) {
       push();
@@ -733,24 +1457,24 @@ function drawEntities(entities, tileSize, map) {
       const rgb = getEntityFillRgb(entity.type);
       fill(rgb[0], rgb[1], rgb[2]);
 
-      rect(px + 4, py + 4, tileSize - 8, tileSize - 8, 4);
+      rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
 
       if (entity.state.isBroken) {
         stroke(255, 0, 0);
         strokeWeight(3);
-        line(px + 6, py + 6, px + tileSize - 6, py + tileSize - 6);
-        line(px + tileSize - 6, py + 6, px + 6, py + tileSize - 6);
+        line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
+        line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
         strokeWeight(1);
       }
 
       noStroke();
       const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
       fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-      circle(px + tileSize - 8, py + 8, 8);
+      circle(px + drawWidth - 8, py + 8, 8);
 
       fill(20);
       noStroke();
-      text(getEntityShortLabel(entity.type), px + tileSize / 2, py + tileSize / 2);
+      text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
     }
     
     drawEntityPorts(entity, tileSize);
@@ -803,10 +1527,65 @@ function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
   return tile.entityId !== ignoreEntityId;
 }
 
-function drawEntityPorts(entity, tileSize) {
-  if (entity.type !== ENTITY_TYPES.TUBE && entity.state && entity.state.isConnected) {
+function shouldExposeConstructorOutputPort(entity, port = null) {
+  if (!entity || entity.type !== ENTITY_TYPES.CONSTRUCTOR) {
+    return false;
+  }
+
+  const outputType = entity.state?.outputType || null;
+  const isLateStageOutput =
+    outputType === RESOURCE_TYPES.ELECTRONICS ||
+    outputType === RESOURCE_TYPES.SHIP_ALLOY;
+  if (!isLateStageOutput) {
+    return false;
+  }
+
+  if (port && port.kind !== "output") {
+    return false;
+  }
+  return true;
+}
+
+function drawConstructorOutputItemBadge(portPx, portPy, tileSize, outputType) {
+  if (!outputType) {
     return;
   }
+
+  const badgeSize = max(14, tileSize * 0.46);
+  const icon = getResourceIconForType(outputType);
+
+  noStroke();
+  fill(252, 252, 255, 238);
+  circle(portPx, portPy, badgeSize);
+
+  if (icon) {
+    const iconSize = badgeSize * 0.72;
+    imageMode(CENTER);
+    image(icon, portPx, portPy, iconSize, iconSize);
+    imageMode(CORNER);
+    return;
+  }
+
+  const fallback =
+    outputType === RESOURCE_TYPES.SHIP_ALLOY
+      ? "SA"
+      : outputType === RESOURCE_TYPES.ELECTRONICS
+        ? "E"
+        : "?";
+  const fontSize = fallback.length > 1 ? 7 : 9;
+  fill(30, 30, 36);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(fontSize);
+  text(fallback, portPx, portPy + 0.3);
+  textStyle(NORMAL);
+}
+
+function drawEntityPorts(entity, tileSize) {
+  const hideConnectedNonTube =
+    entity.type !== ENTITY_TYPES.TUBE &&
+    entity.state &&
+    entity.state.isConnected;
   const ports = entity.type === ENTITY_TYPES.TUBE
     ? getTubePortTiles(entity)
     : getEntityConnectionPorts(entity);
@@ -815,7 +1594,14 @@ function drawEntityPorts(entity, tileSize) {
   const arrowLen = tileSize * 0.45;
 
   for (const port of ports) {
-    if (isPortTileBlockedByBuilding(port.worldX, port.worldY, entity.id)) {
+    const forceExposeOutput = shouldExposeConstructorOutputPort(entity, port);
+    if (hideConnectedNonTube && !forceExposeOutput) {
+      continue;
+    }
+    if (
+      !forceExposeOutput &&
+      isPortTileBlockedByBuilding(port.worldX, port.worldY, entity.id)
+    ) {
       continue;
     }
     const portPx = port.worldX * tileSize + tileSize / 2;
@@ -832,6 +1618,14 @@ function drawEntityPorts(entity, tileSize) {
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [255, 210, 0], arrowLen);
     } else if (port.kind === "output") {
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [230, 60, 60], arrowLen);
+      if (forceExposeOutput) {
+        drawConstructorOutputItemBadge(
+          portPx,
+          portPy,
+          tileSize,
+          entity.state?.outputType || null
+        );
+      }
     } else {
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [80, 180, 200], arrowLen);
       drawDirectionalArrow(portPx, portPy, -dirX, -dirY, [80, 180, 200], arrowLen);
@@ -909,12 +1703,26 @@ function getOrBuildWorldLayer(state) {
       const tile = map.tiles[y][x];
       const px = x * tileSize;
       const py = y * tileSize;
-      if ((tile.type === "empty" || tile.type === "dirt") && bgTiles[tile.bgIndex] && bgTiles[tile.bgIndex].width > 0) {
-        layer.image(bgTiles[tile.bgIndex], px, py, tileSize, tileSize);
+
+      const bgIndex = Number.isInteger(tile.bgIndex) ? tile.bgIndex : 0;
+      const baseTileImg = bgTiles[bgIndex] || bgTiles[0] || null;
+      if (baseTileImg && baseTileImg.width > 0) {
+        layer.image(baseTileImg, px, py, tileSize, tileSize);
       } else {
-        const tileColor = getTileBaseColor(tile);
-        layer.fill(tileColor[0], tileColor[1], tileColor[2]);
+        const fallbackColor = getTileBaseColor(tile);
+        layer.fill(fallbackColor[0], fallbackColor[1], fallbackColor[2]);
         layer.rect(px, py, tileSize, tileSize);
+      }
+
+      // Then draw specific resource node deposit images on top if they exist
+      let depositImg = null; // Reset depositImg for each tile
+      if (tile.type === "iron") depositImg = ironDepositImg;
+      else if (tile.type === "copper") depositImg = copperDepositImg;
+      // else if (tile.type === "helium3") depositImg = heliumDepositImg;
+
+      if (depositImg) {
+        // Draw deposit overlay on top of the base terrain tile.
+        layer.image(depositImg, px, py, tileSize, tileSize);
       }
     }
   }
@@ -985,6 +1793,217 @@ function sideBarText(resource) {
   }
 }
 
+function getEntityDisplayName(entityType) {
+  const idx = HOTBAR_ENTITY_TYPES.indexOf(entityType);
+  if (idx >= 0) {
+    return HOTBAR_BUILDING_NAMES[idx];
+  }
+  return entityType ? String(entityType) : "Building";
+}
+
+function getSidebarResourceBuildUses(resourceType) {
+  if (!resourceType) {
+    return [];
+  }
+
+  if (typeof RESOURCE_TOOLTIP_RECIPES !== "undefined") {
+    const customRoutes = RESOURCE_TOOLTIP_RECIPES[resourceType];
+    if (Array.isArray(customRoutes) && customRoutes.length > 0) {
+      const routes = [];
+      for (const route of customRoutes) {
+        const ingredientsRaw = Array.isArray(route?.ingredients)
+          ? route.ingredients
+          : [];
+        const ingredients = ingredientsRaw
+          .map((ingredient) => ({
+            resourceType: ingredient?.type || null,
+            amount: Number(ingredient?.count) || 0
+          }))
+          .filter((ingredient) => ingredient.resourceType && ingredient.amount > 0);
+        if (ingredients.length === 0) {
+          continue;
+        }
+        routes.push({
+          buildingName: String(route?.building || "constructor").toLowerCase(),
+          ingredients
+        });
+      }
+      if (routes.length > 0) {
+        return routes;
+      }
+    }
+  }
+
+  if (typeof ENTITY_BUILD_COSTS === "undefined") {
+    return [];
+  }
+
+  const uses = [];
+  for (const [entityType, cost] of Object.entries(ENTITY_BUILD_COSTS)) {
+    const required = Number(cost?.[resourceType]) || 0;
+    if (required > 0) {
+      const ingredients = Object.entries(cost)
+        .map(([type, amount]) => ({
+          resourceType: type,
+          amount: Number(amount) || 0
+        }))
+        .filter((ingredient) => ingredient.amount > 0);
+      uses.push({
+        buildingName: getEntityDisplayName(entityType).toLowerCase(),
+        ingredients
+      });
+    }
+  }
+  return uses;
+}
+
+function getHoveredSidebarResourceItem() {
+  if (
+    currentState !== "GAME" ||
+    !drawGame.state ||
+    !isSidebarOpen
+  ) {
+    return null;
+  }
+
+  const mapY = drawGame.state.config.topMargin;
+  const rX = sidebarX + 17.5;
+  const contentStartY = mapY + 5;
+  const visibleHeight = 490;
+  const itemSpacing = Math.floor(visibleHeight / SIDEBAR_RESOURCE_TYPES.length);
+  const rSize = Math.min(35, itemSpacing - 5);
+
+  for (let i = 0; i < SIDEBAR_RESOURCE_TYPES.length; i++) {
+    let rY = contentStartY + i * itemSpacing;
+
+    if (
+      mouseX >= rX &&
+      mouseX <= rX + rSize &&
+      mouseY >= rY &&
+      mouseY <= rY + rSize
+    ) {
+      return {
+        resourceType: SIDEBAR_RESOURCE_TYPES[i],
+        icon: getResourceIconForType(SIDEBAR_RESOURCE_TYPES[i])
+      };
+    }
+  }
+
+  return null;
+}
+
+function isMouseOverSidebarResourceIcon() {
+  return !!getHoveredSidebarResourceItem();
+}
+
+function drawSidebarResourceHoverTooltip(hoveredItem) {
+  if (!hoveredItem || !hoveredItem.resourceType) {
+    return false;
+  }
+
+  const uses = getSidebarResourceBuildUses(hoveredItem.resourceType);
+  if (uses.length === 0) {
+    return false;
+  }
+
+  const pad = 8;
+  const lineGap = 4;
+  const ingredientGap = 6;
+  const iconSize = 22;
+
+  push();
+  textAlign(LEFT, TOP);
+  textSize(12);
+  textStyle(NORMAL);
+  const textH = textAscent() + textDescent();
+  const lineH = max(textH, iconSize);
+
+  let maxLineW = 0;
+  for (const use of uses) {
+    let lineW = 0;
+    for (let i = 0; i < use.ingredients.length; i++) {
+      const ingredient = use.ingredients[i];
+      if (i > 0) {
+        lineW += textWidth(", ");
+      }
+      const amountText = `${ingredient.amount}x`;
+      lineW += textWidth(amountText);
+      const icon = getResourceIconForType(ingredient.resourceType);
+      if (icon) {
+        lineW += 4 + iconSize;
+      } else {
+        lineW += 4 + textWidth(getResourceTypeLabel(ingredient.resourceType).toLowerCase());
+      }
+      if (i < use.ingredients.length - 1) {
+        lineW += ingredientGap;
+      }
+    }
+    lineW += textWidth(" in ");
+    lineW += textWidth(use.buildingName || "constructor");
+    maxLineW = max(maxLineW, lineW);
+  }
+
+  const boxW = maxLineW + pad * 2;
+  const boxH = pad * 2 + uses.length * lineH + (uses.length - 1) * lineGap;
+
+  let bx = mouseX + 14;
+  let by = mouseY + 14;
+  if (bx + boxW > width - 6) {
+    bx = mouseX - boxW - 14;
+  }
+  if (by + boxH > height - 6) {
+    by = mouseY - boxH - 14;
+  }
+  bx = constrain(bx, 6, width - boxW - 6);
+  by = constrain(by, 6, height - boxH - 6);
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  let lineY = by + pad;
+  for (const use of uses) {
+    textStyle(NORMAL);
+    fill(28, 28, 36);
+    let x = bx + pad;
+    for (let i = 0; i < use.ingredients.length; i++) {
+      const ingredient = use.ingredients[i];
+      if (i > 0) {
+        text(", ", x, lineY + (lineH - textH) / 2);
+        x += textWidth(", ");
+      }
+
+      const amountText = `${ingredient.amount}x`;
+      text(amountText, x, lineY + (lineH - textH) / 2);
+      x += textWidth(amountText);
+
+      const icon = getResourceIconForType(ingredient.resourceType);
+      if (icon) {
+        imageMode(CORNER);
+        image(icon, x + 4, lineY + (lineH - iconSize) / 2, iconSize, iconSize);
+        x += 4 + iconSize;
+      } else {
+        const label = getResourceTypeLabel(ingredient.resourceType).toLowerCase();
+        text(" " + label, x + 4, lineY + (lineH - textH) / 2);
+        x += 4 + textWidth(label) + textWidth(" ");
+      }
+
+      if (i < use.ingredients.length - 1) {
+        x += ingredientGap;
+      }
+    }
+
+    text(" in ", x, lineY + (lineH - textH) / 2);
+    x += textWidth(" in ");
+    text(use.buildingName || "constructor", x, lineY + (lineH - textH) / 2);
+    lineY += lineH + lineGap;
+  }
+
+  pop();
+  return true;
+}
+
 function drawSideBar() {
   if (!drawGame.state) return;
 
@@ -999,55 +2018,58 @@ function drawSideBar() {
 
   image(sideBarFrameImg, sidebarX, mapY - 15, sidebarWidth + 7, 510);
 
-  // Clip to map area so sidebar doesn't draw over hotbar or back button
   drawingContext.save();
   drawingContext.beginPath();
   drawingContext.rect(mapX, mapY, mapW, mapH);
   drawingContext.clip();
 
-  // 1. Define our sidebar data dynamically each frame
-  const sidebarItems = [
-    { img: ironOreImg, count: ironOre },
-    { img: ironBarImg, count: ironBar },
-    { img: ironPlateImg, count: ironPlate },
-    { img: copperOreImg, count: copperOre },
-    { img: copperBarImg, count: copperBar },
-    { img: copperPlateImg, count: copperPlate },
-    { img: copperWireImg, count: copperWire },
-    { img: heliumImg, count: helium },
-    { img: electronicsImg, count: electronics },
-    { img: modularComponentImg, count: modularComponent },
-    { img: shipAlloyImg, count: shipAlloy },
-    { img: rocketFuelImg, count: rocketFuel }
-  ];
+  // Restricted mode inventory
+  const restrictedInventory = getRestrictedModeShuttleInventory();
+  const restrictedMode = !!(drawGame.state && drawGame.state.isRestrictedMode);
+  const getCount = (resourceType, fallback) => {
+    if (!restrictedMode) return fallback;
+    if (!restrictedInventory) return 0;
+    const value = Number(restrictedInventory[resourceType]);
+    return Number.isFinite(value) ? value : 0;
+  };
+
+  const sidebarItems = SIDEBAR_RESOURCE_TYPES.map((resourceType) => ({
+    resourceType,
+    img: getResourceIconForType(resourceType),
+    count: getCount(resourceType, getGlobalResourceCount(resourceType))
+  }));
+
+  // Fit all items by calculating spacing from available height
+  const contentStartY = mapY + 5;
+  const visibleHeight = 490;
+  const itemSpacing = Math.floor(visibleHeight / sidebarItems.length);
+  const rSize = Math.min(35, itemSpacing - 5);
 
   fill(255, 200, 100);
   noStroke();
-  let h = mapY + 5;
-
-  // 2. Loop through the array directly, removing all the if/else chains
+  
   for (let i = 0; i < sidebarItems.length; i++) {
     let item = sidebarItems[i];
     let rX = sidebarX + 17.5;
-    let rY = h;
-    let rSize = 35;
-    
+    let rY = contentStartY + i * itemSpacing;
+
     // Draw Icon
-    image(item.img, rX, rY, rSize, rSize);
+    if (item.img) {
+      image(item.img, rX, rY, rSize, rSize);
+    }
 
     // Draw Text
     textAlign(RIGHT, BOTTOM);
     let centerX = rX + (rSize / 2) + 17;
     let centerY = rY + (rSize / 2) + 17;
-    
+
     sideBarText(item.count);
     text(item.count, centerX, centerY);
 
-    // Reset styles for next item
+    // Reset styles
     noStroke();
     textStyle(NORMAL);
     fill(255, 200, 100);
-    h += 40;
   }
 
   drawingContext.restore();
@@ -1079,6 +2101,9 @@ function drawSideBar() {
       cursor('default');
     }
   }
+
+  const hoveredSidebarItem = getHoveredSidebarResourceItem();
+  drawSidebarResourceHoverTooltip(hoveredSidebarItem);
 }
 
 function getSelectedHotbarItem() {
@@ -1088,18 +2113,302 @@ function getSelectedHotbarItem() {
   return hotbarItems[selectedHotbarSlot];
 }
 
-function isMouseOverHotbarArea() {
+function getHotbarLayout() {
   const slotSize = 42;
   const gap = 8;
   const totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
   const startX = width / 2 - totalWidth / 2;
   const y = height - 60;
+  return { slotSize, gap, totalWidth, startX, y };
+}
+
+function isMouseOverHotbarArea() {
+  const { slotSize, totalWidth, startX, y } = getHotbarLayout();
   return (
     mouseY >= y - 4 &&
     mouseY <= y + slotSize + 8 &&
     mouseX >= startX - 8 &&
     mouseX <= startX + totalWidth + 8
   );
+}
+
+function getHoveredHotbarSlot() {
+  if (currentState !== "GAME") {
+    return -1;
+  }
+
+  const { slotSize, gap, startX, y } = getHotbarLayout();
+  for (let i = 0; i < hotbarSlots; i++) {
+    const x = startX + i * (slotSize + gap);
+    if (
+      mouseX >= x &&
+      mouseX <= x + slotSize &&
+      mouseY >= y &&
+      mouseY <= y + slotSize
+    ) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function getHotbarCostTooltipLines(entityType) {
+  const cost = getBuildCostForEntity(entityType);
+  if (!cost) {
+    return [];
+  }
+
+  return Object.entries(cost).map(([resourceType, amount]) => ({
+    resourceType,
+    amount,
+    icon: getResourceIconForType(resourceType),
+    label: getResourceTypeLabel(resourceType)
+  }));
+}
+
+function getHotbarTooltipDescription(entityType) {
+  if (typeof ENTITY_HOTBAR_DESCRIPTIONS === "undefined" || !entityType) {
+    return "";
+  }
+  const description = ENTITY_HOTBAR_DESCRIPTIONS[entityType];
+  return typeof description === "string" ? description : "";
+}
+
+function drawHotbarCostTooltip() {
+  if (currentState !== "GAME") {
+    return;
+  }
+  if (!drawGame.state || !drawGame.state.isRestrictedMode) {
+    return;
+  }
+
+  const hoveredSlot = getHoveredHotbarSlot();
+  if (hoveredSlot < 0) {
+    return;
+  }
+
+  const item = hotbarItems[hoveredSlot];
+  if (!item || !item.entityType) {
+    return;
+  }
+
+  const lines = getHotbarCostTooltipLines(item.entityType);
+  if (lines.length === 0) {
+    return;
+  }
+  const description = getHotbarTooltipDescription(item.entityType);
+  const hasDescription = description.length > 0;
+
+  const { slotSize, y } = getHotbarLayout();
+  const title = item.name;
+
+  push();
+  textAlign(CENTER, TOP);
+
+  textStyle(BOLD);
+  textSize(12);
+  const titleW = textWidth(title);
+  const titleH = textAscent() + textDescent();
+
+  textStyle(NORMAL);
+  textSize(11);
+  let iconSize = 24; // Keep current size for 3+ requirements
+  if (lines.length === 2) {
+    iconSize = 28; // Slightly bigger for 2 requirements
+  } else if (lines.length === 1) {
+    iconSize = 34; // Bigger for 1 requirement
+  }
+  const iconGap = 4;
+  const textGap = 6;
+  const requirementGap = 12;
+  const requirementBlocks = [];
+  let requirementsW = 0;
+  for (const line of lines) {
+    const amountText = `${line.amount}x`;
+    const amountW = textWidth(amountText);
+    const labelW = line.icon ? 0 : textWidth(line.label);
+    const detailW = line.icon
+      ? iconGap + iconSize
+      : textGap + labelW;
+    const blockW = amountW + detailW;
+    requirementBlocks.push({
+      ...line,
+      amountText,
+      amountW,
+      blockW
+    });
+    requirementsW += blockW;
+  }
+  if (requirementBlocks.length > 1) {
+    requirementsW += requirementGap * (requirementBlocks.length - 1);
+  }
+  const requirementTextH = textAscent() + textDescent();
+  textSize(10);
+  const descriptionW = hasDescription ? textWidth(description) : 0;
+  const descriptionH = hasDescription ? (textAscent() + textDescent()) : 0;
+
+  const pad = 8;
+  const requirementsH = Math.max(iconSize, requirementTextH);
+  const contentW = max(titleW, requirementsW, descriptionW);
+  const boxW = contentW + pad * 2;
+  const descriptionBlockH = hasDescription ? (4 + descriptionH) : 0;
+  const boxH = pad * 2 + titleH + descriptionBlockH + 6 + requirementsH;
+  let bx = width / 2 - boxW / 2;
+  bx = constrain(bx, 6, width - boxW - 6);
+  let by = y - boxH - 10;
+  if (by < 6) {
+    by = y + slotSize + 10;
+  }
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  noStroke();
+  fill(28, 28, 36);
+  textStyle(BOLD);
+  textSize(12);
+  text(title, bx + boxW / 2, by + pad);
+
+  let cursorY = by + pad + titleH;
+  if (hasDescription) {
+    cursorY += 4;
+    fill(55, 55, 68);
+    textStyle(NORMAL);
+    textSize(10);
+    text(description, bx + boxW / 2, cursorY);
+    cursorY += descriptionH;
+  }
+
+  cursorY += 6;
+  textStyle(NORMAL);
+  textSize(11);
+  fill(28, 28, 36);
+  let reqX = bx + (boxW - requirementsW) / 2;
+  for (const block of requirementBlocks) {
+    const amountY = cursorY + (requirementsH - requirementTextH) / 2;
+    text(block.amountText, reqX + block.amountW / 2, amountY);
+    if (block.icon) {
+      imageMode(CORNER);
+      image(
+        block.icon,
+        reqX + block.amountW + iconGap,
+        cursorY + (requirementsH - iconSize) / 2,
+        iconSize,
+        iconSize
+      );
+    } else {
+      textAlign(LEFT, TOP);
+      text(
+        block.label,
+        reqX + block.amountW + textGap,
+        amountY
+      );
+      textAlign(CENTER, TOP);
+    }
+    reqX += block.blockW + requirementGap;
+  }
+
+  pop();
+}
+
+function drawHologramBuildCostTooltip(item) {
+  if (currentState !== "GAME") {
+    return false;
+  }
+  if (!drawGame.state || !drawGame.state.isRestrictedMode) {
+    return false;
+  }
+  if (!item || !item.entityType) {
+    return false;
+  }
+
+  const lines = getHotbarCostTooltipLines(item.entityType);
+  if (lines.length === 0) {
+    return false;
+  }
+
+  const title = item.name;
+
+  push();
+  textAlign(LEFT, TOP);
+
+  textStyle(BOLD);
+  textSize(12);
+  const titleW = textWidth(title);
+  const titleH = textAscent() + textDescent();
+
+  textStyle(NORMAL);
+  textSize(11);
+  const iconSize = 24;
+  const iconGap = 4;
+  const textGap = 6;
+  let maxLineW = 0;
+  for (const line of lines) {
+    const amountText = `${line.amount}x`;
+    const amountW = textWidth(amountText);
+    const detailW = line.icon
+      ? iconGap + iconSize
+      : textGap + textWidth(line.label);
+    maxLineW = max(maxLineW, amountW + detailW);
+  }
+
+  const pad = 8;
+  const lineH = Math.max(15, iconSize + 2);
+  const contentW = max(titleW, maxLineW);
+  const boxW = contentW + pad * 2;
+  const boxH = pad * 2 + titleH + 4 + lines.length * lineH;
+
+  let bx = mouseX + 14;
+  let by = mouseY + 14;
+  if (bx + boxW > width - 6) {
+    bx = mouseX - boxW - 14;
+  }
+  if (by + boxH > height - 6) {
+    by = mouseY - boxH - 14;
+  }
+  bx = constrain(bx, 6, width - boxW - 6);
+  by = constrain(by, 6, height - boxH - 6);
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  noStroke();
+  fill(28, 28, 36);
+  textStyle(BOLD);
+  textSize(12);
+  text(title, bx + pad, by + pad);
+
+  textStyle(NORMAL);
+  textSize(11);
+  let lineY = by + pad + titleH + 4;
+  const lineTextOffsetY = 4;
+  for (const line of lines) {
+    const amountText = `${line.amount}x`;
+    const amountX = bx + pad;
+    const amountW = textWidth(amountText);
+    text(amountText, amountX, lineY + lineTextOffsetY);
+    if (line.icon) {
+      imageMode(CORNER);
+      image(
+        line.icon,
+        amountX + amountW + iconGap,
+        lineY + (lineH - iconSize) / 2,
+        iconSize,
+        iconSize
+      );
+    } else {
+      text(line.label, amountX + amountW + textGap, lineY + lineTextOffsetY);
+    }
+    lineY += lineH;
+  }
+
+  pop();
+  return true;
 }
 
 function facingToAngle(facing) {
@@ -1313,6 +2622,24 @@ function drawBuildingPlacementHologram(
 ) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
+  const footprintOffsets = getSafeFootprintOffsets(entityType);
+  let minOffsetX = Infinity;
+  let maxOffsetX = -Infinity;
+  let minOffsetY = Infinity;
+  let maxOffsetY = -Infinity;
+  for (const offset of footprintOffsets) {
+    minOffsetX = min(minOffsetX, offset.x);
+    maxOffsetX = max(maxOffsetX, offset.x);
+    minOffsetY = min(minOffsetY, offset.y);
+    maxOffsetY = max(maxOffsetY, offset.y);
+  }
+  const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
+  const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
+  // Offsets are in tile-center coordinates; convert to local rect top-left.
+  const footprintLeft = (minOffsetX - 0.5) * tileSize;
+  const footprintTop = (minOffsetY - 0.5) * tileSize;
+  const footprintWidth = footprintWidthTiles * tileSize;
+  const footprintHeight = footprintHeightTiles * tileSize;
   const previewOptions = {
     ...(options || {}),
     facing: facing || ((options && options.facing) || "E")
@@ -1329,7 +2656,13 @@ function drawBuildingPlacementHologram(
   stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
   strokeWeight(2);
   fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
-  rect(-tileSize / 2 + 3, -tileSize / 2 + 3, tileSize - 6, tileSize - 6, 4);
+  rect(
+    footprintLeft + 3,
+    footprintTop + 3,
+    footprintWidth - 6,
+    footprintHeight - 6,
+    4
+  );
   fill(35, 35, 42, 200);
   noStroke();
   textSize(14);
@@ -1395,12 +2728,25 @@ function drawSelectedBuildingHighlight(map, tileSize) {
     drawGame.state.selectedBuilding = null;
     return;
   }
-  const px = sel.col * tileSize;
-  const py = sel.row * tileSize;
+  const footprintOffsets = getSafeFootprintOffsets(tile.building.entityType);
+  let minOffsetX = Infinity;
+  let maxOffsetX = -Infinity;
+  let minOffsetY = Infinity;
+  let maxOffsetY = -Infinity;
+  for (const offset of footprintOffsets) {
+    minOffsetX = min(minOffsetX, offset.x);
+    maxOffsetX = max(maxOffsetX, offset.x);
+    minOffsetY = min(minOffsetY, offset.y);
+    maxOffsetY = max(maxOffsetY, offset.y);
+  }
+  const left = (sel.col + minOffsetX) * tileSize;
+  const top = (sel.row + minOffsetY) * tileSize;
+  const widthTiles = maxOffsetX - minOffsetX + 1;
+  const heightTiles = maxOffsetY - minOffsetY + 1;
   noFill();
   stroke(255, 210, 60);
   strokeWeight(2.5);
-  rect(px - 2, py - 2, tileSize + 4, tileSize + 4, 4);
+  rect(left - 2, top - 2, widthTiles * tileSize + 4, heightTiles * tileSize + 4, 4);
 }
 
 function getTileBaseColor(tile) {
@@ -1492,7 +2838,7 @@ function isPointerOverMinimap() {
 }
 
 function isMouseOverResourceTooltipBlockers() {
-  if (backButtonGame.isHovered() || isPointerOverMinimap()) {
+  if (backButtonGame.isHovered() || isPointerOverMinimap() || isMouseOverSidebarResourceIcon()) {
     return true;
   }
   const slotSize = 42;
@@ -1510,6 +2856,9 @@ function isMouseOverResourceTooltipBlockers() {
 
 function drawResourceHoverTooltip() {
   if (currentState !== "GAME" || !drawGame.state) {
+    return;
+  }
+  if (!drawGame.state.isRestrictedMode) {
     return;
   }
   if (isMouseOverResourceTooltipBlockers()) {
@@ -1551,6 +2900,129 @@ function drawResourceHoverTooltip() {
   pop();
 
   textAlign(CENTER, CENTER);
+}
+
+function formatTooltipResourceAmount(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) {
+    return "0";
+  }
+  const rounded = Math.round(amount);
+  if (Math.abs(amount - rounded) < 0.001) {
+    return String(rounded);
+  }
+  return amount.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function getHoveredActiveTubeTooltipData() {
+  if (currentState !== "GAME" || !drawGame.state) {
+    return null;
+  }
+
+  const entity = getEntityUnderMouse();
+  if (!entity || entity.type !== ENTITY_TYPES.TUBE || !entity.state) {
+    return null;
+  }
+
+  const state = entity.state;
+  const resourceType = state.carriedItem;
+  const outputRate = Number(state.outputRate) || 0;
+  const isFlowing = state.flowState === "flowing" && !!state.isActive;
+
+  if (!isFlowing || !resourceType || outputRate <= 0) {
+    return null;
+  }
+
+  return {
+    title: "Tube",
+    amountText: `${formatTooltipResourceAmount(outputRate)}x`,
+    icon: getResourceIconForType(resourceType),
+    label: getResourceTypeLabel(resourceType),
+    resourceType
+  };
+}
+
+function drawActiveTubeFlowTooltip() {
+  if (currentState !== "GAME" || !drawGame.state) {
+    return false;
+  }
+  if (isMouseOverResourceTooltipBlockers()) {
+    return false;
+  }
+
+  const tooltip = getHoveredActiveTubeTooltipData();
+  if (!tooltip) {
+    return false;
+  }
+
+  push();
+  textAlign(LEFT, TOP);
+
+  textStyle(BOLD);
+  textSize(12);
+  const titleW = textWidth(tooltip.title);
+  const titleH = textAscent() + textDescent();
+
+  textStyle(NORMAL);
+  textSize(11);
+  const iconSize = 24;
+  const iconGap = 4;
+  const textGap = 6;
+  const amountW = textWidth(tooltip.amountText);
+  const detailW = tooltip.icon
+    ? iconGap + iconSize
+    : textGap + textWidth(tooltip.label);
+  const lineW = amountW + detailW;
+
+  const pad = 8;
+  const lineH = Math.max(15, iconSize + 2);
+  const contentW = max(titleW, lineW);
+  const boxW = contentW + pad * 2;
+  const boxH = pad * 2 + titleH + 4 + lineH;
+
+  let bx = mouseX + 14;
+  let by = mouseY + 14;
+  if (bx + boxW > width - 6) {
+    bx = mouseX - boxW - 14;
+  }
+  if (by + boxH > height - 6) {
+    by = mouseY - boxH - 14;
+  }
+  bx = constrain(bx, 6, width - boxW - 6);
+  by = constrain(by, 6, height - boxH - 6);
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  noStroke();
+  fill(28, 28, 36);
+  textStyle(BOLD);
+  textSize(12);
+  text(tooltip.title, bx + pad, by + pad);
+
+  textStyle(NORMAL);
+  textSize(11);
+  const lineY = by + pad + titleH + 4;
+  const lineTextOffsetY = 4;
+  const amountX = bx + pad;
+  text(tooltip.amountText, amountX, lineY + lineTextOffsetY);
+  if (tooltip.icon) {
+    imageMode(CORNER);
+    image(
+      tooltip.icon,
+      amountX + amountW + iconGap,
+      lineY + (lineH - iconSize) / 2,
+      iconSize,
+      iconSize
+    );
+  } else {
+    text(tooltip.label, amountX + amountW + textGap, lineY + lineTextOffsetY);
+  }
+
+  pop();
+  return true;
 }
 
 function getMiniMapTileColor(tile) {
@@ -1658,11 +3130,20 @@ function drawModificationRangeIndicator(config, feedback) {
 
 function drawHotbar() {
   push();
-  let slotSize = 42;
-  let gap = 8;
-  let totalWidth = hotbarSlots * slotSize + (hotbarSlots - 1) * gap;
-  let startX = width / 2 - totalWidth / 2;
-  let y = height - 60;
+  const { slotSize, gap, startX, y } = getHotbarLayout();
+
+  if (hotbarOutlineImg) {
+    const framePadding = 14;
+    const frameW = 320;
+    const frameH = 80;
+    image(
+      hotbarOutlineImg,
+      startX - framePadding,
+      y - 27,
+      frameW,
+      frameH
+    );
+  }
 
   for (let i = 0; i < hotbarSlots; i++) {
     let x = startX + i * (slotSize + gap);
@@ -1778,30 +3259,56 @@ function placeSelectedEntityAtMouse() {
 
   if (tileX < 0 || tileX >= mapCols || tileY < 0 || tileY >= mapRows) return;
 
-  // Check modification range
-  if (!isTileWithinModificationRange(tileY, tileX)) {
-    triggerModificationRangeBlink();
-    return;
+  const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
+  if (!type) return;
+  const footprintTiles = getSafeFootprintTilesAt(type, tileX, tileY);
+
+  for (const entry of footprintTiles) {
+    if (
+      entry.x < 0 ||
+      entry.x >= mapCols ||
+      entry.y < 0 ||
+      entry.y >= mapRows
+    ) {
+      return;
+    }
+    if (!isTileWithinModificationRange(entry.y, entry.x)) {
+      triggerModificationRangeBlink();
+      return;
+    }
+    const occupiedTile = map.tiles[entry.y][entry.x];
+    if (occupiedTile.entityId !== null) {
+      return;
+    }
   }
 
   const tile = map.tiles[tileY][tileX];
 
-  // Don't place on occupied tiles
-  if (tile.entityId !== null) return;
-
-  const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
-  if (!type) return;
-
   // Build placement options based on entity type and tile
   const options = getPlacementOptionsForTile(type, tile);
+  const isRestrictedMode = !!drawGame.state.isRestrictedMode;
+  if (isRestrictedMode) {
+    const restrictedInventory = getRestrictedModeShuttleInventory();
+    const missingResources = getMissingBuildResources(type, restrictedInventory);
+    if (missingResources.length > 0) {
+      triggerBuildCostFeedback(type, missingResources);
+      return;
+    }
+    spendBuildResources(restrictedInventory, type);
+  }
 
   const newEntity = createEntity(type, tileX, tileY, options);
   newEntity.state.facing = drawGame.state.placementFacing || "E";
 
   entities.push(newEntity);
-  tile.entityId = newEntity.id;
-  tile.entity = newEntity;
-  tile.item = type;
+
+  for (const entry of footprintTiles) {
+    const occupiedTile = map.tiles[entry.y][entry.x];
+    occupiedTile.entityId = newEntity.id;
+    occupiedTile.entity = newEntity;
+    occupiedTile.item = type;
+    occupiedTile.colorOverride = null;
+  }
 
   const hotbarItem = getSelectedHotbarItem();
   if (hotbarItem) {
@@ -1813,7 +3320,6 @@ function placeSelectedEntityAtMouse() {
       facing: newEntity.state.facing,
       entityId: newEntity.id
     };
-    tile.colorOverride = null;
     if (drawGame.state) {
       drawGame.state.selectedBuilding = { row: tileY, col: tileX };
     }
@@ -1849,6 +3355,24 @@ function getPlacementOptionsForTile(type, tile) {
 function keyPressed() {
   if (currentState != "GAME") {
     return;
+  }
+
+  if (
+    (key === "p" || key === "P") &&
+    keyIsDown(CONTROL) &&
+    keyIsDown(SHIFT)
+  ) {
+    if (drawGame.state && drawGame.state.isRestrictedMode) {
+      if (
+        typeof DevCheckpoint !== "undefined" &&
+        typeof DevCheckpoint.applyRestrictedLateGameSkip === "function"
+      ) {
+        DevCheckpoint.applyRestrictedLateGameSkip();
+      } else {
+        console.error("DevCheckpoint module is unavailable.");
+      }
+    }
+    return false;
   }
 
   const hoveredEntity = getEntityUnderMouse();
@@ -1931,27 +3455,65 @@ function deleteEntityUnderMouse() {
 
   const { entities, map } = drawGame.state;
   const targetId = hit.tile.entityId;
+  const targetEntity = targetId != null ? getEntityById(entities, targetId) : null;
 
   if (targetId == null && !hit.tile.building) {
+    return;
+  }
+
+  if (
+    drawGame.state.isRestrictedMode &&
+    targetEntity &&
+    targetEntity.type === ENTITY_TYPES.SHUTTLE
+  ) {
+    console.log("Cannot delete crashed shuttle in restricted mode.");
     return;
   }
 
   if (targetId != null) {
     const index = entities.findIndex((entry) => entry.id === targetId);
     if (index !== -1) {
+      if (drawGame.state.isRestrictedMode && targetEntity) {
+        const restrictedInventory = getRestrictedModeShuttleInventory();
+        refundBuildResources(restrictedInventory, targetEntity.type);
+      }
       entities.splice(index, 1);
     }
-    hit.tile.entityId = null;
-    hit.tile.item = null;
-  }
-
-  if (hit.tile.building) {
+    if (targetEntity) {
+      const footprintTiles = getSafeFootprintTilesAt(
+        targetEntity.type,
+        targetEntity.tileX,
+        targetEntity.tileY
+      );
+      for (const entry of footprintTiles) {
+        const tile = map.tiles[entry.y]?.[entry.x];
+        if (!tile || tile.entityId !== targetId) continue;
+        tile.entityId = null;
+        tile.entity = null;
+        tile.item = null;
+        tile.colorOverride = null;
+        if (tile.building && tile.building.entityId === targetId) {
+          tile.building = null;
+        }
+      }
+    } else {
+      hit.tile.entityId = null;
+      hit.tile.entity = null;
+      hit.tile.item = null;
+      hit.tile.colorOverride = null;
+      if (hit.tile.building && hit.tile.building.entityId === targetId) {
+        hit.tile.building = null;
+      }
+    }
+  } else if (hit.tile.building) {
     hit.tile.building = null;
   }
 
   if (drawGame.state.selectedBuilding) {
     const sel = drawGame.state.selectedBuilding;
-    if (map.tiles[sel.row]?.[sel.col] === hit.tile) {
+    const selectedTile = map.tiles[sel.row]?.[sel.col];
+    const selectedEntityId = selectedTile?.building?.entityId ?? selectedTile?.entityId;
+    if (!selectedTile || selectedEntityId === targetId || selectedTile === hit.tile) {
       drawGame.state.selectedBuilding = null;
     }
   }
@@ -1985,6 +3547,11 @@ function repairEntityUnderMouse() {
 function toggleEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
+
+  if (entity.type === ENTITY_TYPES.TUBE) {
+    console.log("Tube state is flow-driven and cannot be manually toggled.");
+    return;
+  }
 
   // Miners can only be ON when on a resource node
   if (entity.type === ENTITY_TYPES.MINER) {
@@ -2136,6 +3703,9 @@ function getIncomingTubeInputs(entities, targetId) {
 }
 
 function updateSmelterInputs(entities) {
+  const EPSILON = 1e-6;
+  const SMELTER_VALID_INPUT_RATES = [1, 2];
+
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.SMELTER) continue;
     const smelterState = entity.state;
@@ -2153,14 +3723,22 @@ function updateSmelterInputs(entities) {
           0
         )
       : 0;
+    const matchedInputRate = !!inputType
+      ? SMELTER_VALID_INPUT_RATES.find(
+          (allowedRate) => Math.abs(totalRate - allowedRate) <= EPSILON
+        )
+      : null;
+    const hasSupportedIntake = matchedInputRate != null;
+    const outputType = smelterState.recipes?.get(inputType) || null;
 
     smelterState.inputType = inputType;
     smelterState.currentRecipe = inputType;
-    smelterState.isActive = !!inputType && totalRate > 0;
+    smelterState.isActive = hasSupportedIntake && !!outputType;
     smelterState.isOn = smelterState.isActive;
-    smelterState.outputType = smelterState.recipes?.get(inputType) || null;
-    smelterState.inputRate = totalRate;
-    smelterState.outputRate = smelterState.outputType ? totalRate : 0;
+    smelterState.outputType = outputType;
+    // Expose observed intake (1 or 2 ore/sec), while output remains fixed at 1 bar/sec.
+    smelterState.inputRate = hasSupportedIntake ? matchedInputRate : 0;
+    smelterState.outputRate = hasSupportedIntake && outputType ? 1 : 0;
 
     if (!inputType) {
       smelterState.storedInput = 0;
@@ -2185,23 +3763,24 @@ function findConstructorRecipeByTypes(types) {
 }
 
 function updateConstructorInputs(entities) {
-  const tubeSources = getTubeSourcesByTarget(entities);
+  const EPSILON = 1e-6;
 
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.CONSTRUCTOR) continue;
     const constructorState = entity.state;
-    const sourceIds = tubeSources.get(entity.id) || new Set();
-    const sourceTypes = [];
+    const incoming = getIncomingTubeInputs(entities, entity.id);
+    const incomingRatesByType = new Map();
 
-    for (const sourceId of sourceIds) {
-      const sourceEntity = entities.find((entry) => entry.id === sourceId);
-      const outputType = sourceEntity?.state?.outputType;
-      if (outputType) {
-        sourceTypes.push(outputType);
+    for (const input of incoming) {
+      const type = input?.outputType || null;
+      const rate = Number(input?.rate) || 0;
+      if (!type || rate <= 0) {
+        continue;
       }
+      incomingRatesByType.set(type, (incomingRatesByType.get(type) || 0) + rate);
     }
 
-    const uniqueTypes = [...new Set(sourceTypes)].slice(0, 2);
+    const uniqueTypes = [...incomingRatesByType.keys()];
     const recipe = uniqueTypes.length
       ? findConstructorRecipeByTypes(uniqueTypes)
       : null;
@@ -2226,8 +3805,45 @@ function updateConstructorInputs(entities) {
       });
     }
 
-    constructorState.updateOutputFromInputs();
-    constructorState.isActive = !!constructorState.outputType;
+    if (!recipe) {
+      constructorState.outputType = null;
+      constructorState.outputCount = 0;
+      constructorState.inputRate = 0;
+      constructorState.outputRate = 0;
+      constructorState.isActive = false;
+      continue;
+    }
+
+    let hasExactRecipeInputs = true;
+    for (const input of recipe.inputs) {
+      const requiredCount = Number(input.count) || 0;
+      const availableRate = incomingRatesByType.get(input.type) || 0;
+      if (
+        requiredCount <= 0 ||
+        Math.abs(availableRate - requiredCount) > EPSILON
+      ) {
+        hasExactRecipeInputs = false;
+        break;
+      }
+    }
+
+    const recipeOutputCount = Number(recipe.output?.count) || 0;
+    const totalRequiredPerCraft = recipe.inputs.reduce(
+      (sum, input) => sum + (Number(input.count) || 0),
+      0
+    );
+    const outputRate = hasExactRecipeInputs ? recipeOutputCount : 0;
+
+    constructorState.outputType = recipe.output?.type || null;
+    constructorState.outputCount = recipeOutputCount;
+    constructorState.inputRate = hasExactRecipeInputs
+      ? totalRequiredPerCraft
+      : 0;
+    constructorState.outputRate = outputRate;
+    constructorState.isActive =
+      !!constructorState.outputType &&
+      hasExactRecipeInputs &&
+      outputRate > 0;
   }
 }
 

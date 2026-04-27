@@ -1,0 +1,3 @@
+Smelter: 2x1 (as in front view is horizontal and side view is vertical)
+Splitter: tetris t block (example in ms paint thing)
+Merger: tetris t block
