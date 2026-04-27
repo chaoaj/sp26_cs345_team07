@@ -22,7 +22,7 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOnMiniImg;
+let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOnMiniImg, minerSpriteSheetImg;
 
 let bgTiles = [];
 let stars = [];
@@ -156,6 +156,7 @@ function preload() {
   pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
   pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve1On.png');
   pipeSideOnMiniImg = loadImage('resources/pipes/pipeSideOn.png');
+  minerSpriteSheetImg = loadImage('resources/miner/miner.png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -1388,6 +1389,43 @@ function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
   return wave < 0.34;
 }
 
+function drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, minerState, nowSeconds) {
+  if (!minerSpriteSheetImg || minerSpriteSheetImg.width <= 0) {
+    return false;
+  }
+
+  // resources/miner/info.txt: 28 frames, each frame 18x32.
+  const frameW = 18;
+  const frameH = 32;
+  const totalFrames = max(1, floor(minerSpriteSheetImg.width / frameW));
+  const offFrameIndex = min(7, totalFrames - 1); // "frame 8" in 1-based indexing
+  const isOn = minerState?.isOn !== false;
+  const animationFps = 10;
+  const frameIndex = isOn
+    ? floor(nowSeconds * animationFps) % totalFrames
+    : offFrameIndex;
+  const targetHeight = max(drawHeight + 8, tileSize * 1.35);
+  const targetWidth = targetHeight * (frameW / frameH);
+  const spriteX = px + (drawWidth - targetWidth) / 2;
+  const spriteBottomY = py + drawHeight - 1;
+  const spriteY = spriteBottomY - targetHeight - 6;
+
+  imageMode(CORNER);
+  noTint();
+  image(
+    minerSpriteSheetImg,
+    spriteX,
+    spriteY,
+    targetWidth,
+    targetHeight,
+    frameIndex * frameW,
+    0,
+    frameW,
+    frameH
+  );
+  return true;
+}
+
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
@@ -1452,13 +1490,17 @@ function drawEntities(entities, tileSize, map) {
       }
       pop();
     } else {
-      // FIXED: Removed the solid grey background square from regular buildings
-      // Only draw the regular entity color square if there are no images
-      stroke(50);
-      const rgb = getEntityFillRgb(entity.type);
-      fill(rgb[0], rgb[1], rgb[2]);
+      const drewMinerSprite =
+        entity.type === ENTITY_TYPES.MINER &&
+        drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
 
-      rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
+      if (!drewMinerSprite) {
+        // Regular building fallback rendering when no custom sprite is used.
+        stroke(50);
+        const rgb = getEntityFillRgb(entity.type);
+        fill(rgb[0], rgb[1], rgb[2]);
+        rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
+      }
 
       if (entity.state.isBroken) {
         stroke(255, 0, 0);
@@ -1468,14 +1510,18 @@ function drawEntities(entities, tileSize, map) {
         strokeWeight(1);
       }
 
-      noStroke();
-      const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
-      fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-      circle(px + drawWidth - 8, py + 8, 8);
+      if (!drewMinerSprite) {
+        noStroke();
+        const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
+        fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
+        circle(px + drawWidth - 8, py + 8, 8);
+      }
 
-      fill(20);
-      noStroke();
-      text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+      if (!drewMinerSprite) {
+        fill(20);
+        noStroke();
+        text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+      }
     }
     
     drawEntityPorts(entity, tileSize);
@@ -3169,6 +3215,12 @@ function drawHotbar() {
       let cx = x + slotSize / 2;
       let cy = y + slotSize / 2;
       let iconSize = 18;
+      const useMinerSpriteIcon = (
+        i === 0 &&
+        item.entityType === ENTITY_TYPES.MINER &&
+        minerSpriteSheetImg &&
+        minerSpriteSheetImg.width > 0
+      );
       const usePipeMiniIcon = (
         i === 3 &&
         item.entityType === ENTITY_TYPES.TUBE &&
@@ -3176,7 +3228,28 @@ function drawHotbar() {
         pipeSideOnMiniImg.width > 0
       );
 
-      if (usePipeMiniIcon) {
+      if (useMinerSpriteIcon) {
+        // resources/miner/info.txt: 28 frames, each frame 18x32. Frame 4 => index 3.
+        const frameIndex = 3;
+        const frameW = 18;
+        const frameH = 32;
+        const minerIconHeight = iconSize + 20;
+        const minerIconWidth = minerIconHeight * (frameW / frameH);
+        imageMode(CENTER);
+        noTint();
+        image(
+          minerSpriteSheetImg,
+          cx + 1,
+          cy + 2,
+          minerIconWidth,
+          minerIconHeight,
+          frameIndex * frameW,
+          0,
+          frameW,
+          frameH
+        );
+        imageMode(CORNER);
+      } else if (usePipeMiniIcon) {
         imageMode(CENTER);
         const iconAspect = pipeSideOnMiniImg.height / pipeSideOnMiniImg.width;
         const iconWidth = iconSize + 4;
