@@ -422,6 +422,7 @@ class TubeState extends EntityState {
     super();
     this.isOn = true;
     this.isActive = true;
+    this.zLane = 0;
     this.shape = shape === TUBE_SHAPES.CORNER ? shape : TUBE_SHAPES.STRAIGHT;
     this.facing = facing || "E";
     this.carriedItem = null;

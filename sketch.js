@@ -22,7 +22,7 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOnMiniImg, minerSpriteSheetImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
+let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
 
 let bgTiles = [];
 let stars = [];
@@ -151,11 +151,14 @@ function preload() {
   bgTiles[3] = loadImage('resources/tiles/tile4.png');
 
   pipeFrontOffImg = loadImage('resources/pipes/pipeFrontOff.png');
+  pipeFrontOnImg = loadImage('resources/pipes/pipeFrontOn.png');
   pipeCurve1OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
   pipeCurve1OnImg = loadImage('resources/pipes/pipeCurve1On.png');
   pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
   pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve1On.png');
-  pipeSideOnMiniImg = loadImage('resources/pipes/pipeSideOn.png');
+  pipeSideOffImg = loadImage('resources/pipes/pipeSideOff.png');
+  pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
+  pipeSideOnMiniImg = pipeSideOnImg;
   minerSpriteSheetImg = loadImage('resources/miner/miner.png');
   splitterFrontImg = loadImage('resources/splitter/merger/splitterFront.png');
   splitterBackImg = loadImage('resources/splitter/merger/splitterBack.png');
@@ -1514,128 +1517,584 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   return true;
 }
 
+function drawTubePlacementHologramSprite(
+  footprintLeft,
+  footprintTop,
+  footprintWidth,
+  footprintHeight,
+  previewOptions,
+  alpha = 225,
+  baseCol = null,
+  baseRow = null
+) {
+  const facing = previewOptions?.facing || "E";
+  const shape = previewOptions?.shape || TUBE_SHAPES.STRAIGHT;
+  const previewTube = {
+    tileX: baseCol != null ? baseCol : 0,
+    tileY: baseRow != null ? baseRow : 0,
+    state: { facing, shape }
+  };
+
+  const offsets = getTubePortOffsets(previewTube);
+  const isCorner = shape === TUBE_SHAPES.CORNER;
+  let img = null;
+  let numFrames = 1;
+  let frameIndex = 0;
+
+  if (isCorner) {
+    const useCurve2 = ((previewTube.tileX + previewTube.tileY) % 2) === 0;
+    img = useCurve2
+      ? (pipeCurve2OffImg || pipeCurve1OffImg)
+      : pipeCurve1OffImg;
+    numFrames = 16;
+  } else {
+    const isHorizontalStraight = offsets.input.y === offsets.output.y;
+    img = isHorizontalStraight
+      ? (pipeSideOffImg || pipeFrontOffImg)
+      : pipeFrontOffImg;
+    if (img === pipeSideOffImg) {
+      numFrames = 8;
+    } else if (img === pipeFrontOffImg) {
+      numFrames = 8;
+    }
+  }
+
+  if (!img || img.width <= 0 || img.height <= 0) {
+    return false;
+  }
+
+  const frameW = img.width / max(1, numFrames);
+  const frameH = img.height;
+  imageMode(CORNER);
+  tint(255, alpha);
+  if (isCorner) {
+    push();
+    translate(
+      footprintLeft + footprintWidth / 2,
+      footprintTop + footprintHeight / 2
+    );
+    rotate(facingToAngle(facing));
+    image(
+      img,
+      -footprintWidth / 2,
+      -footprintHeight / 2,
+      footprintWidth,
+      footprintHeight,
+      frameIndex * frameW,
+      0,
+      frameW,
+      frameH
+    );
+    pop();
+  } else {
+    image(
+      img,
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      frameIndex * frameW,
+      0,
+      frameW,
+      frameH
+    );
+  }
+  noTint();
+  return true;
+}
+
+const TUBE_LAYER_BANDS = Object.freeze({
+  under: Object.freeze({ start: 0.68, end: 1.0 }),
+  body: Object.freeze({ start: 0.26, end: 0.78 }),
+  over: Object.freeze({ start: 0.0, end: 0.36 })
+});
+
+function getEntityDrawBounds(entity, tileSize) {
+  const footprintFacing = entity.state?.facing || "E";
+  const footprintOffsets = getSafeFootprintOffsets(entity.type, footprintFacing);
+  let minOffsetX = Infinity;
+  let maxOffsetX = -Infinity;
+  let minOffsetY = Infinity;
+  let maxOffsetY = -Infinity;
+  for (const offset of footprintOffsets) {
+    minOffsetX = min(minOffsetX, offset.x);
+    maxOffsetX = max(maxOffsetX, offset.x);
+    minOffsetY = min(minOffsetY, offset.y);
+    maxOffsetY = max(maxOffsetY, offset.y);
+  }
+
+  const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
+  const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
+  const px = (entity.tileX + minOffsetX) * tileSize;
+  const py = (entity.tileY + minOffsetY) * tileSize;
+  const drawWidth = footprintWidthTiles * tileSize;
+  const drawHeight = footprintHeightTiles * tileSize;
+  return {
+    px,
+    py,
+    drawWidth,
+    drawHeight,
+    tileX: entity.tileX,
+    tileY: entity.tileY
+  };
+}
+
+function toCardinalDirectionKey(offset) {
+  if (!offset) return null;
+  if (offset.x === 1 && offset.y === 0) return "E";
+  if (offset.x === -1 && offset.y === 0) return "W";
+  if (offset.x === 0 && offset.y === 1) return "S";
+  if (offset.x === 0 && offset.y === -1) return "N";
+  return null;
+}
+
+function compareTubeDescriptorsForRender(a, b) {
+  if (a.zLane !== b.zLane) {
+    return a.zLane - b.zLane;
+  }
+  if (a.tileY !== b.tileY) {
+    return a.tileY - b.tileY;
+  }
+  if (a.tileX !== b.tileX) {
+    return a.tileX - b.tileX;
+  }
+  return (a.entity?.id || 0) - (b.entity?.id || 0);
+}
+
+function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
+  const bounds = getEntityDrawBounds(entity, tileSize);
+  const state = entity.state || {};
+  const offsets = getTubePortOffsets(entity);
+  const isCorner = state.shape === TUBE_SHAPES.CORNER;
+  const isFlowing = !!state.carriedItem;
+  const zLaneRaw = Number(state.zLane);
+  const zLane = Number.isFinite(zLaneRaw) ? zLaneRaw : 0;
+  let img = null;
+  let frontOverlayImg = null;
+  let numFrames = 1;
+  let frameIndex = 0;
+  const connectionMask = { N: false, E: false, S: false, W: false };
+  const inputDir = toCardinalDirectionKey(offsets.input);
+  const outputDir = toCardinalDirectionKey(offsets.output);
+  if (inputDir) connectionMask[inputDir] = true;
+  if (outputDir) connectionMask[outputDir] = true;
+
+  if (isCorner) {
+    const useCurve2 = (entity.tileX + entity.tileY) % 2 === 0;
+    img = isFlowing
+      ? (useCurve2 ? (pipeCurve2OnImg || pipeCurve1OnImg) : pipeCurve1OnImg)
+      : (useCurve2 ? (pipeCurve2OffImg || pipeCurve1OffImg) : pipeCurve1OffImg);
+    numFrames = 16;
+    if (state.isConnected) {
+      frameIndex = Math.floor(nowMs / 150) % numFrames;
+    }
+  } else {
+    const isHorizontalStraight = offsets.input.y === offsets.output.y;
+    const horizontalFlowDirection = isHorizontalStraight
+      ? Math.sign(offsets.output.x - offsets.input.x)
+      : 0;
+    const verticalFlowDirection = !isHorizontalStraight
+      ? Math.sign(offsets.output.y - offsets.input.y)
+      : 0;
+    const reverseSideOffLight = horizontalFlowDirection < 0;
+    const reverseFrontOffLight = verticalFlowDirection < 0;
+    img = isHorizontalStraight
+      ? (isFlowing
+          ? (pipeSideOnImg || pipeSideOnMiniImg || pipeFrontOffImg)
+          : (pipeSideOffImg || pipeFrontOffImg))
+      : (pipeFrontOffImg || pipeFrontOnImg);
+    if (!isHorizontalStraight && isFlowing && pipeFrontOnImg && pipeFrontOnImg.width > 0) {
+      frontOverlayImg = pipeFrontOnImg;
+    }
+
+    if (img === pipeFrontOffImg) {
+      numFrames = 8;
+    } else if (img === pipeSideOffImg) {
+      // pipeSideOff is an 8-frame horizontal strip (144x16 => 8 * 18x16).
+      numFrames = 8;
+    } else if (img === pipeFrontOnImg) {
+      numFrames = 1;
+    }
+
+    const animateOffSideTube = img === pipeSideOffImg;
+    const animateOffFrontTube = img === pipeFrontOffImg && !isHorizontalStraight && !isFlowing;
+    if (numFrames > 1 && animateOffSideTube) {
+      // Flashing pattern (not scrolling): mostly hold base frame with periodic
+      // alternate light sets so the tube feels stationary while lights pulse.
+      const flashPattern = [0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7];
+      const flashTick = Math.floor(nowMs / 220);
+      const directionSign = reverseSideOffLight ? 1 : -1;
+      const patternLen = flashPattern.length;
+      const phaseRaw = isHorizontalStraight ? entity.tileX : entity.tileY;
+      const phase = ((phaseRaw % patternLen) + patternLen) % patternLen;
+      const tickDirected = directionSign * flashTick;
+      const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
+      const frameFromPattern = flashPattern[patternIndex];
+      frameIndex = frameFromPattern % numFrames;
+    } else if (numFrames > 1 && animateOffFrontTube) {
+      const flashPattern = [0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7];
+      const flashTick = Math.floor(nowMs / 220);
+      const directionSign = reverseFrontOffLight ? 1 : -1;
+      const patternLen = flashPattern.length;
+      const phaseRaw = entity.tileY;
+      const phase = ((phaseRaw % patternLen) + patternLen) % patternLen;
+      const tickDirected = directionSign * flashTick;
+      const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
+      const frameFromPattern = flashPattern[patternIndex];
+      frameIndex = frameFromPattern % numFrames;
+    } else if (numFrames > 1 && state.isConnected && !isFlowing) {
+      frameIndex = Math.floor(nowMs / 150) % numFrames;
+    }
+  }
+
+  const hasSprite = !!(img && img.width > 0 && img.height > 0);
+  const frameW = hasSprite ? (img.width / max(1, numFrames)) : tileSize;
+  const frameH = hasSprite ? img.height : tileSize;
+  return {
+    entity,
+    tileX: bounds.tileX,
+    tileY: bounds.tileY,
+    px: bounds.px,
+    py: bounds.py,
+    drawWidth: bounds.drawWidth,
+    drawHeight: bounds.drawHeight,
+    zLane,
+    isCorner,
+    rotationAngle: facingToAngle(state.facing || "E"),
+    connectionMask,
+    neighborMask: { N: false, E: false, S: false, W: false },
+    img,
+    frontOverlayImg,
+    hasSprite,
+    numFrames,
+    frameW,
+    frameH,
+    frameIndex
+  };
+}
+
+function annotateTubeDescriptorNeighbors(descriptors) {
+  const lookup = new Map();
+  for (const descriptor of descriptors) {
+    lookup.set(
+      `${descriptor.zLane}|${descriptor.tileX},${descriptor.tileY}`,
+      descriptor
+    );
+  }
+
+  const offsets = {
+    N: { x: 0, y: -1 },
+    E: { x: 1, y: 0 },
+    S: { x: 0, y: 1 },
+    W: { x: -1, y: 0 }
+  };
+  const opposite = { N: "S", E: "W", S: "N", W: "E" };
+
+  for (const descriptor of descriptors) {
+    for (const key of ["N", "E", "S", "W"]) {
+      const offset = offsets[key];
+      const neighborKey =
+        `${descriptor.zLane}|${descriptor.tileX + offset.x},${descriptor.tileY + offset.y}`;
+      const neighbor = lookup.get(neighborKey);
+      if (!neighbor) {
+        descriptor.neighborMask[key] = false;
+        continue;
+      }
+      if (!descriptor.connectionMask[key]) {
+        descriptor.neighborMask[key] = false;
+        continue;
+      }
+      const reciprocalKey = opposite[key];
+      descriptor.neighborMask[key] = !!neighbor.connectionMask[reciprocalKey];
+    }
+  }
+}
+
+function drawConnectedVerticalFrontTubeLayer(descriptor, layerName) {
+  const band = TUBE_LAYER_BANDS[layerName] || TUBE_LAYER_BANDS.body;
+  const frameH = descriptor.frameH;
+  const frameW = descriptor.frameW;
+  const srcX = descriptor.frameIndex * frameW;
+  const hasNorthJoin = !!descriptor.neighborMask.N;
+  const hasSouthJoin = !!descriptor.neighborMask.S;
+
+  // Remove rounded caps at joined edges so stacked N/S segments read as one run.
+  // Keep top seam pixels on the "over" layer so south tiles can visually
+  // sit on top of north neighbors at the join.
+  const capPx = max(3, round(frameH * 0.22));
+  const isOverLayer = layerName === "over";
+  const trimTop = hasNorthJoin && !isOverLayer ? capPx : 0;
+  // Preserve standalone bottom cap so the circular entrance stays visible
+  // in the placed tile; joined segments trim their south cap.
+  const trimBottom = hasSouthJoin ? capPx : 0;
+  let srcStart = trimTop;
+  let srcEnd = frameH - trimBottom;
+  if (srcEnd <= srcStart + 1) {
+    srcStart = 0;
+    srcEnd = frameH;
+  }
+
+  // Small overlap into connected neighbors to hide seams.
+  // Depth rule: south tiles should visually sit on top of north tiles.
+  // So only extend upward into the north neighbor; do not extend downward
+  // into the south neighbor (the south tile will own that seam).
+  const defaultTopOverhang = max(2, round(descriptor.drawHeight * 0.20));
+  const scaleY = descriptor.drawHeight / frameH;
+  const capPxScaled = ceil(capPx * scaleY);
+  const joinPx = max(defaultTopOverhang, round(capPxScaled * 1.35));
+  // Keep anchor connection-invariant so adding/removing neighbors never shifts
+  // a tube vertically. Increase fixed north bleed to strengthen overlap.
+  const extraNorthBleedPx = max(3, round(descriptor.drawHeight * 0.14) + 10);
+  const topLiftPx = max(joinPx, capPxScaled) + extraNorthBleedPx;
+  const dstBaseTop = descriptor.py - topLiftPx;
+  const bottomOverhangPx = 0;
+  const dstBaseBottom = descriptor.py + descriptor.drawHeight + bottomOverhangPx;
+  const dstBaseH = max(1, dstBaseBottom - dstBaseTop);
+
+  // Keep tube proportions stable across connection states by mapping with
+  // full-frame scale. Trims remove geometry instead of re-stretching it.
+  const srcLayerStart = floor(frameH * band.start);
+  const srcLayerEnd = ceil(frameH * band.end);
+  const clampedStart = constrain(srcLayerStart, srcStart, srcEnd - 1);
+  const clampedEnd = constrain(srcLayerEnd, clampedStart + 1, srcEnd);
+  const srcH = max(1, clampedEnd - clampedStart);
+  const pixelsPerSourceY = dstBaseH / frameH;
+  const dstY = round(dstBaseTop + clampedStart * pixelsPerSourceY);
+  const dstH = max(1, round(srcH * pixelsPerSourceY));
+
+  image(
+    descriptor.img,
+    descriptor.px,
+    dstY,
+    descriptor.drawWidth,
+    dstH,
+    srcX,
+    clampedStart,
+    frameW,
+    srcH
+  );
+
+  if (isOverLayer && hasNorthJoin) {
+    const seamCapPx = capPx;
+    const seamSrcStart = 0;
+    const seamSrcEnd = min(seamCapPx, frameH);
+    const seamSrcH = max(1, seamSrcEnd - seamSrcStart);
+    const seamDstH = max(1, round((seamSrcH / frameH) * descriptor.drawHeight));
+    const seamDstY = round(descriptor.py - seamDstH);
+    image(
+      descriptor.img,
+      descriptor.px,
+      seamDstY,
+      descriptor.drawWidth,
+      seamDstH,
+      srcX,
+      seamSrcStart,
+      frameW,
+      seamSrcH
+    );
+  }
+}
+
+function drawFrontTubeOverlay(descriptor) {
+  if (!descriptor || !descriptor.frontOverlayImg) {
+    return;
+  }
+  const overlay = descriptor.frontOverlayImg;
+  if (!overlay || overlay.width <= 0 || overlay.height <= 0) {
+    return;
+  }
+  const baseFrameW = max(1, descriptor.frameW);
+  const baseFrameH = max(1, descriptor.frameH);
+  const targetW = descriptor.drawWidth * (overlay.width / baseFrameW);
+  const targetH = descriptor.drawHeight * (overlay.height / baseFrameH);
+  const x = round(descriptor.px + (descriptor.drawWidth - targetW) / 2);
+  const y = round(descriptor.py + (descriptor.drawHeight - targetH) / 2);
+  imageMode(CORNER);
+  image(overlay, x, y, targetW, targetH);
+}
+
+function drawTubeDescriptorLayer(descriptor, layerName) {
+  if (!descriptor) {
+    return;
+  }
+
+  const band = TUBE_LAYER_BANDS[layerName] || TUBE_LAYER_BANDS.body;
+  if (!descriptor.hasSprite) {
+    if (layerName !== "body") {
+      return;
+    }
+    stroke(50);
+    fill(120);
+    rect(
+      descriptor.px + 4,
+      descriptor.py + 4,
+      descriptor.drawWidth - 8,
+      descriptor.drawHeight - 8,
+      4
+    );
+    return;
+  }
+
+  const srcY = constrain(floor(descriptor.frameH * band.start), 0, descriptor.frameH - 1);
+  const srcEnd = constrain(ceil(descriptor.frameH * band.end), srcY + 1, descriptor.frameH);
+  const srcH = max(1, srcEnd - srcY);
+  const dstY = descriptor.drawHeight * (srcY / descriptor.frameH);
+  const dstH = descriptor.drawHeight * (srcH / descriptor.frameH);
+  const srcX = descriptor.frameIndex * descriptor.frameW;
+
+  imageMode(CORNER);
+  const usesFrontFamily =
+    descriptor.img === pipeFrontOffImg || descriptor.img === pipeFrontOnImg;
+  const isVerticalConnectedRun =
+    !descriptor.isCorner &&
+    usesFrontFamily &&
+    descriptor.connectionMask.N &&
+    descriptor.connectionMask.S;
+  if (isVerticalConnectedRun) {
+    drawConnectedVerticalFrontTubeLayer(descriptor, layerName);
+    if (layerName === "over") {
+      drawFrontTubeOverlay(descriptor);
+    }
+    return;
+  }
+  if (descriptor.isCorner) {
+    push();
+    translate(
+      descriptor.px + descriptor.drawWidth / 2,
+      descriptor.py + descriptor.drawHeight / 2
+    );
+    rotate(descriptor.rotationAngle);
+    image(
+      descriptor.img,
+      -descriptor.drawWidth / 2,
+      -descriptor.drawHeight / 2 + dstY,
+      descriptor.drawWidth,
+      dstH,
+      srcX,
+      srcY,
+      descriptor.frameW,
+      srcH
+    );
+    pop();
+  } else {
+    image(
+      descriptor.img,
+      descriptor.px,
+      descriptor.py + dstY,
+      descriptor.drawWidth,
+      dstH,
+      srcX,
+      srcY,
+      descriptor.frameW,
+      srcH
+    );
+  }
+  if (layerName === "over") {
+    drawFrontTubeOverlay(descriptor);
+  }
+}
+
+function drawTubeDescriptorsInLayeredPasses(descriptors) {
+  if (!Array.isArray(descriptors) || descriptors.length === 0) {
+    return;
+  }
+
+  const sorted = [...descriptors].sort(compareTubeDescriptorsForRender);
+  for (const layerName of ["under", "body", "over"]) {
+    for (const descriptor of sorted) {
+      drawTubeDescriptorLayer(descriptor, layerName);
+    }
+  }
+}
+
+function drawNonTubeEntity(entity, tileSize, nowSeconds) {
+  const bounds = getEntityDrawBounds(entity, tileSize);
+  const px = bounds.px;
+  const py = bounds.py;
+  const drawWidth = bounds.drawWidth;
+  const drawHeight = bounds.drawHeight;
+
+  const drewMinerSprite =
+    entity.type === ENTITY_TYPES.MINER &&
+    drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
+  const drewSplitterSprite =
+    entity.type === ENTITY_TYPES.SPLITTER &&
+    drawPlacedSplitterSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      entity.state?.facing || "E",
+      255,
+      { preferSideForEast: true }
+    );
+  const drewMergerSprite =
+    entity.type === ENTITY_TYPES.MERGER &&
+    drawPlacedMergerSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      entity.state?.facing || "E",
+      255,
+      { preferSideForEast: true }
+    );
+  const drewCustomSprite = drewMinerSprite || drewSplitterSprite || drewMergerSprite;
+
+  if (!drewCustomSprite) {
+    // Regular building fallback rendering when no custom sprite is used.
+    stroke(50);
+    const rgb = getEntityFillRgb(entity.type);
+    fill(rgb[0], rgb[1], rgb[2]);
+    rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
+  }
+
+  if (entity.state.isBroken) {
+    stroke(255, 0, 0);
+    strokeWeight(3);
+    line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
+    line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
+    strokeWeight(1);
+  }
+
+  if (!drewCustomSprite) {
+    noStroke();
+    const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
+    fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
+    circle(px + drawWidth - 8, py + 8, 8);
+  }
+
+  if (!drewCustomSprite) {
+    fill(20);
+    noStroke();
+    text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+  }
+}
+
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
   const nowSeconds = millis() / 1000;
+  const nowMs = millis();
+  const tubeDescriptors = [];
+  const nonTubeEntities = [];
 
   for (const entity of entities) {
-    const footprintFacing = entity.state?.facing || "E";
-    const footprintOffsets = getSafeFootprintOffsets(entity.type, footprintFacing);
-    let minOffsetX = Infinity;
-    let maxOffsetX = -Infinity;
-    let minOffsetY = Infinity;
-    let maxOffsetY = -Infinity;
-    for (const offset of footprintOffsets) {
-      minOffsetX = min(minOffsetX, offset.x);
-      maxOffsetX = max(maxOffsetX, offset.x);
-      minOffsetY = min(minOffsetY, offset.y);
-      maxOffsetY = max(maxOffsetY, offset.y);
-    }
-
-    const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
-    const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
-    const px = (entity.tileX + minOffsetX) * tileSize;
-    const py = (entity.tileY + minOffsetY) * tileSize;
-    const drawWidth = footprintWidthTiles * tileSize;
-    const drawHeight = footprintHeightTiles * tileSize;
-
     if (entity.type === ENTITY_TYPES.TUBE) {
-      push();
-      translate(px + tileSize / 2, py + tileSize / 2);
-      rotate(facingToAngle(entity.state.facing));
-
-      let imgToDraw = null;
-      let isCorner = entity.state.shape === TUBE_SHAPES.CORNER;
-      let isFlowing = !!entity.state.carriedItem;
-
-      if (isCorner) {
-        let useCurve2 = (entity.tileX + entity.tileY) % 2 === 0;
-        if (isFlowing) imgToDraw = useCurve2 ? (pipeCurve2OnImg || pipeCurve1OnImg) : pipeCurve1OnImg;
-        else imgToDraw = useCurve2 ? (pipeCurve2OffImg || pipeCurve1OffImg) : pipeCurve1OffImg;
-      } else {
-        imgToDraw = pipeFrontOffImg; 
-      }
-
-      if (imgToDraw && imgToDraw.width > 0) {
-        // FIXED: Explicitly define the number of frames based on the sprite sheet!
-        // pipeFrontOff is 8 frames, the curves are 16 frames. 
-        // This calculates the exact width of a single frame and stops the "2 tubes at a time" bug!
-        let numFrames = (imgToDraw === pipeFrontOffImg) ? 8 : 16;
-        let frameW = imgToDraw.width / numFrames;
-        let frameH = imgToDraw.height;
-        let currentFrame = 0;
-        
-        if (numFrames > 1 && entity.state.isConnected) {
-            currentFrame = Math.floor(millis() / 150) % numFrames;
-        }
-
-        imageMode(CORNER);
-        image(imgToDraw, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
-      } else {
-        stroke(50);
-        fill(120);
-        rect(-tileSize / 2 + 4, -tileSize / 2 + 4, tileSize - 8, tileSize - 8, 4);
-      }
-      pop();
+      tubeDescriptors.push(buildTubeRenderDescriptor(entity, tileSize, nowMs));
     } else {
-      const drewMinerSprite =
-        entity.type === ENTITY_TYPES.MINER &&
-        drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
-      const drewSplitterSprite =
-        entity.type === ENTITY_TYPES.SPLITTER &&
-        drawPlacedSplitterSprite(
-          px,
-          py,
-          drawWidth,
-          drawHeight,
-          entity.state?.facing || "E",
-          255,
-          { preferSideForEast: true }
-        );
-      const drewMergerSprite =
-        entity.type === ENTITY_TYPES.MERGER &&
-        drawPlacedMergerSprite(
-          px,
-          py,
-          drawWidth,
-          drawHeight,
-          entity.state?.facing || "E",
-          255,
-          { preferSideForEast: true }
-        );
-      const drewCustomSprite = drewMinerSprite || drewSplitterSprite || drewMergerSprite;
-
-      if (!drewCustomSprite) {
-        // Regular building fallback rendering when no custom sprite is used.
-        stroke(50);
-        const rgb = getEntityFillRgb(entity.type);
-        fill(rgb[0], rgb[1], rgb[2]);
-        rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
-      }
-
-      if (entity.state.isBroken) {
-        stroke(255, 0, 0);
-        strokeWeight(3);
-        line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
-        line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
-        strokeWeight(1);
-      }
-
-      if (!drewCustomSprite) {
-        noStroke();
-        const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
-        fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-        circle(px + drawWidth - 8, py + 8, 8);
-      }
-
-      if (!drewCustomSprite) {
-        fill(20);
-        noStroke();
-        text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
-      }
+      nonTubeEntities.push(entity);
     }
-    
+  }
+
+  annotateTubeDescriptorNeighbors(tubeDescriptors);
+  drawTubeDescriptorsInLayeredPasses(tubeDescriptors);
+
+  for (const entity of nonTubeEntities) {
+    drawNonTubeEntity(entity, tileSize, nowSeconds);
+  }
+
+  for (const entity of entities) {
     drawEntityPorts(entity, tileSize);
   }
 }
@@ -2856,8 +3315,11 @@ function drawBuildingPlacementHologram(
   const useMergerHologram =
     entityType === ENTITY_TYPES.MERGER &&
     getMergerSpriteForFacing(previewFacing, { preferSideForEast: true });
+  const useTubeHologram =
+    entityType === ENTITY_TYPES.TUBE &&
+    (pipeSideOffImg || pipeFrontOffImg || pipeCurve1OffImg || pipeCurve2OffImg);
 
-  if (!useMinerOffHologram && !useSplitterHologram && !useMergerHologram) {
+  if (!useMinerOffHologram && !useSplitterHologram && !useMergerHologram && !useTubeHologram) {
     stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
     strokeWeight(2);
     fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
@@ -2914,6 +3376,17 @@ function drawBuildingPlacementHologram(
       previewFacing,
       225,
       { preferSideForEast: true }
+    );
+  } else if (useTubeHologram) {
+    drawTubePlacementHologramSprite(
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      previewOptions,
+      225,
+      baseCol,
+      baseRow
     );
   } else {
     fill(35, 35, 42, 200);
