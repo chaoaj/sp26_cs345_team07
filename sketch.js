@@ -1466,13 +1466,16 @@ function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha =
     return false;
   }
 
-  const spriteX = px;
-  const spriteY = py;
-  const targetWidth = drawWidth;
-  const targetHeight = drawHeight;
+  const visualScale = 2;
+  const targetWidth = round(sprite.width * visualScale);
+  const targetHeight = round(sprite.height * visualScale);
+  // Render exact PNG pixels (no scaling). Anchor to footprint base so any
+  // excess height naturally overhangs upward.
+  const spriteX = round(px + (drawWidth - targetWidth) / 2);
+  const spriteY = round(py + drawHeight - targetHeight);
 
   imageMode(CORNER);
-  tint(255, alpha);
+  noTint();
   image(sprite, spriteX, spriteY, targetWidth, targetHeight);
   noTint();
   return true;
@@ -1505,20 +1508,20 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
     return false;
   }
 
-  const spriteX = px;
-  const spriteY = py;
-  const targetWidth = drawWidth;
-  const targetHeight = drawHeight;
+  const visualScale = 2;
+  const targetWidth = round(sprite.width * visualScale);
+  const targetHeight = round(sprite.height * visualScale);
+  // Render exact PNG pixels (no scaling). Anchor to footprint base so any
+  // excess height naturally overhangs upward.
+  const spriteX = round(px + (drawWidth - targetWidth) / 2);
+  const spriteY = round(py + drawHeight - targetHeight);
 
   imageMode(CORNER);
-  tint(255, alpha);
+  noTint();
   image(sprite, spriteX, spriteY, targetWidth, targetHeight);
   noTint();
   return true;
 }
-
-const SIDE_TUBE_Y_OFFSET_PX = 2;
-const SIDE_TUBE_SHRINK_PX = 5;
 
 function drawTubePlacementHologramSprite(
   footprintLeft,
@@ -1530,6 +1533,7 @@ function drawTubePlacementHologramSprite(
   baseCol = null,
   baseRow = null
 ) {
+  const tubeVisualScale = 2;
   const facing = previewOptions?.facing || "E";
   const shape = previewOptions?.shape || TUBE_SHAPES.STRAIGHT;
   const previewTube = {
@@ -1569,6 +1573,8 @@ function drawTubePlacementHologramSprite(
 
   const frameW = img.width / max(1, numFrames);
   const frameH = img.height;
+  const targetW = round(frameW * tubeVisualScale);
+  const targetH = round(frameH * tubeVisualScale);
   imageMode(CORNER);
   tint(255, alpha);
   if (isCorner) {
@@ -1580,10 +1586,10 @@ function drawTubePlacementHologramSprite(
     rotate(facingToAngle(facing));
     image(
       img,
-      -footprintWidth / 2,
-      -footprintHeight / 2,
-      footprintWidth,
-      footprintHeight,
+      -targetW / 2,
+      footprintHeight / 2 - targetH,
+      targetW,
+      targetH,
       frameIndex * frameW,
       0,
       frameW,
@@ -1591,16 +1597,13 @@ function drawTubePlacementHologramSprite(
     );
     pop();
   } else {
-    const sideTubeShrinkPx = isHorizontalStraight ? SIDE_TUBE_SHRINK_PX : 0;
-    const sideTubeInsetY = sideTubeShrinkPx * 0.5;
-    const sideTubeYOffset = isHorizontalStraight ? SIDE_TUBE_Y_OFFSET_PX : 0;
-    const targetY = footprintTop + sideTubeInsetY + sideTubeYOffset;
-    const targetH = max(1, footprintHeight - sideTubeShrinkPx);
+    const spriteX = round(footprintLeft + (footprintWidth - targetW) / 2);
+    const spriteY = round(footprintTop + footprintHeight - targetH);
     image(
       img,
-      footprintLeft,
-      targetY,
-      footprintWidth,
+      spriteX,
+      spriteY,
+      targetW,
       targetH,
       frameIndex * frameW,
       0,
@@ -1707,19 +1710,14 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
       : 0;
     const reverseSideOffLight = horizontalFlowDirection < 0;
     const reverseFrontOffLight = verticalFlowDirection < 0;
+    const verticalIsOn = !isHorizontalStraight && (isFlowing || state.isConnected);
     img = isHorizontalStraight
       ? (isFlowing
           ? (pipeSideOnImg || pipeSideOnMiniImg || pipeFrontOffImg)
           : (pipeSideOffImg || pipeFrontOffImg))
-      : (pipeFrontOffImg || pipeFrontOnImg);
-    const showVerticalOnLight =
-      !isHorizontalStraight &&
-      (isFlowing || state.isConnected) &&
-      pipeFrontOnImg &&
-      pipeFrontOnImg.width > 0;
-    if (showVerticalOnLight) {
-      frontOverlayImg = pipeFrontOnImg;
-    }
+      : (verticalIsOn
+          ? (pipeFrontOnImg || pipeFrontOffImg)
+          : (pipeFrontOffImg || pipeFrontOnImg));
 
     if (img === pipeFrontOffImg) {
       numFrames = 8;
@@ -1936,11 +1934,11 @@ function drawTubeDescriptorLayer(descriptor, layerName) {
     return;
   }
 
-  const band = TUBE_LAYER_BANDS[layerName] || TUBE_LAYER_BANDS.body;
+  if (layerName !== "body") {
+    return;
+  }
+
   if (!descriptor.hasSprite) {
-    if (layerName !== "body") {
-      return;
-    }
     stroke(50);
     fill(120);
     rect(
@@ -1953,44 +1951,16 @@ function drawTubeDescriptorLayer(descriptor, layerName) {
     return;
   }
 
-  const srcY = constrain(floor(descriptor.frameH * band.start), 0, descriptor.frameH - 1);
-  const srcEnd = constrain(ceil(descriptor.frameH * band.end), srcY + 1, descriptor.frameH);
-  const srcH = max(1, srcEnd - srcY);
-  const dstY = descriptor.drawHeight * (srcY / descriptor.frameH);
-  const dstH = descriptor.drawHeight * (srcH / descriptor.frameH);
+  const tubeVisualScale = 2;
   const srcX = descriptor.frameIndex * descriptor.frameW;
-  const isSideTubeSprite =
-    descriptor.img === pipeSideOffImg ||
-    descriptor.img === pipeSideOnImg ||
-    descriptor.img === pipeSideOnMiniImg;
-  const isHorizontalSideTube =
-    !descriptor.isCorner &&
-    isSideTubeSprite &&
-    descriptor.connectionMask.E &&
-    descriptor.connectionMask.W;
-  const sideTubeYOffset = isHorizontalSideTube ? SIDE_TUBE_Y_OFFSET_PX : 0;
-  const sideTubeShrinkPx = isHorizontalSideTube ? SIDE_TUBE_SHRINK_PX : 0;
-  const sideTubeScaleY =
-    (descriptor.drawHeight - sideTubeShrinkPx) / max(1, descriptor.drawHeight);
-  const sideTubeInsetY = sideTubeShrinkPx * 0.5;
-  const sideTubeDstY = dstY * sideTubeScaleY + sideTubeInsetY;
-  const sideTubeDstH = max(1, dstH * sideTubeScaleY);
+  const frameW = descriptor.frameW;
+  const frameH = descriptor.frameH;
+  const targetW = round(frameW * tubeVisualScale);
+  const targetH = round(frameH * tubeVisualScale);
+  const spriteX = round(descriptor.px + (descriptor.drawWidth - targetW) / 2);
+  const spriteY = round(descriptor.py + descriptor.drawHeight - targetH);
 
   imageMode(CORNER);
-  const usesFrontFamily =
-    descriptor.img === pipeFrontOffImg || descriptor.img === pipeFrontOnImg;
-  const isVerticalConnectedRun =
-    !descriptor.isCorner &&
-    usesFrontFamily &&
-    descriptor.connectionMask.N &&
-    descriptor.connectionMask.S;
-  if (isVerticalConnectedRun) {
-    drawConnectedVerticalFrontTubeLayer(descriptor, layerName);
-    if (layerName === "over") {
-      drawFrontTubeOverlay(descriptor);
-    }
-    return;
-  }
   if (descriptor.isCorner) {
     push();
     translate(
@@ -2000,31 +1970,28 @@ function drawTubeDescriptorLayer(descriptor, layerName) {
     rotate(descriptor.rotationAngle);
     image(
       descriptor.img,
-      -descriptor.drawWidth / 2,
-      -descriptor.drawHeight / 2 + dstY,
-      descriptor.drawWidth,
-      dstH,
+      -targetW / 2,
+      descriptor.drawHeight / 2 - targetH,
+      targetW,
+      targetH,
       srcX,
-      srcY,
-      descriptor.frameW,
-      srcH
+      0,
+      frameW,
+      frameH
     );
     pop();
   } else {
     image(
       descriptor.img,
-      descriptor.px,
-      descriptor.py + sideTubeDstY + sideTubeYOffset,
-      descriptor.drawWidth,
-      sideTubeDstH,
+      spriteX,
+      spriteY,
+      targetW,
+      targetH,
       srcX,
-      srcY,
-      descriptor.frameW,
-      srcH
+      0,
+      frameW,
+      frameH
     );
-  }
-  if (layerName === "over") {
-    drawFrontTubeOverlay(descriptor);
   }
 }
 
@@ -2034,11 +2001,25 @@ function drawTubeDescriptorsInLayeredPasses(descriptors) {
   }
 
   const sorted = [...descriptors].sort(compareTubeDescriptorsForRender);
-  for (const layerName of ["under", "body", "over"]) {
-    for (const descriptor of sorted) {
-      drawTubeDescriptorLayer(descriptor, layerName);
-    }
+  for (const descriptor of sorted) {
+    drawTubeDescriptorLayer(descriptor, "body");
   }
+}
+
+function getEntitySouthmostRenderTileY(entity) {
+  if (!entity) {
+    return 0;
+  }
+  const facing = entity.state?.facing || "E";
+  const offsets = getSafeFootprintOffsets(entity.type, facing);
+  let maxOffsetY = -Infinity;
+  for (const offset of offsets) {
+    maxOffsetY = max(maxOffsetY, offset.y);
+  }
+  if (!Number.isFinite(maxOffsetY)) {
+    maxOffsetY = 0;
+  }
+  return entity.tileY + maxOffsetY;
 }
 
 function drawNonTubeEntity(entity, tileSize, nowSeconds) {
@@ -2111,21 +2092,45 @@ function drawEntities(entities, tileSize, map) {
   const nowSeconds = millis() / 1000;
   const nowMs = millis();
   const tubeDescriptors = [];
-  const nonTubeEntities = [];
+  const renderQueue = [];
 
   for (const entity of entities) {
+    const sortY = getEntitySouthmostRenderTileY(entity);
+    const sortX = entity?.tileX || 0;
+    const sortId = entity?.id || 0;
     if (entity.type === ENTITY_TYPES.TUBE) {
-      tubeDescriptors.push(buildTubeRenderDescriptor(entity, tileSize, nowMs));
+      const descriptor = buildTubeRenderDescriptor(entity, tileSize, nowMs);
+      tubeDescriptors.push(descriptor);
+      renderQueue.push({
+        kind: "tube",
+        sortY,
+        sortX,
+        sortId,
+        descriptor
+      });
     } else {
-      nonTubeEntities.push(entity);
+      renderQueue.push({
+        kind: "entity",
+        sortY,
+        sortX,
+        sortId,
+        entity
+      });
     }
   }
 
   annotateTubeDescriptorNeighbors(tubeDescriptors);
-  drawTubeDescriptorsInLayeredPasses(tubeDescriptors);
-
-  for (const entity of nonTubeEntities) {
-    drawNonTubeEntity(entity, tileSize, nowSeconds);
+  renderQueue.sort((a, b) => {
+    if (a.sortY !== b.sortY) return a.sortY - b.sortY;
+    if (a.sortX !== b.sortX) return a.sortX - b.sortX;
+    return a.sortId - b.sortId;
+  });
+  for (const item of renderQueue) {
+    if (item.kind === "tube") {
+      drawTubeDescriptorLayer(item.descriptor, "body");
+    } else {
+      drawNonTubeEntity(item.entity, tileSize, nowSeconds);
+    }
   }
 
   for (const entity of entities) {
