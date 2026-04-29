@@ -116,9 +116,22 @@ const TUBE_PORT_DEFS = {
     output: { x: 0, y: 1 } 
   },
   [TUBE_SHAPES.CORNER]: { 
-    input: { x: 1, y: 0 }, 
-    output: { x: 0, y: 1 } 
+    // 3-tile L corner: ports connect at arm endpoints.
+    input: { x: 2, y: 0 }, 
+    output: { x: 0, y: 2 } 
   }
+};
+
+// Tube footprint offsets in east-facing orientation.
+const TUBE_FOOTPRINT_DEFS = {
+  [TUBE_SHAPES.STRAIGHT]: [
+    { x: 0, y: 0 }
+  ],
+  [TUBE_SHAPES.CORNER]: [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 0, y: 1 }
+  ]
 };
 
 /**
@@ -572,6 +585,10 @@ function getTubePortOffsets(tube) {
   };
 }
 
+function getTubeFootprintOffsets(shape = TUBE_SHAPES.STRAIGHT) {
+  return TUBE_FOOTPRINT_DEFS[shape] || TUBE_FOOTPRINT_DEFS[TUBE_SHAPES.STRAIGHT];
+}
+
 function getTubePortTiles(tube) {
   const offsets = getTubePortOffsets(tube);
   const isCorner = tube.state?.shape === TUBE_SHAPES.CORNER;
@@ -599,7 +616,9 @@ function getTubeConnectionOffsets(tube) {
 
 function getEntityFootprintOffsetsForFacing(entity) {
   const facing = entity.state?.facing || "E";
-  const offsets = getEntityFootprintOffsets(entity.type);
+  const offsets = entity.type === ENTITY_TYPES.TUBE
+    ? getTubeFootprintOffsets(entity.state?.shape || TUBE_SHAPES.STRAIGHT)
+    : getEntityFootprintOffsets(entity.type);
   return offsets.map((offset) => rotateOffsetFromEast(offset, facing));
 }
 

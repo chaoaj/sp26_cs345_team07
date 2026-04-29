@@ -1105,13 +1105,24 @@ function addProducedResource(resourceType, count) {
   }
 }
 
-function getSafeFootprintOffsets(entityType, facing = "E") {
+function getSafeFootprintOffsets(entityType, facing = "E", options = null) {
   const fallback = [{ x: 0, y: 0 }];
   if (typeof getEntityFootprintOffsets !== "function") {
     return fallback;
   }
 
-  const offsets = getEntityFootprintOffsets(entityType);
+  let offsets = null;
+  if (
+    entityType === ENTITY_TYPES.TUBE &&
+    typeof getTubeFootprintOffsets === "function"
+  ) {
+    const tubeShape = (typeof options === "string"
+      ? options
+      : options?.shape) || TUBE_SHAPES.STRAIGHT;
+    offsets = getTubeFootprintOffsets(tubeShape);
+  } else {
+    offsets = getEntityFootprintOffsets(entityType);
+  }
   if (!Array.isArray(offsets) || offsets.length === 0) {
     return fallback;
   }
@@ -1130,8 +1141,8 @@ function getSafeFootprintOffsets(entityType, facing = "E") {
   return baseOffsets;
 }
 
-function getSafeFootprintTilesAt(entityType, tileX, tileY, facing = "E") {
-  const offsets = getSafeFootprintOffsets(entityType, facing);
+function getSafeFootprintTilesAt(entityType, tileX, tileY, facing = "E", options = null) {
+  const offsets = getSafeFootprintOffsets(entityType, facing, options);
   return offsets.map((offset) => ({
     x: tileX + offset.x,
     y: tileY + offset.y
@@ -1623,7 +1634,11 @@ const TUBE_LAYER_BANDS = Object.freeze({
 
 function getEntityDrawBounds(entity, tileSize) {
   const footprintFacing = entity.state?.facing || "E";
-  const footprintOffsets = getSafeFootprintOffsets(entity.type, footprintFacing);
+  const footprintOffsets = getSafeFootprintOffsets(
+    entity.type,
+    footprintFacing,
+    entity.state
+  );
   let minOffsetX = Infinity;
   let maxOffsetX = -Infinity;
   let minOffsetY = Infinity;
@@ -2011,7 +2026,7 @@ function getEntitySouthmostRenderTileY(entity) {
     return 0;
   }
   const facing = entity.state?.facing || "E";
-  const offsets = getSafeFootprintOffsets(entity.type, facing);
+  const offsets = getSafeFootprintOffsets(entity.type, facing, entity.state);
   let maxOffsetY = -Infinity;
   for (const offset of offsets) {
     maxOffsetY = max(maxOffsetY, offset.y);
@@ -3316,7 +3331,7 @@ function drawBuildingPlacementHologram(
     facing: facing || ((options && options.facing) || "E")
   };
   const previewFacing = previewOptions.facing || "E";
-  const footprintOffsets = getSafeFootprintOffsets(entityType).map((offset) =>
+  const footprintOffsets = getSafeFootprintOffsets(entityType, "E", previewOptions).map((offset) =>
     rotateOffsetFromEast(offset, previewFacing)
   );
   let minOffsetX = Infinity;
@@ -3504,7 +3519,15 @@ function drawSelectedBuildingHighlight(map, tileSize) {
     return;
   }
   const facing = tile.building.facing || "E";
-  const footprintOffsets = getSafeFootprintOffsets(tile.building.entityType, facing);
+  const selectedEntity = tile.entityId != null
+    ? getEntityById(drawGame.state.entities, tile.entityId)
+    : null;
+  const footprintShapeSource = selectedEntity?.state || tile.building || null;
+  const footprintOffsets = getSafeFootprintOffsets(
+    tile.building.entityType,
+    facing,
+    footprintShapeSource
+  );
   let minOffsetX = Infinity;
   let maxOffsetX = -Infinity;
   let minOffsetY = Infinity;
@@ -4096,8 +4119,16 @@ function placeSelectedEntityAtMouse() {
 
   const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
   if (!type) return;
-  const placementFacing = drawGame.state.placementFacing || "E";
-  const footprintTiles = getSafeFootprintTilesAt(type, tileX, tileY, placementFacing);
+  const tile = map.tiles[tileY][tileX];
+  const options = getPlacementOptionsForTile(type, tile);
+  const placementFacing = drawGame.state.placementFacing || options?.facing || "E";
+  const footprintTiles = getSafeFootprintTilesAt(
+    type,
+    tileX,
+    tileY,
+    placementFacing,
+    options
+  );
 
   for (const entry of footprintTiles) {
     if (
@@ -4118,10 +4149,7 @@ function placeSelectedEntityAtMouse() {
     }
   }
 
-  const tile = map.tiles[tileY][tileX];
-
   // Build placement options based on entity type and tile
-  const options = getPlacementOptionsForTile(type, tile);
   const isRestrictedMode = !!drawGame.state.isRestrictedMode;
   if (isRestrictedMode) {
     const restrictedInventory = getRestrictedModeShuttleInventory();
@@ -4154,6 +4182,7 @@ function placeSelectedEntityAtMouse() {
       name: hotbarItem.name,
       entityType: hotbarItem.entityType,
       facing: newEntity.state.facing,
+      shape: newEntity.state?.shape || null,
       entityId: newEntity.id
     };
     if (drawGame.state) {
@@ -4185,6 +4214,85 @@ function getPlacementOptionsForTile(type, tile) {
   }
 
   return getPlacementOptionsForEntity(type, tile);
+}
+
+function tryApplyTubeGeometry(entity, nextFacing, nextShape) {
+  if (!drawGame.state || !entity || entity.type !== ENTITY_TYPES.TUBE) {
+    return false;
+  }
+
+  const { map, config } = drawGame.state;
+  const mapCols = config.mapCols;
+  const mapRows = config.mapRows;
+  const currentFacing = entity.state?.facing || "E";
+  const currentShape = entity.state?.shape || TUBE_SHAPES.STRAIGHT;
+  const resolvedFacing = nextFacing || currentFacing;
+  const resolvedShape = nextShape || currentShape;
+  const currentTiles = getSafeFootprintTilesAt(
+    entity.type,
+    entity.tileX,
+    entity.tileY,
+    currentFacing,
+    { shape: currentShape }
+  );
+  const nextTiles = getSafeFootprintTilesAt(
+    entity.type,
+    entity.tileX,
+    entity.tileY,
+    resolvedFacing,
+    { shape: resolvedShape }
+  );
+
+  for (const entry of nextTiles) {
+    if (
+      entry.x < 0 || entry.x >= mapCols ||
+      entry.y < 0 || entry.y >= mapRows
+    ) {
+      return false;
+    }
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile) {
+      return false;
+    }
+    if (tile.entityId != null && tile.entityId !== entity.id) {
+      return false;
+    }
+  }
+
+  const nextSet = new Set(nextTiles.map((entry) => `${entry.x},${entry.y}`));
+  for (const entry of currentTiles) {
+    if (nextSet.has(`${entry.x},${entry.y}`)) {
+      continue;
+    }
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile || tile.entityId !== entity.id) {
+      continue;
+    }
+    tile.entityId = null;
+    tile.entity = null;
+    tile.item = null;
+    tile.colorOverride = null;
+    if (tile.building && tile.building.entityId === entity.id) {
+      tile.building = null;
+    }
+  }
+
+  entity.state.facing = resolvedFacing;
+  entity.state.shape = resolvedShape;
+  syncTileBuildingFacing(entity);
+
+  for (const entry of nextTiles) {
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile) {
+      continue;
+    }
+    tile.entityId = entity.id;
+    tile.entity = entity;
+    tile.item = entity.type;
+    tile.colorOverride = null;
+  }
+
+  return true;
 }
 
 
@@ -4234,10 +4342,17 @@ function keyPressed() {
           ? TUBE_SHAPES.STRAIGHT
           : TUBE_SHAPES.CORNER;
     } else if (hoveredEntity && hoveredEntity.type === ENTITY_TYPES.TUBE) {
-      hoveredEntity.state.shape = hoveredEntity.state.shape === TUBE_SHAPES.CORNER
+      const nextShape = hoveredEntity.state.shape === TUBE_SHAPES.CORNER
         ? TUBE_SHAPES.STRAIGHT
         : TUBE_SHAPES.CORNER;
-      updateConnections(drawGame.state.entities);
+      const applied = tryApplyTubeGeometry(
+        hoveredEntity,
+        hoveredEntity.state.facing || "E",
+        nextShape
+      );
+      if (applied) {
+        updateConnections(drawGame.state.entities);
+      }
     }
   } else if (key === 'r' || key === 'R') {
     if (selectedHotbarSlot >= 0 && getSelectedHotbarItem()) {
@@ -4247,9 +4362,14 @@ function keyPressed() {
       const current = hoveredEntity.state.facing || "E";
       const index = order.indexOf(current);
       const next = index === -1 ? "E" : order[(index + 1) % order.length];
-      hoveredEntity.state.facing = next;
-      syncTileBuildingFacing(hoveredEntity);
-      updateConnections(drawGame.state.entities);
+      const applied = tryApplyTubeGeometry(
+        hoveredEntity,
+        next,
+        hoveredEntity.state.shape || TUBE_SHAPES.STRAIGHT
+      );
+      if (applied) {
+        updateConnections(drawGame.state.entities);
+      }
     } else if (
       hoveredEntity &&
       (hoveredEntity.type === ENTITY_TYPES.MINER ||
@@ -4320,7 +4440,8 @@ function deleteEntityUnderMouse() {
         targetEntity.type,
         targetEntity.tileX,
         targetEntity.tileY,
-        targetEntity.state?.facing || "E"
+        targetEntity.state?.facing || "E",
+        targetEntity.state
       );
       for (const entry of footprintTiles) {
         const tile = map.tiles[entry.y]?.[entry.x];
@@ -4370,6 +4491,7 @@ function syncTileBuildingFacing(entity) {
     return;
   }
   tile.building.facing = entity.state.facing || "E";
+  tile.building.shape = entity.state?.shape || null;
 }
 
 function repairEntityUnderMouse() {
