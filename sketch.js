@@ -247,6 +247,7 @@ function drawMenu() {
   pop();
 }
 
+// FIXED: Updates initial map generation to place perfectly sized 2x2 resource deposits
 function drawGame() {
   const restrictedMode = (typeof isRestrictedModeEnabled === "function")
     ? isRestrictedModeEnabled()
@@ -276,6 +277,7 @@ function drawGame() {
           entity: null,
           entityId: null,
           building: null,
+          isDepositOrigin: false,
           bgIndex: Math.floor(Math.random() * 4)
         });
       }
@@ -295,7 +297,8 @@ function drawGame() {
       }
     }
 
-    const setResourceNode = (col, row, nodeKey) => {
+    const setResourceNode = (col, row, nodeKey, isOrigin = false) => {
+      if (row < 0 || row >= mapRows || col < 0 || col >= mapCols) return;
       const t = tiles[row][col];
       t.type = nodeKey;
       if (nodeKey === "iron") {
@@ -305,28 +308,28 @@ function drawGame() {
       } else if (nodeKey === "helium3") {
         t.resource = RESOURCE_TYPES.HELIUM3;
       }
+      t.isDepositOrigin = isOrigin;
+    };
+
+    // New helper to place 2x2 blocks and mark the top-left for the renderer
+    const place2x2Deposit = (col, row, nodeKey) => {
+      setResourceNode(col, row, nodeKey, true); // Origin tile for the image
+      setResourceNode(col + 1, row, nodeKey, false);
+      setResourceNode(col, row + 1, nodeKey, false);
+      setResourceNode(col + 1, row + 1, nodeKey, false);
     };
 
     if (restrictedMode) {
-      applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceNode);
+      applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, place2x2Deposit);
     } else {
       // Resource patches for testing in creative mode
-      for (let y = 6; y <= 7; y++) {
-        for (let x = 6; x <= 10; x++) {
-          setResourceNode(x, y, "iron");
-        }
-      }
+      place2x2Deposit(6, 6, "iron");
+      place2x2Deposit(9, 6, "iron");
 
-      for (let y = 10; y <= 12; y++) {
-        for (let x = 12; x <= 16; x++) {
-          setResourceNode(x, y, "copper");
-        }
-      }
+      place2x2Deposit(12, 10, "copper");
+      place2x2Deposit(15, 10, "copper");
 
-      setResourceNode(17, 18, "helium3");
-      setResourceNode(18, 18, "helium3");
-      setResourceNode(17, 19, "helium3");
-      setResourceNode(18, 19, "helium3");
+      place2x2Deposit(17, 18, "helium3");
     }
 
     const entities = [];
@@ -450,7 +453,6 @@ function drawGame() {
   player.x = constrain(player.x, mapOriginX + halfPlayer, mapOriginX + mapWidth - halfPlayer);
   player.y = constrain(player.y, mapOriginY + halfPlayer, mapOriginY + mapHeight - halfPlayer);
 
-  // --- Miner harvesting tick ---
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
   updateRestrictedModeShuttleIntake(entities, dt);
@@ -468,7 +470,7 @@ function drawGame() {
     floor((cameraY + height - mapOriginY) / tileSize) + 1
   );
 
-push();
+  push();
   noStroke();
   let wrapW = width + 200;
   let wrapH = height + 200;
@@ -485,13 +487,11 @@ push();
   pop();
 
   push();
-  // FIXED: Round camera translations to prevent sub-pixel anti-aliasing gaps between tiles
   translate(-Math.round(cameraX), -Math.round(cameraY));
 
   const worldLayer = getOrBuildWorldLayer(drawGame.state);
   image(worldLayer, 0, 0);
 
-  // Draw tiles
   push();
   stroke(200);
   strokeWeight(1);
@@ -518,8 +518,6 @@ push();
     for (let x = visibleMinCol; x <= visibleMaxCol; x++) {
       const portType = portOverlay.get(`${x},${y}`);
       
-      // FIXED: Only draw the port connection highlights, and make them semi-transparent so the ground shows through!
-      // We removed the solid box that used to hide the tiles behind buildings.
       if (portType) {
         if (portType === "output") {
           fill(70, 200, 90, 120);
@@ -536,7 +534,6 @@ push();
   pop();
 
   drawSelectedBuildingHighlight(map, tileSize);
-
   drawEntities(entities, tileSize);
 
   const item = selectedHotbarSlot >= 0 ? getSelectedHotbarItem() : null;
@@ -1740,6 +1737,7 @@ function drawMiniMap(map, player, config, feedback) {
   drawPlayerSprite(player, config.tileSize);
 }
 
+// FIXED: Draws 2x2 resource deposit images by anchoring them to their origin tile
 function getOrBuildWorldLayer(state) {
   const cache = state.renderCache;
   if (cache.worldLayer) {
@@ -1751,6 +1749,7 @@ function getOrBuildWorldLayer(state) {
   const layer = createGraphics(mapCols * tileSize, mapRows * tileSize);
   layer.noStroke();
 
+  // Pass 1: Draw base background tiles for everything so there are no empty gaps
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
@@ -1762,20 +1761,40 @@ function getOrBuildWorldLayer(state) {
       if (baseTileImg && baseTileImg.width > 0) {
         layer.image(baseTileImg, px, py, tileSize, tileSize);
       } else {
-        const fallbackColor = getTileBaseColor(tile);
+        const fallbackColor = getTileBaseColor({type: "empty"});
         layer.fill(fallbackColor[0], fallbackColor[1], fallbackColor[2]);
         layer.rect(px, py, tileSize, tileSize);
       }
-
-      // Then draw specific resource node deposit images on top if they exist
-      let depositImg = null; // Reset depositImg for each tile
+      
+      // Draw fallback flat colors for deposits without images (like helium3)
+      let depositImg = null; 
       if (tile.type === "iron") depositImg = ironDepositImg;
       else if (tile.type === "copper") depositImg = copperDepositImg;
-      // else if (tile.type === "helium3") depositImg = heliumDepositImg;
 
-      if (depositImg) {
-        // Draw deposit overlay on top of the base terrain tile.
-        layer.image(depositImg, px, py, tileSize, tileSize);
+      if (!depositImg && tile.type !== "empty" && tile.type !== "dirt") {
+        const tileColor = getTileBaseColor(tile);
+        layer.fill(tileColor[0], tileColor[1], tileColor[2]);
+        layer.rect(px, py, tileSize, tileSize);
+      }
+    }
+  }
+
+  // Pass 2: Draw the large 2x2 deposit images overlaying the map
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tile = map.tiles[y][x];
+      
+      if (tile.isDepositOrigin) {
+        const px = x * tileSize;
+        const py = y * tileSize;
+        let depositImg = null; 
+        
+        if (tile.type === "iron") depositImg = ironDepositImg;
+        else if (tile.type === "copper") depositImg = copperDepositImg;
+
+        if (depositImg && depositImg.width > 0) {
+          layer.image(depositImg, px, py, tileSize * 2, tileSize * 2);
+        }
       }
     }
   }
