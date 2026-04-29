@@ -154,8 +154,8 @@ function preload() {
   pipeFrontOnImg = loadImage('resources/pipes/pipeFrontOn.png');
   pipeCurve1OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
   pipeCurve1OnImg = loadImage('resources/pipes/pipeCurve1On.png');
-  pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
-  pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve1On.png');
+  pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve2Off.png');
+  pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve2On.png');
   pipeSideOffImg = loadImage('resources/pipes/pipeSideOff.png');
   pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
   pipeSideOnMiniImg = pipeSideOnImg;
@@ -1561,11 +1561,11 @@ function drawTubePlacementHologramSprite(
   let frameIndex = 0;
 
   if (isCorner) {
-    const useCurve2 = ((previewTube.tileX + previewTube.tileY) % 2) === 0;
-    img = useCurve2
+    const useCurve2Family = facing === "N" || facing === "W";
+    img = useCurve2Family
       ? (pipeCurve2OffImg || pipeCurve1OffImg)
-      : pipeCurve1OffImg;
-    numFrames = 16;
+      : (pipeCurve1OffImg || pipeCurve2OffImg);
+    numFrames = 8;
   } else {
     isHorizontalStraight = offsets.input.y === offsets.output.y;
     img = isHorizontalStraight
@@ -1589,16 +1589,20 @@ function drawTubePlacementHologramSprite(
   imageMode(CORNER);
   tint(255, alpha);
   if (isCorner) {
+    const cornerVisual = getCornerTubeVisualTransform(facing);
     push();
     translate(
       footprintLeft + footprintWidth / 2,
       footprintTop + footprintHeight / 2
     );
-    rotate(facingToAngle(facing));
+    rotate(cornerVisual.angle);
+    if (cornerVisual.mirrorX) {
+      scale(-1, 1);
+    }
     image(
       img,
-      -targetW / 2,
-      footprintHeight / 2 - targetH,
+      -targetW / 2 + (cornerVisual.xOffsetPx || 0),
+      footprintHeight / 2 - targetH + (cornerVisual.yOffsetPx || 0),
       targetW,
       targetH,
       frameIndex * frameW,
@@ -1693,6 +1697,8 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
   const state = entity.state || {};
   const offsets = getTubePortOffsets(entity);
   const isCorner = state.shape === TUBE_SHAPES.CORNER;
+  const cornerFacing = state.facing || "E";
+  const cornerVisual = getCornerTubeVisualTransform(cornerFacing);
   const isFlowing = !!state.carriedItem;
   const zLaneRaw = Number(state.zLane);
   const zLane = Number.isFinite(zLaneRaw) ? zLaneRaw : 0;
@@ -1707,13 +1713,30 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
   if (outputDir) connectionMask[outputDir] = true;
 
   if (isCorner) {
-    const useCurve2 = (entity.tileX + entity.tileY) % 2 === 0;
-    img = isFlowing
-      ? (useCurve2 ? (pipeCurve2OnImg || pipeCurve1OnImg) : pipeCurve1OnImg)
-      : (useCurve2 ? (pipeCurve2OffImg || pipeCurve1OffImg) : pipeCurve1OffImg);
-    numFrames = 16;
-    if (state.isConnected) {
-      frameIndex = Math.floor(nowMs / 150) % numFrames;
+    const useCurve2Family = cornerFacing === "N" || cornerFacing === "W";
+    const offImg = useCurve2Family
+      ? (pipeCurve2OffImg || pipeCurve1OffImg)
+      : (pipeCurve1OffImg || pipeCurve2OffImg);
+    const onImg = useCurve2Family
+      ? (pipeCurve2OnImg || pipeCurve1OnImg)
+      : (pipeCurve1OnImg || pipeCurve2OnImg);
+    const cornerIsOn = isFlowing || state.isConnected;
+    img = cornerIsOn ? (onImg || offImg) : (offImg || onImg);
+    if (cornerIsOn) {
+      numFrames = 1;
+    } else {
+      // Follow side-pipe light propagation form: static base shape, light-only flash frames.
+      numFrames = 8;
+      const flashPattern = [0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7];
+      const flashTick = Math.floor(nowMs / 220);
+      const primaryDir = offsets.output.y !== 0 ? offsets.output.y : offsets.output.x;
+      const directionSign = primaryDir < 0 ? 1 : -1;
+      const patternLen = flashPattern.length;
+      const phaseRaw = entity.tileX + entity.tileY;
+      const phase = ((phaseRaw % patternLen) + patternLen) % patternLen;
+      const tickDirected = directionSign * flashTick;
+      const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
+      frameIndex = flashPattern[patternIndex] % numFrames;
     }
   } else {
     const isHorizontalStraight = offsets.input.y === offsets.output.y;
@@ -1792,6 +1815,10 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
     zLane,
     isCorner,
     rotationAngle: facingToAngle(state.facing || "E"),
+    cornerRotationAngle: cornerVisual.angle,
+    cornerMirrorX: cornerVisual.mirrorX,
+    cornerXOffsetPx: cornerVisual.xOffsetPx || 0,
+    cornerYOffsetPx: cornerVisual.yOffsetPx || 0,
     connectionMask,
     neighborMask: { N: false, E: false, S: false, W: false },
     img,
@@ -1982,11 +2009,18 @@ function drawTubeDescriptorLayer(descriptor, layerName) {
       descriptor.px + descriptor.drawWidth / 2,
       descriptor.py + descriptor.drawHeight / 2
     );
-    rotate(descriptor.rotationAngle);
+    rotate(
+      Number.isFinite(descriptor.cornerRotationAngle)
+        ? descriptor.cornerRotationAngle
+        : descriptor.rotationAngle
+    );
+    if (descriptor.cornerMirrorX) {
+      scale(-1, 1);
+    }
     image(
       descriptor.img,
-      -targetW / 2,
-      descriptor.drawHeight / 2 - targetH,
+      -targetW / 2 + (descriptor.cornerXOffsetPx || 0),
+      descriptor.drawHeight / 2 - targetH + (descriptor.cornerYOffsetPx || 0),
       targetW,
       targetH,
       srcX,
@@ -3528,6 +3562,13 @@ function drawSelectedBuildingHighlight(map, tileSize) {
     facing,
     footprintShapeSource
   );
+  const selectedShape =
+    selectedEntity?.state?.shape ||
+    tile.building.shape ||
+    null;
+  const isCornerTubeSelection =
+    tile.building.entityType === ENTITY_TYPES.TUBE &&
+    selectedShape === TUBE_SHAPES.CORNER;
   let minOffsetX = Infinity;
   let maxOffsetX = -Infinity;
   let minOffsetY = Infinity;
@@ -3545,7 +3586,29 @@ function drawSelectedBuildingHighlight(map, tileSize) {
   noFill();
   stroke(255, 210, 60);
   strokeWeight(2.5);
-  rect(left - 2, top - 2, widthTiles * tileSize + 4, heightTiles * tileSize + 4, 4);
+  if (isCornerTubeSelection) {
+    for (const offset of footprintOffsets) {
+      const tileLeft = (sel.col + offset.x) * tileSize;
+      const tileTop = (sel.row + offset.y) * tileSize;
+      rect(tileLeft - 2, tileTop - 2, tileSize + 4, tileSize + 4, 4);
+    }
+  } else {
+    rect(left - 2, top - 2, widthTiles * tileSize + 4, heightTiles * tileSize + 4, 4);
+  }
+}
+
+function getCornerTubeVisualTransform(facing) {
+  const dir = facing || "E";
+  if (dir === "W") {
+    return { angle: 0, mirrorX: false, xOffsetPx: 0, yOffsetPx: 0 };
+  }
+  if (dir === "N") {
+    return { angle: 0, mirrorX: true, xOffsetPx: 0, yOffsetPx: 0 };
+  }
+  if (dir === "S") {
+    return { angle: 0, mirrorX: true, xOffsetPx: 4, yOffsetPx: -4 };
+  }
+  return { angle: 0, mirrorX: false, xOffsetPx: 4, yOffsetPx: -4 };
 }
 
 function getTileBaseColor(tile) {
