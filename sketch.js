@@ -1517,6 +1517,9 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   return true;
 }
 
+const SIDE_TUBE_Y_OFFSET_PX = 2;
+const SIDE_TUBE_SHRINK_PX = 5;
+
 function drawTubePlacementHologramSprite(
   footprintLeft,
   footprintTop,
@@ -1537,6 +1540,7 @@ function drawTubePlacementHologramSprite(
 
   const offsets = getTubePortOffsets(previewTube);
   const isCorner = shape === TUBE_SHAPES.CORNER;
+  let isHorizontalStraight = false;
   let img = null;
   let numFrames = 1;
   let frameIndex = 0;
@@ -1548,7 +1552,7 @@ function drawTubePlacementHologramSprite(
       : pipeCurve1OffImg;
     numFrames = 16;
   } else {
-    const isHorizontalStraight = offsets.input.y === offsets.output.y;
+    isHorizontalStraight = offsets.input.y === offsets.output.y;
     img = isHorizontalStraight
       ? (pipeSideOffImg || pipeFrontOffImg)
       : pipeFrontOffImg;
@@ -1587,12 +1591,17 @@ function drawTubePlacementHologramSprite(
     );
     pop();
   } else {
+    const sideTubeShrinkPx = isHorizontalStraight ? SIDE_TUBE_SHRINK_PX : 0;
+    const sideTubeInsetY = sideTubeShrinkPx * 0.5;
+    const sideTubeYOffset = isHorizontalStraight ? SIDE_TUBE_Y_OFFSET_PX : 0;
+    const targetY = footprintTop + sideTubeInsetY + sideTubeYOffset;
+    const targetH = max(1, footprintHeight - sideTubeShrinkPx);
     image(
       img,
       footprintLeft,
-      footprintTop,
+      targetY,
       footprintWidth,
-      footprintHeight,
+      targetH,
       frameIndex * frameW,
       0,
       frameW,
@@ -1703,7 +1712,12 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
           ? (pipeSideOnImg || pipeSideOnMiniImg || pipeFrontOffImg)
           : (pipeSideOffImg || pipeFrontOffImg))
       : (pipeFrontOffImg || pipeFrontOnImg);
-    if (!isHorizontalStraight && isFlowing && pipeFrontOnImg && pipeFrontOnImg.width > 0) {
+    const showVerticalOnLight =
+      !isHorizontalStraight &&
+      (isFlowing || state.isConnected) &&
+      pipeFrontOnImg &&
+      pipeFrontOnImg.width > 0;
+    if (showVerticalOnLight) {
       frontOverlayImg = pipeFrontOnImg;
     }
 
@@ -1717,7 +1731,11 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
     }
 
     const animateOffSideTube = img === pipeSideOffImg;
-    const animateOffFrontTube = img === pipeFrontOffImg && !isHorizontalStraight && !isFlowing;
+    const animateOffFrontTube =
+      img === pipeFrontOffImg &&
+      !isHorizontalStraight &&
+      !isFlowing &&
+      !state.isConnected;
     if (numFrames > 1 && animateOffSideTube) {
       // Flashing pattern (not scrolling): mostly hold base frame with periodic
       // alternate light sets so the tube feels stationary while lights pulse.
@@ -1742,7 +1760,7 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
       const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
       const frameFromPattern = flashPattern[patternIndex];
       frameIndex = frameFromPattern % numFrames;
-    } else if (numFrames > 1 && state.isConnected && !isFlowing) {
+    } else if (numFrames > 1 && state.isConnected && !isFlowing && isHorizontalStraight) {
       frameIndex = Math.floor(nowMs / 150) % numFrames;
     }
   }
@@ -1941,6 +1959,22 @@ function drawTubeDescriptorLayer(descriptor, layerName) {
   const dstY = descriptor.drawHeight * (srcY / descriptor.frameH);
   const dstH = descriptor.drawHeight * (srcH / descriptor.frameH);
   const srcX = descriptor.frameIndex * descriptor.frameW;
+  const isSideTubeSprite =
+    descriptor.img === pipeSideOffImg ||
+    descriptor.img === pipeSideOnImg ||
+    descriptor.img === pipeSideOnMiniImg;
+  const isHorizontalSideTube =
+    !descriptor.isCorner &&
+    isSideTubeSprite &&
+    descriptor.connectionMask.E &&
+    descriptor.connectionMask.W;
+  const sideTubeYOffset = isHorizontalSideTube ? SIDE_TUBE_Y_OFFSET_PX : 0;
+  const sideTubeShrinkPx = isHorizontalSideTube ? SIDE_TUBE_SHRINK_PX : 0;
+  const sideTubeScaleY =
+    (descriptor.drawHeight - sideTubeShrinkPx) / max(1, descriptor.drawHeight);
+  const sideTubeInsetY = sideTubeShrinkPx * 0.5;
+  const sideTubeDstY = dstY * sideTubeScaleY + sideTubeInsetY;
+  const sideTubeDstH = max(1, dstH * sideTubeScaleY);
 
   imageMode(CORNER);
   const usesFrontFamily =
@@ -1980,9 +2014,9 @@ function drawTubeDescriptorLayer(descriptor, layerName) {
     image(
       descriptor.img,
       descriptor.px,
-      descriptor.py + dstY,
+      descriptor.py + sideTubeDstY + sideTubeYOffset,
       descriptor.drawWidth,
-      dstH,
+      sideTubeDstH,
       srcX,
       srcY,
       descriptor.frameW,
