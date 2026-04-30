@@ -22,7 +22,8 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
+let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
+let ironDepositImg, copperDepositImg, heliumDepositImg;
 
 let bgTiles = [];
 let stars = [];
@@ -177,6 +178,7 @@ function preload() {
   pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
   pipeSideOnMiniImg = pipeSideOnImg;
   minerSpriteSheetImg = loadImage('resources/miner/miner.png');
+  smelterFrontImg = loadImage('resources/smelter/smelterFront.png');
   splitterFrontImg = loadImage('resources/splitter/merger/splitterFront.png');
   splitterBackImg = loadImage('resources/splitter/merger/splitterBack.png');
   splitterSideImg = loadImage('resources/splitter/merger/splitterSide.png');
@@ -211,7 +213,7 @@ function preload() {
   hotbarOutlineImg = loadImage('resources/UI/hotbarFrame.png');
   copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
   ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
-  // heliumDepositImg = loadImage();
+  heliumDepositImg = loadImage('resources/resourceNodes/helium3Deposit.png');
 }
 
 function centerCanvas() {
@@ -1501,10 +1503,19 @@ function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha =
   // excess height naturally overhangs upward.
   const spriteX = round(px + (drawWidth - targetWidth) / 2);
   const spriteY = round(py + drawHeight - targetHeight);
+  const shouldMirrorWest = !!options.mirrorWest && (facing || "E") === "W";
 
   imageMode(CORNER);
   noTint();
-  image(sprite, spriteX, spriteY, targetWidth, targetHeight);
+  if (shouldMirrorWest) {
+    push();
+    translate(spriteX + targetWidth / 2, 0);
+    scale(-1, 1);
+    image(sprite, -targetWidth / 2, spriteY, targetWidth, targetHeight);
+    pop();
+  } else {
+    image(sprite, spriteX, spriteY, targetWidth, targetHeight);
+  }
   noTint();
   return true;
 }
@@ -1543,10 +1554,19 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   // excess height naturally overhangs upward.
   const spriteX = round(px + (drawWidth - targetWidth) / 2);
   const spriteY = round(py + drawHeight - targetHeight);
+  const shouldMirrorWest = !!options.mirrorWest && (facing || "E") === "W";
 
   imageMode(CORNER);
   noTint();
-  image(sprite, spriteX, spriteY, targetWidth, targetHeight);
+  if (shouldMirrorWest) {
+    push();
+    translate(spriteX + targetWidth / 2, 0);
+    scale(-1, 1);
+    image(sprite, -targetWidth / 2, spriteY, targetWidth, targetHeight);
+    pop();
+  } else {
+    image(sprite, spriteX, spriteY, targetWidth, targetHeight);
+  }
   noTint();
   return true;
 }
@@ -2495,7 +2515,7 @@ function getOrBuildWorldLayer(state) {
       let depositImg = null; // Reset depositImg for each tile
       if (tile.type === "iron") depositImg = ironDepositImg;
       else if (tile.type === "copper") depositImg = copperDepositImg;
-      // else if (tile.type === "helium3") depositImg = heliumDepositImg;
+      else if (tile.type === "helium3") depositImg = heliumDepositImg;
 
       if (depositImg) {
         // Draw deposit overlay on top of the base terrain tile.
@@ -3509,7 +3529,7 @@ function drawBuildingPlacementHologram(
       footprintHeight,
       previewFacing,
       225,
-      { preferSideForEast: true }
+      { preferSideForEast: true, mirrorWest: true }
     );
   } else if (useMergerHologram) {
     drawPlacedMergerSprite(
@@ -3519,7 +3539,7 @@ function drawBuildingPlacementHologram(
       footprintHeight,
       previewFacing,
       225,
-      { preferSideForEast: true }
+      { preferSideForEast: true, mirrorWest: true }
     );
   } else if (useTubeHologram) {
     drawTubePlacementHologramSprite(
@@ -4100,6 +4120,12 @@ function drawHotbar() {
         pipeSideOnMiniImg &&
         pipeSideOnMiniImg.width > 0
       );
+      const useSmelterFrontIcon = (
+        i === 1 &&
+        item.entityType === ENTITY_TYPES.SMELTER &&
+        smelterFrontImg &&
+        smelterFrontImg.width > 0
+      );
       const useSplitterFrontIcon = (
         i === 4 &&
         item.entityType === ENTITY_TYPES.SPLITTER &&
@@ -4139,6 +4165,27 @@ function drawHotbar() {
         const iconAspect = pipeSideOnMiniImg.height / pipeSideOnMiniImg.width;
         const iconWidth = iconSize + 4;
         image(pipeSideOnMiniImg, cx, cy, iconWidth, iconWidth * iconAspect);
+        imageMode(CORNER);
+      } else if (useSmelterFrontIcon) {
+        // Smelter front sheet is 192x38; use a single 32x38 frame for the icon.
+        const frameCount = 6;
+        const frameIndex = 0;
+        const frameW = smelterFrontImg.width / frameCount;
+        const frameH = smelterFrontImg.height;
+        imageMode(CENTER);
+        const iconWidth = iconSize + 8;
+        const iconHeight = iconWidth * (frameH / frameW);
+        image(
+          smelterFrontImg,
+          cx,
+          cy - 3,
+          iconWidth,
+          iconHeight,
+          frameIndex * frameW,
+          0,
+          frameW,
+          frameH
+        );
         imageMode(CORNER);
       } else if (useSplitterFrontIcon) {
         imageMode(CENTER);
