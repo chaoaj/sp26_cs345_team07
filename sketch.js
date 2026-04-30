@@ -22,7 +22,7 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
+let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
 let ironDepositImg, copperDepositImg, heliumDepositImg;
 
 let bgTiles = [];
@@ -119,6 +119,15 @@ const CORNER_TUBE_MANUAL_PIXEL_OFFSETS = {
   N: { x: 0, y: 0 }
 };
 
+// Manual per-facing pixel offsets for smelter sprites.
+// Shift left by 1px by default for all facings.
+const SMELTER_MANUAL_PIXEL_OFFSETS = {
+  E: { x: -3, y: 0 },
+  S: { x: 0, y: -1 },
+  W: { x: -3, y: 0 },
+  N: { x: 0, y: -1 }
+};
+
 // Base orientation transform for corner tube facings.
 const CORNER_TUBE_BASE_VISUAL_TRANSFORMS = Object.freeze({
   E: Object.freeze({ angle: 0, mirrorX: false }),
@@ -179,6 +188,8 @@ function preload() {
   pipeSideOnMiniImg = pipeSideOnImg;
   minerSpriteSheetImg = loadImage('resources/miner/miner.png');
   smelterFrontImg = loadImage('resources/smelter/smelterFront.png');
+  smelterSideImg = loadImage('resources/smelter/smelterSide.png');
+  smelterBackImg = loadImage('resources/smelter/smelterBack.png');
   splitterFrontImg = loadImage('resources/splitter/merger/splitterFront.png');
   splitterBackImg = loadImage('resources/splitter/merger/splitterBack.png');
   splitterSideImg = loadImage('resources/splitter/merger/splitterSide.png');
@@ -1539,6 +1550,91 @@ function drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, minerSta
   return true;
 }
 
+function getSmelterSpriteForFacing(facing) {
+  const dir = facing || "E";
+  if (dir === "E" || dir === "W") {
+    return smelterSideImg || smelterFrontImg || null;
+  }
+  if (dir === "S") {
+    return smelterBackImg || smelterFrontImg || smelterSideImg || null;
+  }
+  return smelterFrontImg || smelterBackImg || smelterSideImg || null;
+}
+
+function getSmelterManualPixelOffset(facing) {
+  const dir = facing || "E";
+  const key = SMELTER_MANUAL_PIXEL_OFFSETS[dir] ? dir : "E";
+  const manual = SMELTER_MANUAL_PIXEL_OFFSETS[key] || {};
+  const manualX = Number(manual.x);
+  const manualY = Number(manual.y);
+  return {
+    xOffsetPx: Number.isFinite(manualX) ? manualX : 0,
+    yOffsetPx: Number.isFinite(manualY) ? manualY : 0
+  };
+}
+
+function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterState, nowSeconds) {
+  const sprite = getSmelterSpriteForFacing(facing);
+  if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
+    return false;
+  }
+
+  const frameCount = 6;
+  const frameW = sprite.width / frameCount;
+  const frameH = sprite.height;
+  const isOn = smelterState?.isOn != null
+    ? smelterState.isOn
+    : !!smelterState?.isActive;
+  const animationFps = 8;
+  const frameIndex = isOn
+    ? floor(nowSeconds * animationFps) % frameCount
+    : 0;
+
+  const visualScale = 2;
+  const targetWidth = round(frameW * visualScale);
+  const targetHeight = round(frameH * visualScale);
+  const manualOffset = getSmelterManualPixelOffset(facing);
+  const spriteX = round(px + (drawWidth - targetWidth) / 2 + manualOffset.xOffsetPx);
+  const spriteY = round(py + drawHeight - targetHeight + manualOffset.yOffsetPx);
+  // West uses the same side asset orientation as East; only ports are reversed
+  // through entity facing/port rotation logic.
+  const shouldMirrorWest = false;
+  const srcX = frameIndex * frameW;
+
+  imageMode(CORNER);
+  noTint();
+  if (shouldMirrorWest) {
+    push();
+    translate(spriteX + targetWidth / 2, 0);
+    scale(-1, 1);
+    image(
+      sprite,
+      -targetWidth / 2,
+      spriteY,
+      targetWidth,
+      targetHeight,
+      srcX,
+      0,
+      frameW,
+      frameH
+    );
+    pop();
+  } else {
+    image(
+      sprite,
+      spriteX,
+      spriteY,
+      targetWidth,
+      targetHeight,
+      srcX,
+      0,
+      frameW,
+      frameH
+    );
+  }
+  return true;
+}
+
 function getSplitterSpriteForFacing(facing, options = {}) {
   const preferSideForEast = !!options.preferSideForEast;
   const dir = facing || "E";
@@ -2227,6 +2323,17 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const drewMinerSprite =
     entity.type === ENTITY_TYPES.MINER &&
     drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
+  const drewSmelterSprite =
+    entity.type === ENTITY_TYPES.SMELTER &&
+    drawPlacedSmelterSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      entity.state?.facing || "E",
+      entity.state,
+      nowSeconds
+    );
   const drewSplitterSprite =
     entity.type === ENTITY_TYPES.SPLITTER &&
     drawPlacedSplitterSprite(
@@ -2249,7 +2356,7 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       255,
       { preferSideForEast: true }
     );
-  const drewCustomSprite = drewMinerSprite || drewSplitterSprite || drewMergerSprite;
+  const drewCustomSprite = drewMinerSprite || drewSmelterSprite || drewSplitterSprite || drewMergerSprite;
 
   if (!drewCustomSprite) {
     // Regular building fallback rendering when no custom sprite is used.
@@ -2390,6 +2497,11 @@ function collapseDirectionToCardinal(dirX, dirY, preferAxis = "x") {
   return { x: Math.sign(dirX) || 1, y: 0 };
 }
 
+function getPreferredArrowAxisForFacing(facing) {
+  const dir = facing || "E";
+  return dir === "N" || dir === "S" ? "y" : "x";
+}
+
 function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
   if (!drawGame.state) return false;
   const map = drawGame.state.map;
@@ -2505,7 +2617,8 @@ function drawEntityPorts(entity, tileSize) {
         dirX = splitterForward.x;
         dirY = splitterForward.y;
       }
-      const collapsed = collapseDirectionToCardinal(dirX, dirY, "x");
+      const preferAxis = getPreferredArrowAxisForFacing(entity.state?.facing || "E");
+      const collapsed = collapseDirectionToCardinal(dirX, dirY, preferAxis);
       dirX = collapsed.x;
       dirY = collapsed.y;
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [230, 60, 60], arrowLen);
@@ -3507,7 +3620,8 @@ function drawPlacementPorts(
         dirX = splitterForward.x;
         dirY = splitterForward.y;
       }
-      const collapsed = collapseDirectionToCardinal(dirX, dirY, "x");
+      const preferAxis = getPreferredArrowAxisForFacing(facing || "E");
+      const collapsed = collapseDirectionToCardinal(dirX, dirY, preferAxis);
       dirX = collapsed.x;
       dirY = collapsed.y;
       drawArrow(portPx, portPy, dirX, dirY, [0, 200, 0]);
