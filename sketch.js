@@ -109,6 +109,23 @@ let sidebarMaxVisibleItems = 12;
 const RESTRICTED_SHUTTLE_COL = 25;
 const RESTRICTED_SHUTTLE_ROW = 6;
 
+// Manual per-facing pixel offsets for corner tube sprites.
+// Adjust x/y here as needed; defaults are intentionally zero.
+const CORNER_TUBE_MANUAL_PIXEL_OFFSETS = {
+  E: { x: 1, y: 0 },
+  S: { x: 1, y: 0 },
+  W: { x: 0, y: 0 },
+  N: { x: 0, y: 0 }
+};
+
+// Base orientation transform for corner tube facings.
+const CORNER_TUBE_BASE_VISUAL_TRANSFORMS = Object.freeze({
+  E: Object.freeze({ angle: 0, mirrorX: false }),
+  S: Object.freeze({ angle: 0, mirrorX: true }),
+  W: Object.freeze({ angle: 0, mirrorX: false }),
+  N: Object.freeze({ angle: 0, mirrorX: true })
+});
+
 
 function setup() {
   canvas = createCanvas(600, 600);
@@ -1534,6 +1551,25 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   return true;
 }
 
+function getCornerTubeDisplayFrameSize(facing) {
+  const useCurve2Family = facing === "N" || facing === "W";
+  const offImg = useCurve2Family
+    ? (pipeCurve2OffImg || pipeCurve1OffImg)
+    : (pipeCurve1OffImg || pipeCurve2OffImg);
+  const onImg = useCurve2Family
+    ? (pipeCurve2OnImg || pipeCurve1OnImg)
+    : (pipeCurve1OnImg || pipeCurve2OnImg);
+
+  const offFrameW = offImg && offImg.width > 0 ? offImg.width / 8 : 0;
+  const offFrameH = offImg && offImg.height > 0 ? offImg.height : 0;
+  const onFrameW = onImg && onImg.width > 0 ? onImg.width : 0;
+  const onFrameH = onImg && onImg.height > 0 ? onImg.height : 0;
+
+  const frameW = max(1, round(max(offFrameW, onFrameW)));
+  const frameH = max(1, round(max(offFrameH, onFrameH)));
+  return { frameW, frameH };
+}
+
 function drawTubePlacementHologramSprite(
   footprintLeft,
   footprintTop,
@@ -1584,8 +1620,15 @@ function drawTubePlacementHologramSprite(
 
   const frameW = img.width / max(1, numFrames);
   const frameH = img.height;
-  const targetW = round(frameW * tubeVisualScale);
-  const targetH = round(frameH * tubeVisualScale);
+  const cornerDisplaySize = isCorner
+    ? getCornerTubeDisplayFrameSize(facing)
+    : null;
+  const targetW = round(
+    (cornerDisplaySize ? cornerDisplaySize.frameW : frameW) * tubeVisualScale
+  );
+  const targetH = round(
+    (cornerDisplaySize ? cornerDisplaySize.frameH : frameH) * tubeVisualScale
+  );
   imageMode(CORNER);
   tint(255, alpha);
   if (isCorner) {
@@ -1699,7 +1742,7 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
   const isCorner = state.shape === TUBE_SHAPES.CORNER;
   const cornerFacing = state.facing || "E";
   const cornerVisual = getCornerTubeVisualTransform(cornerFacing);
-  const isFlowing = !!state.carriedItem;
+  const isFlowing = state.flowState === "flowing";
   const zLaneRaw = Number(state.zLane);
   const zLane = Number.isFinite(zLaneRaw) ? zLaneRaw : 0;
   let img = null;
@@ -1720,7 +1763,9 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
     const onImg = useCurve2Family
       ? (pipeCurve2OnImg || pipeCurve1OnImg)
       : (pipeCurve1OnImg || pipeCurve2OnImg);
-    const cornerIsOn = isFlowing || state.isConnected;
+    const hasValidIo = state.hasOpenPort === false;
+    const hasSupplySignal = isFlowing || (Number(state.outputRate) || 0) > 0;
+    const cornerIsOn = hasValidIo && hasSupplySignal;
     img = cornerIsOn ? (onImg || offImg) : (offImg || onImg);
     if (cornerIsOn) {
       numFrames = 1;
@@ -1748,9 +1793,12 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
       : 0;
     const reverseSideOffLight = horizontalFlowDirection < 0;
     const reverseFrontOffLight = verticalFlowDirection < 0;
-    const verticalIsOn = !isHorizontalStraight && (isFlowing || state.isConnected);
+    const hasValidIo = state.hasOpenPort === false;
+    const hasSupplySignal = isFlowing || (Number(state.outputRate) || 0) > 0;
+    const sideIsOn = hasValidIo && hasSupplySignal;
+    const verticalIsOn = !isHorizontalStraight && hasValidIo && hasSupplySignal;
     img = isHorizontalStraight
-      ? (isFlowing
+      ? (sideIsOn
           ? (pipeSideOnImg || pipeSideOnMiniImg || pipeFrontOffImg)
           : (pipeSideOffImg || pipeFrontOffImg))
       : (verticalIsOn
@@ -1771,7 +1819,7 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
       img === pipeFrontOffImg &&
       !isHorizontalStraight &&
       !isFlowing &&
-      !state.isConnected;
+      !hasValidIo;
     if (numFrames > 1 && animateOffSideTube) {
       // Flashing pattern (not scrolling): mostly hold base frame with periodic
       // alternate light sets so the tube feels stationary while lights pulse.
@@ -1796,7 +1844,7 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
       const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
       const frameFromPattern = flashPattern[patternIndex];
       frameIndex = frameFromPattern % numFrames;
-    } else if (numFrames > 1 && state.isConnected && !isFlowing && isHorizontalStraight) {
+    } else if (numFrames > 1 && hasValidIo && hasSupplySignal && !isFlowing && isHorizontalStraight) {
       frameIndex = Math.floor(nowMs / 150) % numFrames;
     }
   }
@@ -1997,8 +2045,16 @@ function drawTubeDescriptorLayer(descriptor, layerName) {
   const srcX = descriptor.frameIndex * descriptor.frameW;
   const frameW = descriptor.frameW;
   const frameH = descriptor.frameH;
-  const targetW = round(frameW * tubeVisualScale);
-  const targetH = round(frameH * tubeVisualScale);
+  const cornerFacing = descriptor.entity?.state?.facing || "E";
+  const cornerDisplaySize = descriptor.isCorner
+    ? getCornerTubeDisplayFrameSize(cornerFacing)
+    : null;
+  const targetW = round(
+    (cornerDisplaySize ? cornerDisplaySize.frameW : frameW) * tubeVisualScale
+  );
+  const targetH = round(
+    (cornerDisplaySize ? cornerDisplaySize.frameH : frameH) * tubeVisualScale
+  );
   const spriteX = round(descriptor.px + (descriptor.drawWidth - targetW) / 2);
   const spriteY = round(descriptor.py + descriptor.drawHeight - targetH);
 
@@ -3599,16 +3655,18 @@ function drawSelectedBuildingHighlight(map, tileSize) {
 
 function getCornerTubeVisualTransform(facing) {
   const dir = facing || "E";
-  if (dir === "W") {
-    return { angle: 0, mirrorX: false, xOffsetPx: 0, yOffsetPx: 0 };
-  }
-  if (dir === "N") {
-    return { angle: 0, mirrorX: true, xOffsetPx: 0, yOffsetPx: 0 };
-  }
-  if (dir === "S") {
-    return { angle: 0, mirrorX: true, xOffsetPx: 4, yOffsetPx: -4 };
-  }
-  return { angle: 0, mirrorX: false, xOffsetPx: 4, yOffsetPx: -4 };
+  const key = CORNER_TUBE_BASE_VISUAL_TRANSFORMS[dir] ? dir : "E";
+  const base = CORNER_TUBE_BASE_VISUAL_TRANSFORMS[key];
+  const manual = CORNER_TUBE_MANUAL_PIXEL_OFFSETS[key] || {};
+  const manualX = Number(manual.x);
+  const manualY = Number(manual.y);
+
+  return {
+    angle: Number.isFinite(base.angle) ? base.angle : 0,
+    mirrorX: !!base.mirrorX,
+    xOffsetPx: Number.isFinite(manualX) ? manualX : 0,
+    yOffsetPx: Number.isFinite(manualY) ? manualY : 0
+  };
 }
 
 function getTileBaseColor(tile) {
