@@ -22,7 +22,10 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOnImg;
+let pipeFrontOffImg, pipeFrontOnImg,
+    pipeCurve1OffImg, pipeCurve1OnImg,
+    pipeCurve2OffImg, pipeCurve2OnImg,
+    pipeSideOffImg,  pipeSideOnImg;
 
 let bgTiles = [];
 let stars = [];
@@ -150,12 +153,14 @@ function preload() {
   bgTiles[2] = loadImage('resources/tiles/tile3.png');
   bgTiles[3] = loadImage('resources/tiles/tile4.png');
 
-  pipeFrontOffImg = loadImage('resources/pipes/pipeFrontOff.png');
+ pipeFrontOffImg  = loadImage('resources/pipes/pipeFrontOff.png');
+  pipeFrontOnImg   = loadImage('resources/pipes/pipeFrontOn.png');
   pipeCurve1OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
-  pipeCurve1OnImg = loadImage('resources/pipes/pipeCurve1On.png');
-  pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
-  pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve1On.png');
-  pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
+  pipeCurve1OnImg  = loadImage('resources/pipes/pipeCurve1On.png');
+  pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve2Off.png');  // FIXED
+  pipeCurve2OnImg  = loadImage('resources/pipes/pipeCurve2On.png');   // FIXED
+  pipeSideOffImg   = loadImage('resources/pipes/pipeSideOff.png');    // ADDED
+  pipeSideOnImg    = loadImage('resources/pipes/pipeSideOn.png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -1410,73 +1415,91 @@ function drawEntities(entities, tileSize, map) {
     const py = entity.tileY * tileSize;
 
     if (entity.type === ENTITY_TYPES.TUBE) {
-      push();
-      translate(px + tileSize / 2, py + tileSize / 2);
-      
-      let isCorner = entity.state.shape === TUBE_SHAPES.CORNER;
-      let isFlowing = !!entity.state.carriedItem;
+  push();
+  translate(px + tileSize / 2, py + tileSize / 2);
 
-      if (isCorner) {
-        rotate(facingToAngle(entity.state.facing));
-        let useCurve2 = (entity.tileX + entity.tileY) % 2 === 0;
-        let imgToDraw = null;
-        if (isFlowing) imgToDraw = useCurve2 ? (pipeCurve2OnImg || pipeCurve1OnImg) : pipeCurve1OnImg;
-        else imgToDraw = useCurve2 ? (pipeCurve2OffImg || pipeCurve1OffImg) : pipeCurve1OffImg;
-        
-        if (imgToDraw && imgToDraw.width > 0) {
-          let frameH = imgToDraw.height;
-          let frameW = frameH; 
-          let numFrames = Math.floor(imgToDraw.width / frameW) || 1;
-          let currentFrame = 0;
-          if (numFrames > 1 && entity.state.isConnected) {
-              currentFrame = Math.floor(millis() / 150) % numFrames;
-          }
-          imageMode(CORNER);
-          image(imgToDraw, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
-        }
-      } else {
-        let isVertical = (entity.state.facing === "N" || entity.state.facing === "S");
-        let isHorizontal = !isVertical;
-        
-        let isConnectedOutput = false;
-        if (entity.state.isConnected) {
-            const connectedPorts = getTubePortConnections(entities, entity);
-            for(let p of connectedPorts) {
-                if(p.kind === "output" || p.kind === "both") isConnectedOutput = true;
-            }
-        }
+  const isCorner  = entity.state.shape === TUBE_SHAPES.CORNER;
+  const isFlowing = entity.state.flowState === "flowing";
+  const nowMs     = millis();
 
-        if (isVertical && entity.state.facing === "S" && !isConnectedOutput && pipeFrontOffImg && pipeFrontOffImg.width > 0) {
-            let frameH = pipeFrontOffImg.height;
-            let frameW = frameH; 
-            let numFrames = Math.floor(pipeFrontOffImg.width / frameW) || 1;
-            let currentFrame = (numFrames > 1 && entity.state.isConnected) ? Math.floor(millis() / 150) % numFrames : 0;
-            imageMode(CORNER);
-            image(pipeFrontOffImg, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
-        } else {
-            if (isHorizontal) rotate(HALF_PI); 
-            
-            let imgToDraw = null;
-            if (isFlowing) {
-                imgToDraw = pipeSideOnImg;
-            } else {
-                imgToDraw = (typeof pipeSideOffImg !== 'undefined' && pipeSideOffImg && pipeSideOffImg.width > 0) ? pipeSideOffImg : pipeSideOnImg;
-            }
+  // Helper: draw one frame from a sprite sheet.
+  // frameW must match the actual per-frame pixel width of the sheet.
+  function drawPipeSprite(img, frameW, animated) {
+    if (!img || img.width === 0) return false;
+    const numFrames = Math.floor(img.width / frameW) || 1;
+    const frame = (animated && numFrames > 1)
+      ? Math.floor(nowMs / 150) % numFrames
+      : 0;
+    imageMode(CORNER);
+    image(img,
+      -tileSize / 2, -tileSize / 2, tileSize, tileSize,
+      frame * frameW, 0, frameW, img.height
+    );
+    return true;
+  }
 
-            if (imgToDraw && imgToDraw.width > 0) {
-                let frameH = imgToDraw.height;
-                let frameW = frameH; 
-                let numFrames = Math.floor(imgToDraw.width / frameW) || 1;
-                let currentFrame = (numFrames > 1 && entity.state.isConnected) ? Math.floor(millis() / 150) % numFrames : 0;
-                imageMode(CORNER);
-                image(imgToDraw, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
-            } else {
-                stroke(50); fill(120);
-                rect(-tileSize / 2 + 4, -tileSize / 2 + 4, tileSize - 8, tileSize - 8, 4);
-            }
-        }
+  if (isCorner) {
+    // Rotate to facing direction
+    rotate(facingToAngle(entity.state.facing));
+
+    // Alternate between curve1 and curve2 for visual variety
+    const useCurve2 = (entity.tileX + entity.tileY) % 2 === 0;
+
+    if (isFlowing) {
+      // Single-frame "On" images — frameW == full image width
+      const img = useCurve2 ? pipeCurve2OnImg : pipeCurve1OnImg;
+      const fw  = useCurve2 ? 32 : 32;      // both On images are single 32-wide frames
+      if (!drawPipeSprite(img, fw, false)) {
+        // Fallback to Off sheet frame 0
+        drawPipeSprite(useCurve2 ? pipeCurve2OffImg : pipeCurve1OffImg,
+                       useCurve2 ? 32 : 27, false);
       }
-      pop();
+    } else {
+      // Animated "Off" sheets
+      // pipeCurve1Off: 216x30 → 8 frames @ 27px each
+      // pipeCurve2Off: 256x47 → 8 frames @ 32px each
+      const img = useCurve2 ? pipeCurve2OffImg : pipeCurve1OffImg;
+      const fw  = useCurve2 ? 32 : 27;
+      if (!drawPipeSprite(img, fw, true)) {
+        stroke(50); fill(100);
+        rect(-tileSize / 2 + 4, -tileSize / 2 + 4, tileSize - 8, tileSize - 8, 4);
+      }
+    }
+
+  } else {
+    // Straight tube — rotate so the sprite always renders along its logical axis.
+    // Sprites are drawn "vertical" (top→bottom).  For E/W facings rotate 90°.
+    const facing = entity.state.facing || "N";
+    const isHorizontal = (facing === "E" || facing === "W");
+    if (isHorizontal) rotate(HALF_PI);
+
+    if (isFlowing) {
+      // "On" images are single frames showing active indicator dots.
+      // pipeSideOn:  18x16  → single frame (horizontal/side pipe)
+      // pipeFrontOn: 14x30  → single frame (vertical/front pipe)
+      // Use Front for N/S, Side for E/W (after rotation Side also draws N/S correctly)
+      const isFrontFacing = (facing === "N" || facing === "S");
+      const img = isFrontFacing ? pipeFrontOnImg : pipeSideOnImg;
+      const fw  = isFrontFacing ? 14 : 18;
+      if (!drawPipeSprite(img, fw, false)) {
+        // Fallback: draw the Off sheet animated
+        drawPipeSprite(pipeFrontOffImg, 16, true) ||
+        drawPipeSprite(pipeSideOffImg,  16, true);
+      }
+    } else {
+      // Animated "Off" sheets.
+      // pipeFrontOff: 128x31 → 8 frames @ 16px each
+      // pipeSideOff:  144x16 → 9 frames @ 16px each
+      const isFrontFacing = (facing === "N" || facing === "S");
+      const img = isFrontFacing ? pipeFrontOffImg : pipeSideOffImg;
+      const fw  = 16;
+      if (!drawPipeSprite(img, fw, true)) {
+        stroke(50); fill(120);
+        rect(-tileSize / 2 + 4, -tileSize / 2 + 4, tileSize - 8, tileSize - 8, 4);
+      }
+    }
+  }
+    pop();
     } else {
       push();
       translate(px + tileSize / 2, py + tileSize / 2);
@@ -2716,7 +2739,7 @@ function drawBuildingPlacementHologram(
   
   stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
   strokeWeight(2);
-  fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
+  fill(colorRgb[0], colorRgb[1], colorRgb[2], 230);
 
   let w = tileSize - 6;
   let h = tileSize - 6;
