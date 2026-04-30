@@ -300,6 +300,9 @@ function drawGame() {
         row.push({
           type: "empty",
           resource: null,
+          resourceNodeId: null,
+          resourceNodeOriginX: null,
+          resourceNodeOriginY: null,
           item: null,
           colorOverride: null,
           entity: null,
@@ -324,38 +327,67 @@ function drawGame() {
       }
     }
 
-    const setResourceNode = (col, row, nodeKey) => {
+    const getNodeResourceType = (nodeKey) => {
+      if (nodeKey === "iron") return RESOURCE_TYPES.IRON_ORE;
+      if (nodeKey === "copper") return RESOURCE_TYPES.COPPER_ORE;
+      if (nodeKey === "helium3") return RESOURCE_TYPES.HELIUM3;
+      return null;
+    };
+    const setResourceNodeTile = (col, row, nodeKey, nodeId, originX, originY) => {
+      if (row < 0 || row >= mapRows || col < 0 || col >= mapCols) {
+        return;
+      }
       const t = tiles[row][col];
       t.type = nodeKey;
-      if (nodeKey === "iron") {
-        t.resource = RESOURCE_TYPES.IRON_ORE;
-      } else if (nodeKey === "copper") {
-        t.resource = RESOURCE_TYPES.COPPER_ORE;
-      } else if (nodeKey === "helium3") {
-        t.resource = RESOURCE_TYPES.HELIUM3;
+      t.resource = getNodeResourceType(nodeKey);
+      t.resourceNodeId = nodeId || null;
+      t.resourceNodeOriginX = Number.isFinite(originX) ? originX : null;
+      t.resourceNodeOriginY = Number.isFinite(originY) ? originY : null;
+    };
+    const placeResourceNodeBlock2x2 = (topLeftCol, topLeftRow, nodeKey) => {
+      if (
+        topLeftCol < 0 ||
+        topLeftCol + 1 >= mapCols ||
+        topLeftRow < 0 ||
+        topLeftRow + 1 >= mapRows
+      ) {
+        return false;
       }
+      const nodeId = `${nodeKey}:${topLeftCol},${topLeftRow}`;
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          setResourceNodeTile(
+            topLeftCol + dx,
+            topLeftRow + dy,
+            nodeKey,
+            nodeId,
+            topLeftCol,
+            topLeftRow
+          );
+        }
+      }
+      return true;
     };
 
     if (restrictedMode) {
-      applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceNode);
+      applyRestrictedModeResourceLayout(
+        tiles,
+        mapCols,
+        mapRows,
+        placeResourceNodeBlock2x2
+      );
     } else {
       // Resource patches for testing in creative mode
-      for (let y = 6; y <= 7; y++) {
-        for (let x = 6; x <= 10; x++) {
-          setResourceNode(x, y, "iron");
-        }
-      }
+      placeResourceNodeBlock2x2(6, 6, "iron");
+      placeResourceNodeBlock2x2(8, 6, "iron");
+      placeResourceNodeBlock2x2(10, 6, "iron");
 
-      for (let y = 10; y <= 12; y++) {
-        for (let x = 12; x <= 16; x++) {
-          setResourceNode(x, y, "copper");
-        }
-      }
+      placeResourceNodeBlock2x2(12, 10, "copper");
+      placeResourceNodeBlock2x2(14, 10, "copper");
+      placeResourceNodeBlock2x2(12, 12, "copper");
+      placeResourceNodeBlock2x2(14, 12, "copper");
 
-      setResourceNode(17, 18, "helium3");
-      setResourceNode(18, 18, "helium3");
-      setResourceNode(17, 19, "helium3");
-      setResourceNode(18, 19, "helium3");
+      placeResourceNodeBlock2x2(17, 18, "helium3");
     }
 
     const entities = [];
@@ -626,8 +658,8 @@ push();
   updatePlayerAnimation();
 }
 
-function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceNode) {
-  if (!Array.isArray(tiles) || typeof setResourceNode !== "function") {
+function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourceNodeBlock2x2) {
+  if (!Array.isArray(tiles) || typeof placeResourceNodeBlock2x2 !== "function") {
     return;
   }
 
@@ -648,6 +680,9 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceN
     ) {
       tile.resource = null;
     }
+    tile.resourceNodeId = null;
+    tile.resourceNodeOriginX = null;
+    tile.resourceNodeOriginY = null;
   };
 
   for (let y = 0; y < mapRows; y++) {
@@ -666,15 +701,34 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceN
   }
 
   const placeDepositPatch = (centerX, centerY, radiusX, radiusY, type) => {
-    for (let dy = -radiusY; dy <= radiusY; dy++) {
-      for (let dx = -radiusX; dx <= radiusX; dx++) {
-        const x = centerX + dx;
-        const y = centerY + dy;
-        if (!isInside(x, y) || isReserved(x, y)) {
+    const anchorX = centerX - 1;
+    const anchorY = centerY - 1;
+    for (let by = -radiusY; by <= radiusY; by++) {
+      for (let bx = -radiusX; bx <= radiusX; bx++) {
+        const topLeftX = anchorX + bx * 2;
+        const topLeftY = anchorY + by * 2;
+        let canPlace = true;
+        for (let oy = 0; oy < 2 && canPlace; oy++) {
+          for (let ox = 0; ox < 2; ox++) {
+            const x = topLeftX + ox;
+            const y = topLeftY + oy;
+            if (!isInside(x, y) || isReserved(x, y)) {
+              canPlace = false;
+              break;
+            }
+          }
+        }
+        if (!canPlace) {
           continue;
         }
-        setResourceNode(x, y, type);
-        reserve(x, y);
+        if (!placeResourceNodeBlock2x2(topLeftX, topLeftY, type)) {
+          continue;
+        }
+        for (let oy = 0; oy < 2; oy++) {
+          for (let ox = 0; ox < 2; ox++) {
+            reserve(topLeftX + ox, topLeftY + oy);
+          }
+        }
       }
     }
   };
@@ -710,19 +764,35 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceN
 
     while (placed < group.count && attempts < maxAttempts) {
       attempts++;
-      const x = Math.floor(Math.random() * mapCols);
-      const y = Math.floor(Math.random() * mapRows);
-      if (!isInside(x, y) || isReserved(x, y)) {
+      const x = Math.floor(Math.random() * (mapCols - 1));
+      const y = Math.floor(Math.random() * (mapRows - 1));
+      let canPlace = true;
+      for (let oy = 0; oy < 2 && canPlace; oy++) {
+        for (let ox = 0; ox < 2; ox++) {
+          const tx = x + ox;
+          const ty = y + oy;
+          if (!isInside(tx, ty) || isReserved(tx, ty)) {
+            canPlace = false;
+            break;
+          }
+          const tile = tiles[ty] && tiles[ty][tx];
+          if (!tile || tile.entityId != null || tile.type !== "empty") {
+            canPlace = false;
+            break;
+          }
+        }
+      }
+      if (!canPlace) {
         continue;
       }
-
-      const tile = tiles[y] && tiles[y][x];
-      if (!tile || tile.entityId != null || tile.type !== "empty") {
+      if (!placeResourceNodeBlock2x2(x, y, group.type)) {
         continue;
       }
-
-      setResourceNode(x, y, group.type);
-      reserve(x, y);
+      for (let oy = 0; oy < 2; oy++) {
+        for (let ox = 0; ox < 2; ox++) {
+          reserve(x + ox, y + oy);
+        }
+      }
       placed++;
     }
   }
@@ -2518,7 +2588,9 @@ function getOrBuildWorldLayer(state) {
   const { tileSize, mapCols, mapRows } = config;
   const layer = createGraphics(mapCols * tileSize, mapRows * tileSize);
   layer.noStroke();
+  const depositDrawCalls = [];
 
+  // Pass 1: draw base terrain only.
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
@@ -2534,18 +2606,53 @@ function getOrBuildWorldLayer(state) {
         layer.fill(fallbackColor[0], fallbackColor[1], fallbackColor[2]);
         layer.rect(px, py, tileSize, tileSize);
       }
+    }
+  }
 
-      // Then draw specific resource node deposit images on top if they exist
+  // Pass 2: draw resource node overlays.
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tile = map.tiles[y][x];
+      const px = x * tileSize;
+      const py = y * tileSize;
       let depositImg = null; // Reset depositImg for each tile
       if (tile.type === "iron") depositImg = ironDepositImg;
       else if (tile.type === "copper") depositImg = copperDepositImg;
       else if (tile.type === "helium3") depositImg = heliumDepositImg;
 
       if (depositImg) {
-        // Draw deposit overlay on top of the base terrain tile.
-        layer.image(depositImg, px, py, tileSize, tileSize);
+        const originX = Number.isFinite(tile.resourceNodeOriginX)
+          ? tile.resourceNodeOriginX
+          : x;
+        const originY = Number.isFinite(tile.resourceNodeOriginY)
+          ? tile.resourceNodeOriginY
+          : y;
+        const isNodeRoot = originX === x && originY === y;
+        if (isNodeRoot) {
+          // Draw one icon across the full 2x2 resource node footprint.
+          depositDrawCalls.push({
+            img: depositImg,
+            x: px,
+            y: py,
+            w: tileSize * 2,
+            h: tileSize * 2
+          });
+        } else if (!Number.isFinite(tile.resourceNodeOriginX) || !Number.isFinite(tile.resourceNodeOriginY)) {
+          // Backward-compat fallback for older single-tile nodes.
+          depositDrawCalls.push({
+            img: depositImg,
+            x: px,
+            y: py,
+            w: tileSize,
+            h: tileSize
+          });
+        }
       }
     }
+  }
+
+  for (const drawCall of depositDrawCalls) {
+    layer.image(drawCall.img, drawCall.x, drawCall.y, drawCall.w, drawCall.h);
   }
 
   cache.worldLayer = layer;
