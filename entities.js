@@ -176,7 +176,7 @@ const ENTITY_PORT_DEFS = {
   ],
   [ENTITY_TYPES.SMELTER]: [
     { name: "input", kind: "input", offset: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+    { name: "output", kind: "output", offset: { x: 1, y: 1 } }
   ],
   [ENTITY_TYPES.CONSTRUCTOR]: [
     { name: "input", kind: "input", offset: { x: 0, y: -1 } },
@@ -208,6 +208,10 @@ const ENTITY_PORT_DEFS = {
 };
 
 const ENTITY_FOOTPRINT_DEFS = {
+  [ENTITY_TYPES.SMELTER]: [
+    { x: 0, y: 0 },
+    { x: 0, y: 1 }
+  ],
   [ENTITY_TYPES.SPLITTER]: [
     { x: 0, y: -1 },
     { x: 0, y: 0 },

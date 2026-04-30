@@ -2299,6 +2299,27 @@ function drawDirectionalArrow(cx, cy, dirX, dirY, rgb, arrowLen) {
   );
 }
 
+function collapseDirectionToCardinal(dirX, dirY, preferAxis = "x") {
+  const absX = Math.abs(dirX);
+  const absY = Math.abs(dirY);
+
+  if (absX === 0 && absY === 0) {
+    return { x: 1, y: 0 };
+  }
+
+  if (absX > absY) {
+    return { x: Math.sign(dirX) || 1, y: 0 };
+  }
+  if (absY > absX) {
+    return { x: 0, y: Math.sign(dirY) || 1 };
+  }
+
+  if (preferAxis === "y") {
+    return { x: 0, y: Math.sign(dirY) || 1 };
+  }
+  return { x: Math.sign(dirX) || 1, y: 0 };
+}
+
 function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
   if (!drawGame.state) return false;
   const map = drawGame.state.map;
@@ -2414,6 +2435,9 @@ function drawEntityPorts(entity, tileSize) {
         dirX = splitterForward.x;
         dirY = splitterForward.y;
       }
+      const collapsed = collapseDirectionToCardinal(dirX, dirY, "x");
+      dirX = collapsed.x;
+      dirY = collapsed.y;
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [230, 60, 60], arrowLen);
       if (forceExposeOutput) {
         drawConstructorOutputItemBadge(
@@ -3376,6 +3400,9 @@ function drawPlacementPorts(
         dirX = splitterForward.x;
         dirY = splitterForward.y;
       }
+      const collapsed = collapseDirectionToCardinal(dirX, dirY, "x");
+      dirX = collapsed.x;
+      dirY = collapsed.y;
       drawArrow(portPx, portPy, dirX, dirY, [0, 200, 0]);
     } else if (port.kind === "both") {
       drawArrow(portPx, portPy, dirX, dirY, [60, 190, 190]);
@@ -4463,6 +4490,82 @@ function tryApplyTubeGeometry(entity, nextFacing, nextShape) {
   return true;
 }
 
+function tryApplyNonTubeFacing(entity, nextFacing) {
+  if (!drawGame.state || !entity || entity.type === ENTITY_TYPES.TUBE) {
+    return false;
+  }
+
+  const { map, config } = drawGame.state;
+  const mapCols = config.mapCols;
+  const mapRows = config.mapRows;
+  const currentFacing = entity.state?.facing || "E";
+  const resolvedFacing = nextFacing || currentFacing;
+  const currentTiles = getSafeFootprintTilesAt(
+    entity.type,
+    entity.tileX,
+    entity.tileY,
+    currentFacing,
+    entity.state
+  );
+  const nextTiles = getSafeFootprintTilesAt(
+    entity.type,
+    entity.tileX,
+    entity.tileY,
+    resolvedFacing,
+    entity.state
+  );
+
+  for (const entry of nextTiles) {
+    if (
+      entry.x < 0 || entry.x >= mapCols ||
+      entry.y < 0 || entry.y >= mapRows
+    ) {
+      return false;
+    }
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile) {
+      return false;
+    }
+    if (tile.entityId != null && tile.entityId !== entity.id) {
+      return false;
+    }
+  }
+
+  const nextSet = new Set(nextTiles.map((entry) => `${entry.x},${entry.y}`));
+  for (const entry of currentTiles) {
+    if (nextSet.has(`${entry.x},${entry.y}`)) {
+      continue;
+    }
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile || tile.entityId !== entity.id) {
+      continue;
+    }
+    tile.entityId = null;
+    tile.entity = null;
+    tile.item = null;
+    tile.colorOverride = null;
+    if (tile.building && tile.building.entityId === entity.id) {
+      tile.building = null;
+    }
+  }
+
+  entity.state.facing = resolvedFacing;
+  syncTileBuildingFacing(entity);
+
+  for (const entry of nextTiles) {
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile) {
+      continue;
+    }
+    tile.entityId = entity.id;
+    tile.entity = entity;
+    tile.item = entity.type;
+    tile.colorOverride = null;
+  }
+
+  return true;
+}
+
 
 function keyPressed() {
   if (currentState != "GAME") {
@@ -4550,9 +4653,10 @@ function keyPressed() {
       const current = hoveredEntity.state.facing || "E";
       const index = order.indexOf(current);
       const next = index === -1 ? "E" : order[(index + 1) % order.length];
-      hoveredEntity.state.facing = next;
-      syncTileBuildingFacing(hoveredEntity);
-      updateConnections(drawGame.state.entities);
+      const applied = tryApplyNonTubeFacing(hoveredEntity, next);
+      if (applied) {
+        updateConnections(drawGame.state.entities);
+      }
     } else {
       repairEntityUnderMouse();
     }
