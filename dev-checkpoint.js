@@ -827,21 +827,20 @@
 
       const [dirA, dirB] = pickTubeDirectionPair(entityDirs, neighborDirs);
       let tubeConfig = null;
-
-      if (snapshotFacing && snapshotShape) {
+      try {
+        tubeConfig = getTubeConfigForDirectionsOrThrow(dirA, dirB);
+      } catch (_ignore) {
         tubeConfig = {
-          shape: snapshotShape,
-          facing: snapshotFacing
+          shape: TUBE_SHAPES.STRAIGHT,
+          facing: Math.abs(dirA.x) > 0 ? "S" : "E"
         };
-      } else {
-        try {
-          tubeConfig = getTubeConfigForDirectionsOrThrow(dirA, dirB);
-        } catch (_ignore) {
-          tubeConfig = {
-            shape: snapshotShape || TUBE_SHAPES.STRAIGHT,
-            facing: snapshotFacing || (Math.abs(dirA.x) > 0 ? "S" : "E")
-          };
-        }
+      }
+
+      if (snapshotShape) {
+        tubeConfig.shape = snapshotShape;
+      }
+      if (snapshotFacing) {
+        tubeConfig.facing = snapshotFacing;
       }
 
       if (tubeConfig.shape === TUBE_SHAPES.STRAIGHT && !snapshotFacing) {

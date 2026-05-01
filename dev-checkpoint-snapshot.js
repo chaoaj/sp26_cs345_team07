@@ -942,6 +942,15 @@ length
     return match ? match[1] : null;
   }
 
+  function extractQuotedValue(line, key) {
+    const pattern = new RegExp(
+      String.raw`${key}\s*:\s*['"“”‘’]([^'"“”‘’]+)['"“”‘’]`,
+      "i"
+    );
+    const value = extractMatchValue(line, pattern);
+    return value != null ? value : null;
+  }
+
   function parseSnapshotText(rawText) {
     const parsed = {
       miners: [],
@@ -974,8 +983,8 @@ length
         continue;
       }
 
-      const idValue = extractMatchValue(line, /id:\s*(\d+)/);
-      const atValue = extractMatchValue(line, /at:\s*'([^']+)'/);
+      const idValue = extractMatchValue(line, /id:\s*(\d+)/i);
+      const atValue = extractQuotedValue(line, "at");
       if (idValue == null || atValue == null) {
         continue;
       }
@@ -985,15 +994,16 @@ length
         at: atValue
       };
 
-      const facingValue = extractMatchValue(line, /facing:\s*'([NSEW])'/);
+      const facingRaw = extractQuotedValue(line, "facing");
+      const facingValue = facingRaw ? String(facingRaw).trim().charAt(0).toUpperCase() : null;
       if (facingValue) {
         entry.facing = facingValue;
       }
 
       if (section === "tubes") {
-        const shapeValue = extractMatchValue(line, /shape:\s*'([^']+)'/);
+        const shapeValue = extractQuotedValue(line, "shape");
         if (shapeValue) {
-          entry.shape = shapeValue;
+          entry.shape = String(shapeValue).trim().toLowerCase();
         }
 
         const fromToken = extractMatchValue(line, /from:\s*([^,\s}]+)/);
