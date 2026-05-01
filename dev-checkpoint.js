@@ -70,9 +70,31 @@
     return normalizeDirection(toX - fromX, toY - fromY);
   }
 
-  function getFootprintTilesAt(entityType, tileX, tileY) {
+  function getFootprintTilesAt(entityOrType, tileX, tileY, facing = "E", options = null) {
+    const entityType = (entityOrType && typeof entityOrType === "object")
+      ? entityOrType.type
+      : entityOrType;
+    const resolvedFacing = (entityOrType && typeof entityOrType === "object")
+      ? (entityOrType.state && entityOrType.state.facing) || facing
+      : facing;
+    const resolvedOptions = (entityOrType && typeof entityOrType === "object")
+      ? (entityOrType.state || options)
+      : options;
+
     if (typeof getSafeFootprintTilesAt === "function") {
-      return getSafeFootprintTilesAt(entityType, tileX, tileY);
+      return getSafeFootprintTilesAt(
+        entityType,
+        tileX,
+        tileY,
+        resolvedFacing,
+        resolvedOptions
+      );
+    }
+    if (typeof getSafeFootprintOffsets === "function") {
+      return getSafeFootprintOffsets(entityType, resolvedFacing, resolvedOptions).map((offset) => ({
+        x: tileX + offset.x,
+        y: tileY + offset.y
+      }));
     }
     if (typeof getEntityFootprintTilesAt === "function") {
       return getEntityFootprintTilesAt(entityType, tileX, tileY);
@@ -159,7 +181,7 @@
   }
 
   function stampEntityOnMap(state, entity, buildingName) {
-    const footprint = getFootprintTilesAt(entity.type, entity.tileX, entity.tileY);
+    const footprint = getFootprintTilesAt(entity, entity.tileX, entity.tileY);
     for (const tilePos of footprint) {
       if (!isInsideMap(state, tilePos.x, tilePos.y)) {
         throw new Error(
@@ -456,6 +478,403 @@
     return shuttle;
   }
 
+  function stabilizeConnections(state, passes = 4) {
+    if (typeof updateConnections !== "function" || !state || !Array.isArray(state.entities)) {
+      return;
+    }
+    const totalPasses = Math.max(1, Number.isFinite(passes) ? Math.floor(passes) : 1);
+    for (let i = 0; i < totalPasses; i++) {
+      updateConnections(state.entities);
+    }
+  }
+
+  function parseAtCoordinate(value) {
+    if (typeof value !== "string") return null;
+    const parts = value.split(",");
+    if (parts.length !== 2) return null;
+    const x = Number(parts[0]);
+    const y = Number(parts[1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  }
+
+  function getSnapshotArray(snapshot, key) {
+    const value = snapshot && snapshot[key];
+    return Array.isArray(value) ? value : [];
+  }
+
+  function getPortsForEntityTypeAtFacing(entityType, tileX, tileY, facing) {
+    if (typeof ENTITY_PORT_DEFS === "undefined") {
+      return [];
+    }
+    const defs = ENTITY_PORT_DEFS[entityType];
+    if (!Array.isArray(defs)) {
+      return [];
+    }
+    return defs.map((port) => {
+      const rotated = typeof rotateOffsetFromEast === "function"
+        ? rotateOffsetFromEast(port.offset, facing || "E")
+        : port.offset;
+      return {
+        ...port,
+        worldX: tileX + rotated.x,
+        worldY: tileY + rotated.y
+      };
+    });
+  }
+
+  function inferFacingFromSnapshot(entityType, tileX, tileY, tubeCoordSet) {
+    const facings = ["E", "S", "W", "N"];
+    let bestFacing = "E";
+    let bestScore = -1;
+
+    for (const facing of facings) {
+      const ports = getPortsForEntityTypeAtFacing(entityType, tileX, tileY, facing);
+      if (!ports.length) {
+        continue;
+      }
+      let inputMatches = 0;
+      let outputMatches = 0;
+      let totalMatches = 0;
+      for (const port of ports) {
+        const key = `${port.worldX},${port.worldY}`;
+        if (!tubeCoordSet.has(key)) {
+          continue;
+        }
+        totalMatches += 1;
+        if (port.kind === "input") {
+          inputMatches += 1;
+        } else if (port.kind === "output") {
+          outputMatches += 1;
+        } else if (port.kind === "both") {
+          inputMatches += 1;
+          outputMatches += 1;
+        }
+      }
+      const score = totalMatches * 10 + Math.min(1, inputMatches) * 3 + Math.min(1, outputMatches) * 3;
+      if (score > bestScore) {
+        bestScore = score;
+        bestFacing = facing;
+      }
+    }
+
+    return bestFacing;
+  }
+
+  function uniqueFacings(candidates) {
+    const result = [];
+    const seen = new Set();
+    for (const facing of candidates) {
+      const value = typeof facing === "string" && facing ? facing : "E";
+      if (seen.has(value)) continue;
+      seen.add(value);
+      result.push(value);
+    }
+    return result;
+  }
+
+  function placeEntityWithFacingFallbackOrThrow(state, entityType, tileX, tileY, options, facingCandidates, name) {
+    const candidates = uniqueFacings(facingCandidates);
+    let lastError = null;
+    for (const facing of candidates) {
+      try {
+        return placeEntityOrThrow(state, entityType, tileX, tileY, {
+          facing,
+          options,
+          name
+        });
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error(`Failed to place ${String(entityType)} at (${tileX}, ${tileY})`);
+  }
+
+  function getLatestDebugSnapshot() {
+    const candidate = globalScope.__devCheckpointSnapshot || globalScope.__lastConnectionDebug;
+    if (!candidate || typeof candidate !== "object") {
+      return null;
+    }
+    return candidate;
+  }
+
+  function collectTubeSet(tubeEntries) {
+    const set = new Set();
+    for (const entry of tubeEntries) {
+      const at = parseAtCoordinate(entry && entry.at);
+      if (!at) continue;
+      set.add(`${at.x},${at.y}`);
+    }
+    return set;
+  }
+
+  function collectTubeNeighborDirections(tubeCoordSet, x, y) {
+    const dirs = [];
+    for (const step of CARDINAL_NEIGHBORS) {
+      const key = `${x + step.x},${y + step.y}`;
+      if (tubeCoordSet.has(key)) {
+        dirs.push({ x: step.x, y: step.y });
+      }
+    }
+    return dirs;
+  }
+
+  function normalizeCardinalFacing(value) {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim().toUpperCase();
+    return (normalized === "E" || normalized === "S" || normalized === "W" || normalized === "N")
+      ? normalized
+      : null;
+  }
+
+  function normalizeTubeShape(value) {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === TUBE_SHAPES.STRAIGHT) return TUBE_SHAPES.STRAIGHT;
+    if (normalized === TUBE_SHAPES.CORNER) return TUBE_SHAPES.CORNER;
+    return null;
+  }
+
+  function inferStraightTubeAxis(neighborDirs, dirA, dirB) {
+    const dirs = [];
+    if (Array.isArray(neighborDirs)) {
+      dirs.push(...neighborDirs);
+    }
+    if (dirA) dirs.push(dirA);
+    if (dirB) dirs.push(dirB);
+
+    let hasHorizontal = false;
+    let hasVertical = false;
+    for (const dir of dirs) {
+      if (!dir) continue;
+      if (dir.x !== 0) hasHorizontal = true;
+      if (dir.y !== 0) hasVertical = true;
+    }
+
+    if (hasVertical && !hasHorizontal) return "vertical";
+    if (hasHorizontal && !hasVertical) return "horizontal";
+    return null;
+  }
+
+  function normalizeStraightTubeFacingForAxis(facing, axis) {
+    const dir = normalizeCardinalFacing(facing) || "E";
+    if (axis === "vertical") {
+      return (dir === "E" || dir === "W") ? dir : "E";
+    }
+    if (axis === "horizontal") {
+      return (dir === "N" || dir === "S") ? dir : "S";
+    }
+    return dir;
+  }
+
+  function addUniqueDir(list, dir, seen) {
+    if (!dir || !Number.isFinite(dir.x) || !Number.isFinite(dir.y)) {
+      return;
+    }
+    const key = `${dir.x},${dir.y}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    list.push({ x: dir.x, y: dir.y });
+  }
+
+  function pickTubeDirectionPair(entityDirs, neighborDirs) {
+    const unique = [];
+    const seen = new Set();
+    for (const dir of entityDirs) addUniqueDir(unique, dir, seen);
+    for (const dir of neighborDirs) addUniqueDir(unique, dir, seen);
+
+    if (entityDirs.length > 0 && neighborDirs.length > 0) {
+      for (const first of entityDirs) {
+        for (const second of neighborDirs) {
+          if (first.x === second.x && first.y === second.y) continue;
+          return [first, second];
+        }
+      }
+    }
+
+    if (unique.length >= 2) {
+      for (let i = 0; i < unique.length; i++) {
+        for (let j = i + 1; j < unique.length; j++) {
+          const a = unique[i];
+          const b = unique[j];
+          if (a.x === -b.x && a.y === -b.y) {
+            return [a, b];
+          }
+        }
+      }
+      return [unique[0], unique[1]];
+    }
+
+    if (unique.length === 1) {
+      const first = unique[0];
+      return [first, { x: -first.x, y: -first.y }];
+    }
+
+    return [{ x: 0, y: -1 }, { x: 0, y: 1 }];
+  }
+
+  function buildRestrictedCheckpointFromSnapshotOrThrow(state, snapshot) {
+    const shuttle = ensureShuttleOrThrow(state);
+    clearNonShuttleEntities(state, shuttle.id);
+
+    const tubeEntries = getSnapshotArray(snapshot, "tubes");
+    const tubeCoordSet = collectTubeSet(tubeEntries);
+
+    const buildSpecs = [
+      { key: "miners", type: ENTITY_TYPES.MINER, name: "Miner" },
+      { key: "smelters", type: ENTITY_TYPES.SMELTER, name: "Smelter" },
+      { key: "constructors", type: ENTITY_TYPES.CONSTRUCTOR, name: "Constructor" },
+      { key: "splitters", type: ENTITY_TYPES.SPLITTER, name: "Splitter" },
+      { key: "mergers", type: ENTITY_TYPES.MERGER, name: "Merger" }
+    ];
+
+    const entityByDebugId = new Map();
+    entityByDebugId.set(1, shuttle);
+    entityByDebugId.set(shuttle.id, shuttle);
+    const buildingWarnings = [];
+
+    for (const spec of buildSpecs) {
+      const entries = getSnapshotArray(snapshot, spec.key)
+        .slice()
+        .sort((a, b) => (Number(a?.id) || 0) - (Number(b?.id) || 0));
+      for (const entry of entries) {
+        const at = parseAtCoordinate(entry && entry.at);
+        if (!at) {
+          buildingWarnings.push(`Skipped ${spec.key} entry with invalid at: ${JSON.stringify(entry)}`);
+          continue;
+        }
+
+        const inferredFacing = inferFacingFromSnapshot(spec.type, at.x, at.y, tubeCoordSet);
+        const preferredFacing = (entry && typeof entry.facing === "string" && entry.facing) || inferredFacing;
+        const facingCandidates = [preferredFacing, inferredFacing, "E", "S", "W", "N"];
+        const options = {};
+
+        if (spec.type === ENTITY_TYPES.MINER) {
+          let inferredResource = null;
+          try {
+            inferredResource = inferNodeResourceOrThrow(state, at.x, at.y);
+          } catch (_ignore) {
+            inferredResource = null;
+          }
+          options.resourceType = (entry && entry.outputType) || inferredResource || RESOURCE_TYPES.IRON_ORE;
+          options.isOnResourceNode = true;
+        }
+
+        try {
+          const placed = placeEntityWithFacingFallbackOrThrow(
+            state,
+            spec.type,
+            at.x,
+            at.y,
+            options,
+            facingCandidates,
+            spec.name
+          );
+
+          if (entry && entry.id != null) {
+            entityByDebugId.set(Number(entry.id), placed);
+          }
+
+          if (spec.type === ENTITY_TYPES.MINER && placed.state) {
+            if (entry && entry.outputType) {
+              placed.state.outputType = entry.outputType;
+            }
+            if (Number.isFinite(entry && entry.outputRate)) {
+              placed.state.outputRate = Number(entry.outputRate);
+            }
+            if (typeof entry?.isOn === "boolean") {
+              placed.state.isOn = entry.isOn;
+            }
+            if (typeof entry?.isActive === "boolean") {
+              placed.state.isActive = entry.isActive;
+            }
+          }
+        } catch (error) {
+          buildingWarnings.push(
+            `Failed placing ${spec.type} at (${at.x}, ${at.y}): ${error && error.message ? error.message : String(error)}`
+          );
+        }
+      }
+    }
+
+    const tubeWarnings = [];
+    const sortedTubes = tubeEntries
+      .slice()
+      .sort((a, b) => (Number(a?.id) || 0) - (Number(b?.id) || 0));
+
+    for (const entry of sortedTubes) {
+      const at = parseAtCoordinate(entry && entry.at);
+      if (!at) {
+        tubeWarnings.push(`Skipped tube entry with invalid at: ${JSON.stringify(entry)}`);
+        continue;
+      }
+
+      const neighborDirs = collectTubeNeighborDirections(tubeCoordSet, at.x, at.y);
+      const entityDirs = [];
+      for (const id of [entry && entry.from, entry && entry.to]) {
+        if (id == null) continue;
+        const mapped = entityByDebugId.get(Number(id));
+        if (!mapped) continue;
+        try {
+          entityDirs.push(directionBetween(at.x, at.y, mapped.tileX, mapped.tileY));
+        } catch (_ignore) {
+          // ignore invalid direction for this reference
+        }
+      }
+
+      const snapshotFacing = normalizeCardinalFacing(entry && entry.facing);
+      const snapshotShape = normalizeTubeShape(entry && entry.shape);
+
+      const [dirA, dirB] = pickTubeDirectionPair(entityDirs, neighborDirs);
+      let tubeConfig = null;
+
+      if (snapshotFacing && snapshotShape) {
+        tubeConfig = {
+          shape: snapshotShape,
+          facing: snapshotFacing
+        };
+      } else {
+        try {
+          tubeConfig = getTubeConfigForDirectionsOrThrow(dirA, dirB);
+        } catch (_ignore) {
+          tubeConfig = {
+            shape: snapshotShape || TUBE_SHAPES.STRAIGHT,
+            facing: snapshotFacing || (Math.abs(dirA.x) > 0 ? "S" : "E")
+          };
+        }
+      }
+
+      if (tubeConfig.shape === TUBE_SHAPES.STRAIGHT && !snapshotFacing) {
+        const axis = inferStraightTubeAxis(neighborDirs, dirA, dirB);
+        tubeConfig.facing = normalizeStraightTubeFacingForAxis(tubeConfig.facing, axis);
+      }
+
+      try {
+        const tube = placeEntityOrThrow(state, ENTITY_TYPES.TUBE, at.x, at.y, {
+          facing: tubeConfig.facing,
+          options: { shape: tubeConfig.shape, facing: tubeConfig.facing },
+          name: "Tube"
+        });
+        if (entry && entry.id != null) {
+          entityByDebugId.set(Number(entry.id), tube);
+        }
+      } catch (error) {
+        tubeWarnings.push(
+          `Failed placing tube at (${at.x}, ${at.y}): ${error && error.message ? error.message : String(error)}`
+        );
+      }
+    }
+
+    stabilizeConnections(state, 4);
+
+    if (buildingWarnings.length > 0 || tubeWarnings.length > 0) {
+      console.warn("DevCheckpoint snapshot placement warnings:", {
+        buildingWarnings,
+        tubeWarnings
+      });
+    }
+  }
+
   function buildRestrictedLateGameCheckpointOrThrow(state) {
     const ironPlateBarCount = getRecipeInputCountOrThrow(
       RESOURCE_TYPES.IRON_PLATE,
@@ -714,9 +1133,7 @@
       4
     );
 
-    if (typeof updateConnections === "function") {
-      updateConnections(state.entities);
-    }
+    stabilizeConnections(state, 4);
 
     // Re-assert fixed debug source rates after connection recompute.
     configureDebugMinerOutput(ironBarPlateFeed, RESOURCE_TYPES.IRON_BAR, ironPlateBarCount);
@@ -749,8 +1166,16 @@
       }
 
       const state = getStateOrThrow();
-      buildRestrictedLateGameCheckpointOrThrow(state);
-      console.log("DevCheckpoint: restricted late-game checkpoint applied.");
+      const snapshot = getLatestDebugSnapshot();
+      if (!snapshot) {
+        console.warn(
+          "DevCheckpoint: no debug snapshot found. " +
+          "Run connection debug (P) first, or set globalThis.__devCheckpointSnapshot."
+        );
+        return false;
+      }
+      buildRestrictedCheckpointFromSnapshotOrThrow(state, snapshot);
+      console.log("DevCheckpoint: snapshot checkpoint applied.");
       return true;
     } catch (error) {
       console.error("DevCheckpoint failed:", error);

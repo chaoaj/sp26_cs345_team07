@@ -439,7 +439,8 @@ function drawGame() {
         minimapCols: null,
         minimapRows: null
       },
-      animationTimer: 0
+      animationTimer: 0,
+      restrictedBuildRestrictionsDisabled: false
     };
 
     drawGame.state.isRestrictedMode = restrictedMode;
@@ -4538,6 +4539,10 @@ function placeSelectedEntityAtMouse() {
   const tile = map.tiles[tileY][tileX];
   const options = getPlacementOptionsForTile(type, tile);
   const placementFacing = drawGame.state.placementFacing || options?.facing || "E";
+  const isRestrictedMode = !!drawGame.state.isRestrictedMode;
+  const bypassRestrictedBuildRules =
+    isRestrictedMode &&
+    !!drawGame.state.restrictedBuildRestrictionsDisabled;
   const footprintTiles = getSafeFootprintTilesAt(
     type,
     tileX,
@@ -4555,7 +4560,7 @@ function placeSelectedEntityAtMouse() {
     ) {
       return;
     }
-    if (!isTileWithinModificationRange(entry.y, entry.x)) {
+    if (!bypassRestrictedBuildRules && !isTileWithinModificationRange(entry.y, entry.x)) {
       triggerModificationRangeBlink();
       return;
     }
@@ -4566,8 +4571,7 @@ function placeSelectedEntityAtMouse() {
   }
 
   // Build placement options based on entity type and tile
-  const isRestrictedMode = !!drawGame.state.isRestrictedMode;
-  if (isRestrictedMode) {
+  if (isRestrictedMode && !bypassRestrictedBuildRules) {
     const restrictedInventory = getRestrictedModeShuttleInventory();
     const missingResources = getMissingBuildResources(type, restrictedInventory);
     if (missingResources.length > 0) {
@@ -4799,6 +4803,8 @@ function keyPressed() {
     keyIsDown(SHIFT)
   ) {
     if (drawGame.state && drawGame.state.isRestrictedMode) {
+      drawGame.state.restrictedBuildRestrictionsDisabled = true;
+      console.log("Restricted mode build restrictions disabled (range + cost checks bypassed).");
       if (
         typeof DevCheckpoint !== "undefined" &&
         typeof DevCheckpoint.applyRestrictedLateGameSkip === "function"
@@ -5088,15 +5094,32 @@ function updateConnections(entities) {
 }
 
 function logConnectionDebug(entities) {
+  const miners = [];
   const tubes = [];
   const splitters = [];
+  const mergers = [];
   const smelters = [];
+  const constructors = [];
 
   for (const entity of entities) {
-    if (entity.type === ENTITY_TYPES.TUBE) {
+    if (entity.type === ENTITY_TYPES.MINER) {
+      miners.push({
+        id: entity.id,
+        at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
+        inputRate: entity.state.inputRate ?? 0,
+        outputRate: entity.state.outputRate ?? 0,
+        outputType: entity.state.outputType || null,
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
+      });
+    } else if (entity.type === ENTITY_TYPES.TUBE) {
       tubes.push({
         id: entity.id,
         at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
+        shape: entity.state?.shape || TUBE_SHAPES.STRAIGHT,
         from: entity.state.fromEntityId || null,
         to: entity.state.toEntityId || null,
         component: entity.state.componentId ?? null,
@@ -5107,29 +5130,80 @@ function logConnectionDebug(entities) {
       splitters.push({
         id: entity.id,
         at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
         inputRate: entity.state.inputRate ?? 0,
         outputRate: entity.state.outputRate ?? 0,
+        inputType: entity.state.inputType || null,
         outputType: entity.state.outputType || null,
-        isActive: !!entity.state.isActive
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
+      });
+    } else if (entity.type === ENTITY_TYPES.MERGER) {
+      mergers.push({
+        id: entity.id,
+        at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
+        inputRate: entity.state.inputRate ?? 0,
+        outputRate: entity.state.outputRate ?? 0,
+        inputType: entity.state.inputType || null,
+        outputType: entity.state.outputType || null,
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
       });
     } else if (entity.type === ENTITY_TYPES.SMELTER) {
       smelters.push({
         id: entity.id,
         at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
         inputRate: entity.state.inputRate ?? 0,
         outputRate: entity.state.outputRate ?? 0,
         inputType: entity.state.inputType || null,
         outputType: entity.state.outputType || null,
-        isOn: !!entity.state.isOn
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
+      });
+    } else if (entity.type === ENTITY_TYPES.CONSTRUCTOR) {
+      constructors.push({
+        id: entity.id,
+        at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
+        inputRate: entity.state.inputRate ?? 0,
+        outputRate: entity.state.outputRate ?? 0,
+        inputSlots: Array.isArray(entity.state.inputSlots)
+          ? entity.state.inputSlots.map((slot) => ({
+              type: slot?.type || null,
+              count: slot?.count ?? 0
+            }))
+          : [],
+        outputType: entity.state.outputType || null,
+        outputCount: entity.state.outputCount ?? 0,
+        outputBuffer: entity.state.outputBuffer ?? 0,
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
       });
     }
   }
 
-  console.log("Connection debug:", {
+  const snapshot = {
+    miners,
     tubes,
     splitters,
-    smelters
-  });
+    mergers,
+    smelters,
+    constructors
+  };
+
+  console.log("Connection debug:", snapshot);
+
+  try {
+    globalThis.__lastConnectionDebug = JSON.parse(JSON.stringify(snapshot));
+  } catch (_error) {
+    globalThis.__lastConnectionDebug = snapshot;
+  }
 }
 
 function getIncomingTubeInputs(entities, targetId) {
