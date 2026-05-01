@@ -138,6 +138,174 @@ const CORNER_TUBE_BASE_VISUAL_TRANSFORMS = Object.freeze({
   N: Object.freeze({ angle: 0, mirrorX: true })
 });
 
+const BACKGROUND_MUSIC_SEQUENCE = Object.freeze([
+  Object.freeze({
+    title: "Dance of the Moon Rocks",
+    file: "resources/music/Dance of the Moon Rocks.m4a",
+    postDelayMs: 2 * 60 * 1000
+  }),
+  Object.freeze({
+    title: "Lunar Blues",
+    file: "resources/music/Lunar Blues.m4a",
+    postDelayMs: () => randomIntInRange(2 * 60 * 1000, 4 * 60 * 1000)
+  })
+]);
+
+let backgroundMusicPlayers = [];
+let backgroundMusicBootstrapped = false;
+let backgroundMusicStarted = false;
+let backgroundMusicCurrentIndex = -1;
+let backgroundMusicTimerId = null;
+let backgroundMusicScheduleToken = 0;
+let backgroundMusicLastVolume = null;
+let backgroundMusicWarnedMissing = false;
+
+function randomIntInRange(minInclusive, maxInclusive) {
+  const min = Number(minInclusive) || 0;
+  const max = Number(maxInclusive) || min;
+  if (max <= min) return Math.floor(min);
+  const delta = max - min;
+  return Math.floor(min + Math.random() * (delta + 1));
+}
+
+function getMusicSliderVolume() {
+  const raw = Number(typeof musicVolume === "number" ? musicVolume : 0.5);
+  if (!Number.isFinite(raw)) return 0.5;
+  return Math.max(0, Math.min(1, raw));
+}
+
+function applyBackgroundMusicVolume() {
+  const volume = getMusicSliderVolume();
+  if (backgroundMusicLastVolume === volume) {
+    return;
+  }
+  backgroundMusicLastVolume = volume;
+  for (const track of backgroundMusicPlayers) {
+    if (track?.audio) {
+      track.audio.volume = volume;
+    }
+  }
+}
+
+function bootstrapBackgroundMusic() {
+  if (backgroundMusicBootstrapped) {
+    return;
+  }
+  backgroundMusicBootstrapped = true;
+  backgroundMusicPlayers = BACKGROUND_MUSIC_SEQUENCE.map((entry, index) => {
+    const audio = new Audio(entry.file);
+    audio.preload = "auto";
+    audio.loop = false;
+    audio.volume = getMusicSliderVolume();
+    audio.addEventListener("ended", () => {
+      onBackgroundMusicTrackEnded(index);
+    });
+    audio.addEventListener("error", () => {
+      if (!backgroundMusicWarnedMissing) {
+        console.warn(
+          "Background music file missing/unloadable. " +
+          "Add .m4a files under resources/music/."
+        );
+        backgroundMusicWarnedMissing = true;
+      }
+    });
+    return { ...entry, audio };
+  });
+}
+
+function resolveTrackPostDelayMs(track) {
+  if (!track) return 0;
+  if (typeof track.postDelayMs === "function") {
+    const v = Number(track.postDelayMs());
+    return Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+  }
+  const fixed = Number(track.postDelayMs);
+  return Number.isFinite(fixed) ? Math.max(0, Math.floor(fixed)) : 0;
+}
+
+function clearBackgroundMusicTimer() {
+  if (backgroundMusicTimerId != null) {
+    clearTimeout(backgroundMusicTimerId);
+    backgroundMusicTimerId = null;
+  }
+}
+
+function scheduleBackgroundMusicTrack(index, delayMs) {
+  clearBackgroundMusicTimer();
+  const safeDelay = Math.max(0, Number(delayMs) || 0);
+  const token = ++backgroundMusicScheduleToken;
+  backgroundMusicTimerId = setTimeout(() => {
+    if (token !== backgroundMusicScheduleToken) {
+      return;
+    }
+    playBackgroundMusicTrack(index);
+  }, safeDelay);
+}
+
+function onBackgroundMusicTrackEnded(endedIndex) {
+  if (!backgroundMusicStarted || endedIndex !== backgroundMusicCurrentIndex) {
+    return;
+  }
+  const track = backgroundMusicPlayers[endedIndex];
+  const waitMs = resolveTrackPostDelayMs(track);
+  const nextIndex = (endedIndex + 1) % backgroundMusicPlayers.length;
+  scheduleBackgroundMusicTrack(nextIndex, waitMs);
+}
+
+function playBackgroundMusicTrack(index) {
+  if (!backgroundMusicPlayers.length) {
+    return;
+  }
+
+  const safeIndex = ((index % backgroundMusicPlayers.length) + backgroundMusicPlayers.length) % backgroundMusicPlayers.length;
+  backgroundMusicCurrentIndex = safeIndex;
+  applyBackgroundMusicVolume();
+
+  for (let i = 0; i < backgroundMusicPlayers.length; i++) {
+    const other = backgroundMusicPlayers[i]?.audio;
+    if (!other || i === safeIndex) {
+      continue;
+    }
+    if (!other.paused) {
+      other.pause();
+    }
+    if (other.currentTime !== 0) {
+      other.currentTime = 0;
+    }
+  }
+
+  const activeTrack = backgroundMusicPlayers[safeIndex];
+  const activeAudio = activeTrack?.audio;
+  if (!activeAudio) {
+    return;
+  }
+
+  activeAudio.currentTime = 0;
+  const playPromise = activeAudio.play();
+  if (playPromise && typeof playPromise.catch === "function") {
+    playPromise.catch(() => {
+      const waitMs = resolveTrackPostDelayMs(activeTrack);
+      const nextIndex = (safeIndex + 1) % backgroundMusicPlayers.length;
+      scheduleBackgroundMusicTrack(nextIndex, waitMs);
+    });
+  }
+}
+
+function requestBackgroundMusicStart() {
+  bootstrapBackgroundMusic();
+  if (backgroundMusicStarted || backgroundMusicPlayers.length === 0) {
+    return;
+  }
+  backgroundMusicStarted = true;
+  if (typeof userStartAudio === "function") {
+    userStartAudio();
+  }
+  // Start immediately inside the user gesture call stack (click/key),
+  // otherwise browsers may block playback if it runs in a timeout.
+  clearBackgroundMusicTimer();
+  playBackgroundMusicTrack(0);
+}
+
 
 function setup() {
   canvas = createCanvas(600, 600);
@@ -174,6 +342,7 @@ function setup() {
     currentState = "MENU";
   });
   setupSettings();
+  bootstrapBackgroundMusic();
 };
 
 function preload() {
@@ -246,6 +415,7 @@ function windowResized() {
 }
 
 function draw() {
+  applyBackgroundMusicVolume();
   cursor('default');
   if (currentState == "MENU") {
     drawMenu();
@@ -4816,6 +4986,7 @@ function drawHotbar() {
 }
 
 function mousePressed() {
+  requestBackgroundMusicStart();
   if (currentState == "MENU") {
     startButton.checkClick();
     settingsButton.checkClick();
@@ -5138,6 +5309,7 @@ function tryApplyNonTubeFacing(entity, nextFacing) {
 
 
 function keyPressed() {
+  requestBackgroundMusicStart();
   if (currentState === "ENDGAME") {
     if (keyCode === ENTER || key === " " || keyCode === ESCAPE) {
       currentState = "MENU";
