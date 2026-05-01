@@ -200,7 +200,11 @@ const ENTITY_PORT_DEFS = {
     { name: "inputDown", kind: "input", offset: { x: 0, y: 2 } }
   ],
   [ENTITY_TYPES.ROCKET_SITE]: [
-    { name: "input", kind: "input", offset: { x: -1, y: 0 } }
+    // 3x5 rocket footprint (centered on entity tile):
+    // ports sit one tile outside the ship on left, right, and bottom.
+    { name: RESOURCE_TYPES.ELECTRONICS, kind: "input", offset: { x: -2, y: 0 } },
+    { name: RESOURCE_TYPES.SHIP_ALLOY, kind: "input", offset: { x: 2, y: 0 } },
+    { name: RESOURCE_TYPES.ROCKET_FUEL, kind: "input", offset: { x: 0, y: 3 } }
   ],
   [ENTITY_TYPES.EXTRACTOR]: [
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
@@ -226,6 +230,14 @@ const ENTITY_FOOTPRINT_DEFS = {
     { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
     { x: -1, y: 0 },  { x: 0, y: 0 },  { x: 1, y: 0 },
     { x: -1, y: 1 },  { x: 0, y: 1 },  { x: 1, y: 1 }
+  ],
+  // Vertically long rocket footprint (3 columns x 5 rows), centered on entity tile.
+  [ENTITY_TYPES.ROCKET_SITE]: [
+    { x: -1, y: -2 }, { x: 0, y: -2 }, { x: 1, y: -2 },
+    { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
+    { x: -1, y: 0 },  { x: 0, y: 0 },  { x: 1, y: 0 },
+    { x: -1, y: 1 },  { x: 0, y: 1 },  { x: 1, y: 1 },
+    { x: -1, y: 2 },  { x: 0, y: 2 },  { x: 1, y: 2 }
   ]
 };
 

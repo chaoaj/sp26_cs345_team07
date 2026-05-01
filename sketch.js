@@ -1,6 +1,6 @@
 // sketch.js
 let currentState = "MENU";
-let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton;
+let startButton, settingsButton, backButtonGame, testEndGameButton, backButtonSettings, escapeButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 6;
@@ -33,6 +33,8 @@ let currentAnimation = "idle";
 let currentFrame = 0;
 let facingLeft = false;
 const animationFPS = 10;
+const ROCKET_HALF_WIDTH_TILES = 1;   // 3 tiles wide
+const ROCKET_HALF_HEIGHT_TILES = 2;  // 5 tiles tall
 
 const spriteDimensions = {
   front: {
@@ -165,6 +167,9 @@ function setup() {
   backButtonGame = new Button(30, 20, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
+  testEndGameButton = new Button(140, 20, 120, 40, "Test End", () => {
+    currentState = "ENDGAME";
+  });
   backButtonSettings = new Button(250, 430, 100, 40, "<- Return", () => {
     currentState = "MENU";
   });
@@ -249,6 +254,9 @@ function draw() {
     background(0);
     drawGame();
     hideSettingsUI();
+  } else if (currentState == "ENDGAME") {
+    drawEndGame();
+    hideSettingsUI();
   } else if (currentState == "SETTINGS") {
     drawSettings();
   }
@@ -284,6 +292,38 @@ function drawMenu() {
     2
   );
 
+  pop();
+}
+
+function getRocketFootprintTiles(centerTileX, centerTileY) {
+  const tiles = [];
+  for (let dy = -ROCKET_HALF_HEIGHT_TILES; dy <= ROCKET_HALF_HEIGHT_TILES; dy++) {
+    for (let dx = -ROCKET_HALF_WIDTH_TILES; dx <= ROCKET_HALF_WIDTH_TILES; dx++) {
+      tiles.push({
+        x: centerTileX + dx,
+        y: centerTileY + dy,
+        isCenter: dx === 0 && dy === 0
+      });
+    }
+  }
+  return tiles;
+}
+
+function drawEndGame() {
+  background(20, 28, 44);
+
+  push();
+  fill(235, 242, 255);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(44);
+  text("Rocket Completed!", width / 2, height / 2 - 40);
+  textStyle(NORMAL);
+  textSize(18);
+  text("End-game screen stub", width / 2, height / 2 + 6);
+  textSize(14);
+  fill(200, 214, 245);
+  text("Press Enter, Space, or Esc to return to menu", width / 2, height / 2 + 44);
   pop();
 }
 
@@ -402,6 +442,46 @@ function drawGame() {
     }
 
     const entities = [];
+    const rocketTileX = 26;
+    const rocketTileY = 31;
+    const rocketEntity = createEntity(
+      ENTITY_TYPES.ROCKET_SITE,
+      rocketTileX,
+      rocketTileY,
+      {}
+    );
+    rocketEntity.state.facing = "E";
+    rocketEntity.state.isOn = true;
+
+    entities.push(rocketEntity);
+
+    const rocketInputPortSet = new Set(
+      getEntityConnectionPorts(rocketEntity)
+        .filter((port) => port.kind === "input")
+        .map((port) => `${port.worldX},${port.worldY}`)
+    );
+
+    // Occupy a 3x5 footprint centered on the rocket tile.
+    // Leave input-port tiles placeable so tubes can connect on-port.
+    for (const fp of getRocketFootprintTiles(rocketTileX, rocketTileY)) {
+      const row = tiles[fp.y];
+      const tile = row ? row[fp.x] : null;
+      if (!tile) continue;
+      const isRocketInputPort = rocketInputPortSet.has(`${fp.x},${fp.y}`);
+      if (!isRocketInputPort) {
+        tile.entityId = rocketEntity.id;
+        tile.entity = rocketEntity;
+        tile.item = ENTITY_TYPES.ROCKET_SITE;
+      }
+      tile.building = {
+        color: getEntityFillRgb(ENTITY_TYPES.ROCKET_SITE),
+        label: fp.isCenter ? "RO" : "",
+        name: "Rocket Ship",
+        entityType: ENTITY_TYPES.ROCKET_SITE,
+        facing: "E",
+        entityId: rocketEntity.id
+      };
+    }
 
     drawGame.state = {
       config: {
@@ -449,6 +529,7 @@ function drawGame() {
     if (restrictedMode) {
       spawnRestrictedModeShuttle(drawGame.state);
     }
+    updateConnections(entities);
   }
 
   const { config, map, player, feedback, entities } = drawGame.state;
@@ -527,6 +608,10 @@ function drawGame() {
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
   updateRestrictedModeShuttleIntake(entities, dt);
+  if (updateRocketConstructionProgress(entities, dt)) {
+    currentState = "ENDGAME";
+    return;
+  }
 
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
@@ -569,6 +654,7 @@ push();
   stroke(200);
   strokeWeight(1);
   const portOverlay = new Map();
+  const rocketPortOverlay = new Set();
   const markPort = (x, y, kind) => {
     const key = `${x},${y}`;
     const existing = portOverlay.get(key);
@@ -584,6 +670,9 @@ push();
       : getEntityConnectionPorts(entity);
     for (const port of ports) {
       markPort(port.worldX, port.worldY, port.kind);
+      if (entity.type === ENTITY_TYPES.ROCKET_SITE && port.kind === "input") {
+        rocketPortOverlay.add(`${port.worldX},${port.worldY}`);
+      }
     }
   }
 
@@ -594,10 +683,11 @@ push();
       // FIXED: Only draw the port connection highlights, and make them semi-transparent so the ground shows through!
       // We removed the solid box that used to hide the tiles behind buildings.
       if (portType) {
+        const isRocketInputPort = rocketPortOverlay.has(`${x},${y}`);
         if (portType === "output") {
           fill(70, 200, 90, 120);
         } else if (portType === "input") {
-          fill(80, 130, 230, 120);
+          fill(80, 130, 230, isRocketInputPort ? 48 : 120);
         } else if (portType === "both") {
           fill(60, 190, 190, 120);
         }
@@ -654,8 +744,9 @@ push();
 
   pop();
 
-  drawMiniMap(map, player, config, feedback);
+  drawMiniMap(map, player, config, feedback, entities);
   backButtonGame.draw();
+  testEndGameButton.draw();
   drawHotbar();
   drawSideBar();
   if (drawGame.state.isRestrictedMode) {
@@ -667,6 +758,7 @@ push();
   }
   drawBuildCostFeedbackMessage();
   drawActiveTubeFlowTooltip();
+  drawRocketHoverTooltip();
   updatePlayerAnimation();
 }
 
@@ -1284,6 +1376,80 @@ function updateFactoryProduction(entities, dt) {
   }
 }
 
+function updateRocketConstructionProgress(entities, dt) {
+  const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
+  if (!rocket || !rocket.state) {
+    return false;
+  }
+
+  const rocketState = rocket.state;
+  if (rocketState.completed) {
+    return true;
+  }
+
+  const required = rocketState.required || {};
+  const delivered = rocketState.delivered || {};
+  const rocketPorts = getEntityConnectionPorts(rocket).filter((port) => port.kind === "input");
+  const portByCoord = new Map();
+  for (const port of rocketPorts) {
+    portByCoord.set(`${port.worldX},${port.worldY}`, port.name);
+  }
+
+  const entitiesById = new Map(entities.map((entity) => [entity.id, entity]));
+  const increments = {
+    [RESOURCE_TYPES.ELECTRONICS]: 0,
+    [RESOURCE_TYPES.SHIP_ALLOY]: 0,
+    [RESOURCE_TYPES.ROCKET_FUEL]: 0
+  };
+
+  for (const tube of entities) {
+    if (tube.type !== ENTITY_TYPES.TUBE) continue;
+    if (tube.state?.toEntityId !== rocket.id) continue;
+    if (!(tube.state?.isConnected)) continue;
+
+    const sourceEntity = entitiesById.get(tube.state.fromEntityId);
+    const outputType = sourceEntity?.state?.outputType || tube.state.carriedItem || null;
+    const outputRate = Number(tube.state.outputRate) || 0;
+    if (!outputType || outputRate <= 0) continue;
+
+    const touchedPortNames = new Set();
+    const tubePortTiles = getTubePortTiles(tube);
+    for (const portTile of tubePortTiles) {
+      const portName = portByCoord.get(`${portTile.worldX},${portTile.worldY}`);
+      if (portName) {
+        touchedPortNames.add(portName);
+      }
+    }
+
+    for (const portName of touchedPortNames) {
+      if (portName === outputType && increments[portName] != null) {
+        increments[portName] += outputRate * dt;
+      }
+    }
+  }
+
+  for (const [resourceType, amount] of Object.entries(increments)) {
+    if (amount <= 0 || required[resourceType] == null) continue;
+    const current = Number(delivered[resourceType]) || 0;
+    delivered[resourceType] = min(required[resourceType], current + amount);
+  }
+
+  const requiredTotal = Object.values(required).reduce((sum, value) => sum + Number(value || 0), 0);
+  const deliveredTotal = Object.entries(required).reduce((sum, [type, value]) => {
+    return sum + min(Number(value || 0), Number(delivered[type] || 0));
+  }, 0);
+  rocketState.buildProgress = requiredTotal > 0 ? deliveredTotal / requiredTotal : 0;
+
+  const complete = Object.entries(required).every(([type, value]) => {
+    return Number(delivered[type] || 0) >= Number(value || 0);
+  });
+  rocketState.completed = complete;
+  rocketState.isActive = !complete && deliveredTotal > 0;
+  rocketState.isOn = complete;
+
+  return complete;
+}
+
 function drawPlayerSprite(player, tileSize) {
   const dims = spriteDimensions[currentDirection] &&
                spriteDimensions[currentDirection][currentAnimation];
@@ -1884,559 +2050,78 @@ function getEntityDrawBounds(entity, tileSize) {
     maxOffsetY = max(maxOffsetY, offset.y);
   }
 
-  const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
-  const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
-  const px = (entity.tileX + minOffsetX) * tileSize;
-  const py = (entity.tileY + minOffsetY) * tileSize;
-  const drawWidth = footprintWidthTiles * tileSize;
-  const drawHeight = footprintHeightTiles * tileSize;
-  return {
-    px,
-    py,
-    drawWidth,
-    drawHeight,
-    tileX: entity.tileX,
-    tileY: entity.tileY
-  };
-}
+    const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
+    const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
+    const px = (entity.tileX + minOffsetX) * tileSize;
+    const py = (entity.tileY + minOffsetY) * tileSize;
+    const drawWidth = footprintWidthTiles * tileSize;
+    const drawHeight = footprintHeightTiles * tileSize;
 
-function toCardinalDirectionKey(offset) {
-  if (!offset) return null;
-  if (offset.x === 1 && offset.y === 0) return "E";
-  if (offset.x === -1 && offset.y === 0) return "W";
-  if (offset.x === 0 && offset.y === 1) return "S";
-  if (offset.x === 0 && offset.y === -1) return "N";
-  return null;
-}
-
-function compareTubeDescriptorsForRender(a, b) {
-  if (a.zLane !== b.zLane) {
-    return a.zLane - b.zLane;
-  }
-  if (a.tileY !== b.tileY) {
-    return a.tileY - b.tileY;
-  }
-  if (a.tileX !== b.tileX) {
-    return a.tileX - b.tileX;
-  }
-  return (a.entity?.id || 0) - (b.entity?.id || 0);
-}
-
-function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
-  const bounds = getEntityDrawBounds(entity, tileSize);
-  const state = entity.state || {};
-  const offsets = getTubePortOffsets(entity);
-  const isCorner = state.shape === TUBE_SHAPES.CORNER;
-  const cornerFacing = state.facing || "E";
-  const cornerVisual = getCornerTubeVisualTransform(cornerFacing);
-  const isFlowing = state.flowState === "flowing";
-  const zLaneRaw = Number(state.zLane);
-  const zLane = Number.isFinite(zLaneRaw) ? zLaneRaw : 0;
-  let img = null;
-  let frontOverlayImg = null;
-  let numFrames = 1;
-  let frameIndex = 0;
-  const connectionMask = { N: false, E: false, S: false, W: false };
-  const inputDir = toCardinalDirectionKey(offsets.input);
-  const outputDir = toCardinalDirectionKey(offsets.output);
-  if (inputDir) connectionMask[inputDir] = true;
-  if (outputDir) connectionMask[outputDir] = true;
-
-  if (isCorner) {
-    const useCurve2Family = cornerFacing === "N" || cornerFacing === "W";
-    const offImg = useCurve2Family
-      ? (pipeCurve2OffImg || pipeCurve1OffImg)
-      : (pipeCurve1OffImg || pipeCurve2OffImg);
-    const onImg = useCurve2Family
-      ? (pipeCurve2OnImg || pipeCurve1OnImg)
-      : (pipeCurve1OnImg || pipeCurve2OnImg);
-    const hasValidIo = state.hasOpenPort === false;
-    const hasSupplySignal = isFlowing || (Number(state.outputRate) || 0) > 0;
-    const cornerIsOn = hasValidIo && hasSupplySignal;
-    img = cornerIsOn ? (onImg || offImg) : (offImg || onImg);
-    if (cornerIsOn) {
-      numFrames = 1;
-    } else {
-      // Follow side-pipe light propagation form: static base shape, light-only flash frames.
-      numFrames = 8;
-      const flashPattern = [0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7];
-      const flashTick = Math.floor(nowMs / 220);
-      const primaryDir = offsets.output.y !== 0 ? offsets.output.y : offsets.output.x;
-      const directionSign = primaryDir < 0 ? 1 : -1;
-      const patternLen = flashPattern.length;
-      const phaseRaw = entity.tileX + entity.tileY;
-      const phase = ((phaseRaw % patternLen) + patternLen) % patternLen;
-      const tickDirected = directionSign * flashTick;
-      const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
-      frameIndex = flashPattern[patternIndex] % numFrames;
-    }
-  } else {
-    const isHorizontalStraight = offsets.input.y === offsets.output.y;
-    const horizontalFlowDirection = isHorizontalStraight
-      ? Math.sign(offsets.output.x - offsets.input.x)
-      : 0;
-    const verticalFlowDirection = !isHorizontalStraight
-      ? Math.sign(offsets.output.y - offsets.input.y)
-      : 0;
-    const reverseSideOffLight = horizontalFlowDirection < 0;
-    const reverseFrontOffLight = verticalFlowDirection < 0;
-    const hasValidIo = state.hasOpenPort === false;
-    const hasSupplySignal = isFlowing || (Number(state.outputRate) || 0) > 0;
-    const sideIsOn = hasValidIo && hasSupplySignal;
-    const verticalIsOn = !isHorizontalStraight && hasValidIo && hasSupplySignal;
-    img = isHorizontalStraight
-      ? (sideIsOn
-          ? (pipeSideOnImg || pipeSideOnMiniImg || pipeFrontOffImg)
-          : (pipeSideOffImg || pipeFrontOffImg))
-      : (verticalIsOn
-          ? (pipeFrontOnImg || pipeFrontOffImg)
-          : (pipeFrontOffImg || pipeFrontOnImg));
-
-    if (img === pipeFrontOffImg) {
-      numFrames = 8;
-    } else if (img === pipeSideOffImg) {
-      // pipeSideOff is an 8-frame horizontal strip (144x16 => 8 * 18x16).
-      numFrames = 8;
-    } else if (img === pipeFrontOnImg) {
-      numFrames = 1;
-    }
-
-    const animateOffSideTube = img === pipeSideOffImg;
-    const animateOffFrontTube =
-      img === pipeFrontOffImg &&
-      !isHorizontalStraight &&
-      !isFlowing &&
-      !hasValidIo;
-    if (numFrames > 1 && animateOffSideTube) {
-      // Flashing pattern (not scrolling): mostly hold base frame with periodic
-      // alternate light sets so the tube feels stationary while lights pulse.
-      const flashPattern = [0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7];
-      const flashTick = Math.floor(nowMs / 220);
-      const directionSign = reverseSideOffLight ? 1 : -1;
-      const patternLen = flashPattern.length;
-      const phaseRaw = isHorizontalStraight ? entity.tileX : entity.tileY;
-      const phase = ((phaseRaw % patternLen) + patternLen) % patternLen;
-      const tickDirected = directionSign * flashTick;
-      const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
-      const frameFromPattern = flashPattern[patternIndex];
-      frameIndex = frameFromPattern % numFrames;
-    } else if (numFrames > 1 && animateOffFrontTube) {
-      const flashPattern = [0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7];
-      const flashTick = Math.floor(nowMs / 220);
-      const directionSign = reverseFrontOffLight ? 1 : -1;
-      const patternLen = flashPattern.length;
-      const phaseRaw = entity.tileY;
-      const phase = ((phaseRaw % patternLen) + patternLen) % patternLen;
-      const tickDirected = directionSign * flashTick;
-      const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
-      const frameFromPattern = flashPattern[patternIndex];
-      frameIndex = frameFromPattern % numFrames;
-    } else if (numFrames > 1 && hasValidIo && hasSupplySignal && !isFlowing && isHorizontalStraight) {
-      frameIndex = Math.floor(nowMs / 150) % numFrames;
-    }
-  }
-
-  const hasSprite = !!(img && img.width > 0 && img.height > 0);
-  const frameW = hasSprite ? (img.width / max(1, numFrames)) : tileSize;
-  const frameH = hasSprite ? img.height : tileSize;
-  return {
-    entity,
-    tileX: bounds.tileX,
-    tileY: bounds.tileY,
-    px: bounds.px,
-    py: bounds.py,
-    drawWidth: bounds.drawWidth,
-    drawHeight: bounds.drawHeight,
-    zLane,
-    isCorner,
-    rotationAngle: facingToAngle(state.facing || "E"),
-    cornerRotationAngle: cornerVisual.angle,
-    cornerMirrorX: cornerVisual.mirrorX,
-    cornerXOffsetPx: cornerVisual.xOffsetPx || 0,
-    cornerYOffsetPx: cornerVisual.yOffsetPx || 0,
-    connectionMask,
-    neighborMask: { N: false, E: false, S: false, W: false },
-    img,
-    frontOverlayImg,
-    hasSprite,
-    numFrames,
-    frameW,
-    frameH,
-    frameIndex
-  };
-}
-
-function annotateTubeDescriptorNeighbors(descriptors) {
-  const lookup = new Map();
-  for (const descriptor of descriptors) {
-    lookup.set(
-      `${descriptor.zLane}|${descriptor.tileX},${descriptor.tileY}`,
-      descriptor
-    );
-  }
-
-  const offsets = {
-    N: { x: 0, y: -1 },
-    E: { x: 1, y: 0 },
-    S: { x: 0, y: 1 },
-    W: { x: -1, y: 0 }
-  };
-  const opposite = { N: "S", E: "W", S: "N", W: "E" };
-
-  for (const descriptor of descriptors) {
-    for (const key of ["N", "E", "S", "W"]) {
-      const offset = offsets[key];
-      const neighborKey =
-        `${descriptor.zLane}|${descriptor.tileX + offset.x},${descriptor.tileY + offset.y}`;
-      const neighbor = lookup.get(neighborKey);
-      if (!neighbor) {
-        descriptor.neighborMask[key] = false;
-        continue;
-      }
-      if (!descriptor.connectionMask[key]) {
-        descriptor.neighborMask[key] = false;
-        continue;
-      }
-      const reciprocalKey = opposite[key];
-      descriptor.neighborMask[key] = !!neighbor.connectionMask[reciprocalKey];
-    }
-  }
-}
-
-function drawConnectedVerticalFrontTubeLayer(descriptor, layerName) {
-  const band = TUBE_LAYER_BANDS[layerName] || TUBE_LAYER_BANDS.body;
-  const frameH = descriptor.frameH;
-  const frameW = descriptor.frameW;
-  const srcX = descriptor.frameIndex * frameW;
-  const hasNorthJoin = !!descriptor.neighborMask.N;
-  const hasSouthJoin = !!descriptor.neighborMask.S;
-
-  // Remove rounded caps at joined edges so stacked N/S segments read as one run.
-  // Keep top seam pixels on the "over" layer so south tiles can visually
-  // sit on top of north neighbors at the join.
-  const capPx = max(3, round(frameH * 0.22));
-  const isOverLayer = layerName === "over";
-  const trimTop = hasNorthJoin && !isOverLayer ? capPx : 0;
-  // Preserve standalone bottom cap so the circular entrance stays visible
-  // in the placed tile; joined segments trim their south cap.
-  const trimBottom = hasSouthJoin ? capPx : 0;
-  let srcStart = trimTop;
-  let srcEnd = frameH - trimBottom;
-  if (srcEnd <= srcStart + 1) {
-    srcStart = 0;
-    srcEnd = frameH;
-  }
-
-  // Small overlap into connected neighbors to hide seams.
-  // Depth rule: south tiles should visually sit on top of north tiles.
-  // So only extend upward into the north neighbor; do not extend downward
-  // into the south neighbor (the south tile will own that seam).
-  const defaultTopOverhang = max(2, round(descriptor.drawHeight * 0.20));
-  const scaleY = descriptor.drawHeight / frameH;
-  const capPxScaled = ceil(capPx * scaleY);
-  const joinPx = max(defaultTopOverhang, round(capPxScaled * 1.35));
-  // Keep anchor connection-invariant so adding/removing neighbors never shifts
-  // a tube vertically. Increase fixed north bleed to strengthen overlap.
-  const extraNorthBleedPx = max(3, round(descriptor.drawHeight * 0.14) + 10);
-  const topLiftPx = max(joinPx, capPxScaled) + extraNorthBleedPx;
-  const dstBaseTop = descriptor.py - topLiftPx;
-  const bottomOverhangPx = 0;
-  const dstBaseBottom = descriptor.py + descriptor.drawHeight + bottomOverhangPx;
-  const dstBaseH = max(1, dstBaseBottom - dstBaseTop);
-
-  // Keep tube proportions stable across connection states by mapping with
-  // full-frame scale. Trims remove geometry instead of re-stretching it.
-  const srcLayerStart = floor(frameH * band.start);
-  const srcLayerEnd = ceil(frameH * band.end);
-  const clampedStart = constrain(srcLayerStart, srcStart, srcEnd - 1);
-  const clampedEnd = constrain(srcLayerEnd, clampedStart + 1, srcEnd);
-  const srcH = max(1, clampedEnd - clampedStart);
-  const pixelsPerSourceY = dstBaseH / frameH;
-  const dstY = round(dstBaseTop + clampedStart * pixelsPerSourceY);
-  const dstH = max(1, round(srcH * pixelsPerSourceY));
-
-  image(
-    descriptor.img,
-    descriptor.px,
-    dstY,
-    descriptor.drawWidth,
-    dstH,
-    srcX,
-    clampedStart,
-    frameW,
-    srcH
-  );
-
-  if (isOverLayer && hasNorthJoin) {
-    const seamCapPx = capPx;
-    const seamSrcStart = 0;
-    const seamSrcEnd = min(seamCapPx, frameH);
-    const seamSrcH = max(1, seamSrcEnd - seamSrcStart);
-    const seamDstH = max(1, round((seamSrcH / frameH) * descriptor.drawHeight));
-    const seamDstY = round(descriptor.py - seamDstH);
-    image(
-      descriptor.img,
-      descriptor.px,
-      seamDstY,
-      descriptor.drawWidth,
-      seamDstH,
-      srcX,
-      seamSrcStart,
-      frameW,
-      seamSrcH
-    );
-  }
-}
-
-function drawFrontTubeOverlay(descriptor) {
-  if (!descriptor || !descriptor.frontOverlayImg) {
-    return;
-  }
-  const overlay = descriptor.frontOverlayImg;
-  if (!overlay || overlay.width <= 0 || overlay.height <= 0) {
-    return;
-  }
-  const baseFrameW = max(1, descriptor.frameW);
-  const baseFrameH = max(1, descriptor.frameH);
-  const targetW = descriptor.drawWidth * (overlay.width / baseFrameW);
-  const targetH = descriptor.drawHeight * (overlay.height / baseFrameH);
-  const x = round(descriptor.px + (descriptor.drawWidth - targetW) / 2);
-  const y = round(descriptor.py + (descriptor.drawHeight - targetH) / 2);
-  imageMode(CORNER);
-  image(overlay, x, y, targetW, targetH);
-}
-
-function drawTubeDescriptorLayer(descriptor, layerName) {
-  if (!descriptor) {
-    return;
-  }
-
-  if (layerName !== "body") {
-    return;
-  }
-
-  if (!descriptor.hasSprite) {
-    stroke(50);
-    fill(120);
-    rect(
-      descriptor.px + 4,
-      descriptor.py + 4,
-      descriptor.drawWidth - 8,
-      descriptor.drawHeight - 8,
-      4
-    );
-    return;
-  }
-
-  const tubeVisualScale = 2;
-  const srcX = descriptor.frameIndex * descriptor.frameW;
-  const frameW = descriptor.frameW;
-  const frameH = descriptor.frameH;
-  const cornerFacing = descriptor.entity?.state?.facing || "E";
-  const cornerDisplaySize = descriptor.isCorner
-    ? getCornerTubeDisplayFrameSize(cornerFacing)
-    : null;
-  const targetW = round(
-    (cornerDisplaySize ? cornerDisplaySize.frameW : frameW) * tubeVisualScale
-  );
-  const targetH = round(
-    (cornerDisplaySize ? cornerDisplaySize.frameH : frameH) * tubeVisualScale
-  );
-  const spriteX = round(descriptor.px + (descriptor.drawWidth - targetW) / 2);
-  const spriteY = round(descriptor.py + descriptor.drawHeight - targetH);
-
-  imageMode(CORNER);
-  if (descriptor.isCorner) {
-    push();
-    translate(
-      descriptor.px + descriptor.drawWidth / 2,
-      descriptor.py + descriptor.drawHeight / 2
-    );
-    rotate(
-      Number.isFinite(descriptor.cornerRotationAngle)
-        ? descriptor.cornerRotationAngle
-        : descriptor.rotationAngle
-    );
-    if (descriptor.cornerMirrorX) {
-      scale(-1, 1);
-    }
-    image(
-      descriptor.img,
-      -targetW / 2 + (descriptor.cornerXOffsetPx || 0),
-      descriptor.drawHeight / 2 - targetH + (descriptor.cornerYOffsetPx || 0),
-      targetW,
-      targetH,
-      srcX,
-      0,
-      frameW,
-      frameH
-    );
-    pop();
-  } else {
-    image(
-      descriptor.img,
-      spriteX,
-      spriteY,
-      targetW,
-      targetH,
-      srcX,
-      0,
-      frameW,
-      frameH
-    );
-  }
-}
-
-function drawTubeDescriptorsInLayeredPasses(descriptors) {
-  if (!Array.isArray(descriptors) || descriptors.length === 0) {
-    return;
-  }
-
-  const sorted = [...descriptors].sort(compareTubeDescriptorsForRender);
-  for (const descriptor of sorted) {
-    drawTubeDescriptorLayer(descriptor, "body");
-  }
-}
-
-function getEntitySouthmostRenderTileY(entity) {
-  if (!entity) {
-    return 0;
-  }
-  const facing = entity.state?.facing || "E";
-  const offsets = getSafeFootprintOffsets(entity.type, facing, entity.state);
-  let maxOffsetY = -Infinity;
-  for (const offset of offsets) {
-    maxOffsetY = max(maxOffsetY, offset.y);
-  }
-  if (!Number.isFinite(maxOffsetY)) {
-    maxOffsetY = 0;
-  }
-  return entity.tileY + maxOffsetY;
-}
-
-function drawNonTubeEntity(entity, tileSize, nowSeconds) {
-  const bounds = getEntityDrawBounds(entity, tileSize);
-  const px = bounds.px;
-  const py = bounds.py;
-  const drawWidth = bounds.drawWidth;
-  const drawHeight = bounds.drawHeight;
-
-  const drewMinerSprite =
-    entity.type === ENTITY_TYPES.MINER &&
-    drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
-  const drewSmelterSprite =
-    entity.type === ENTITY_TYPES.SMELTER &&
-    drawPlacedSmelterSprite(
-      px,
-      py,
-      drawWidth,
-      drawHeight,
-      entity.state?.facing || "E",
-      entity.state,
-      nowSeconds
-    );
-  const drewSplitterSprite =
-    entity.type === ENTITY_TYPES.SPLITTER &&
-    drawPlacedSplitterSprite(
-      px,
-      py,
-      drawWidth,
-      drawHeight,
-      entity.state?.facing || "E",
-      255,
-      { preferSideForEast: true }
-    );
-  const drewMergerSprite =
-    entity.type === ENTITY_TYPES.MERGER &&
-    drawPlacedMergerSprite(
-      px,
-      py,
-      drawWidth,
-      drawHeight,
-      entity.state?.facing || "E",
-      255,
-      { preferSideForEast: true }
-    );
-  const drewCustomSprite = drewMinerSprite || drewSmelterSprite || drewSplitterSprite || drewMergerSprite;
-
-  if (!drewCustomSprite) {
-    // Regular building fallback rendering when no custom sprite is used.
-    stroke(50);
-    const rgb = getEntityFillRgb(entity.type);
-    fill(rgb[0], rgb[1], rgb[2]);
-    rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
-  }
-
-  if (entity.state.isBroken) {
-    stroke(255, 0, 0);
-    strokeWeight(3);
-    line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
-    line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
-    strokeWeight(1);
-  }
-
-  if (!drewCustomSprite) {
-    noStroke();
-    const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
-    fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-    circle(px + drawWidth - 8, py + 8, 8);
-  }
-
-  if (!drewCustomSprite) {
-    fill(20);
-    noStroke();
-    text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
-  }
-}
-
-function drawEntities(entities, tileSize, map) {
-  textAlign(CENTER, CENTER);
-  textSize(10);
-  const nowSeconds = millis() / 1000;
-  const nowMs = millis();
-  const tubeDescriptors = [];
-  const renderQueue = [];
-
-  for (const entity of entities) {
-    const sortY = getEntitySouthmostRenderTileY(entity);
-    const sortX = entity?.tileX || 0;
-    const sortId = entity?.id || 0;
     if (entity.type === ENTITY_TYPES.TUBE) {
-      const descriptor = buildTubeRenderDescriptor(entity, tileSize, nowMs);
-      tubeDescriptors.push(descriptor);
-      renderQueue.push({
-        kind: "tube",
-        sortY,
-        sortX,
-        sortId,
-        descriptor
-      });
-    } else {
-      renderQueue.push({
-        kind: "entity",
-        sortY,
-        sortX,
-        sortId,
-        entity
-      });
-    }
-  }
+      push();
+      translate(px + tileSize / 2, py + tileSize / 2);
+      rotate(facingToAngle(entity.state.facing));
 
-  annotateTubeDescriptorNeighbors(tubeDescriptors);
-  renderQueue.sort((a, b) => {
-    if (a.sortY !== b.sortY) return a.sortY - b.sortY;
-    if (a.sortX !== b.sortX) return a.sortX - b.sortX;
-    return a.sortId - b.sortId;
-  });
-  for (const item of renderQueue) {
-    if (item.kind === "tube") {
-      drawTubeDescriptorLayer(item.descriptor, "body");
-    } else {
-      drawNonTubeEntity(item.entity, tileSize, nowSeconds);
-    }
-  }
+      let imgToDraw = null;
+      let isCorner = entity.state.shape === TUBE_SHAPES.CORNER;
+      let isFlowing = !!entity.state.carriedItem;
 
-  for (const entity of entities) {
+      if (isCorner) {
+        let useCurve2 = (entity.tileX + entity.tileY) % 2 === 0;
+        if (isFlowing) imgToDraw = useCurve2 ? (pipeCurve2OnImg || pipeCurve1OnImg) : pipeCurve1OnImg;
+        else imgToDraw = useCurve2 ? (pipeCurve2OffImg || pipeCurve1OffImg) : pipeCurve1OffImg;
+      } else {
+        imgToDraw = pipeFrontOffImg; 
+      }
+
+      if (imgToDraw && imgToDraw.width > 0) {
+        // FIXED: Explicitly define the number of frames based on the sprite sheet!
+        // pipeFrontOff is 8 frames, the curves are 16 frames. 
+        // This calculates the exact width of a single frame and stops the "2 tubes at a time" bug!
+        let numFrames = (imgToDraw === pipeFrontOffImg) ? 8 : 16;
+        let frameW = imgToDraw.width / numFrames;
+        let frameH = imgToDraw.height;
+        let currentFrame = 0;
+        
+        if (numFrames > 1 && entity.state.isConnected) {
+            currentFrame = Math.floor(millis() / 150) % numFrames;
+        }
+
+        imageMode(CORNER);
+        image(imgToDraw, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
+      } else {
+        stroke(50);
+        fill(120);
+        rect(-tileSize / 2 + 4, -tileSize / 2 + 4, tileSize - 8, tileSize - 8, 4);
+      }
+      pop();
+    } else {
+      // FIXED: Removed the solid grey background square from regular buildings
+      // Only draw the regular entity color square if there are no images
+      stroke(50);
+      const rgb = getEntityFillRgb(entity.type);
+      fill(rgb[0], rgb[1], rgb[2]);
+
+      rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
+
+      if (entity.state.isBroken) {
+        stroke(255, 0, 0);
+        strokeWeight(3);
+        line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
+        line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
+        strokeWeight(1);
+      }
+
+      noStroke();
+      const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
+      fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
+      circle(px + drawWidth - 8, py + 8, 8);
+
+      fill(20);
+      noStroke();
+      text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+    }
+    
     drawEntityPorts(entity, tileSize);
   }
 }
@@ -2653,7 +2338,7 @@ function getEntityShortLabel(type) {
   }
 }
 
-function drawMiniMap(map, player, config, feedback) {
+function drawMiniMap(map, player, config, feedback, entities) {
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
 
   const miniMaxSize = 140;
@@ -2674,6 +2359,35 @@ function drawMiniMap(map, player, config, feedback) {
     miniTile
   );
   image(minimapLayer, miniX, miniY);
+
+  // Overlay dynamic placed items / buildings (including the pre-placed rocket footprint).
+  noStroke();
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tile = map.tiles[y][x];
+      if (!tile || !tile.building || !tile.building.color) continue;
+      const c = tile.building.color;
+      fill(c[0], c[1], c[2]);
+      rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
+    }
+  }
+
+  // Keep rocket readable on minimap even when some port tiles are occupied by tubes.
+  if (entities && entities.length) {
+    for (const entity of entities) {
+      if (entity.type !== ENTITY_TYPES.ROCKET_SITE) continue;
+      fill(180, 180, 255, 180);
+      const footprint = getRocketFootprintTiles(entity.tileX, entity.tileY);
+      for (const fp of footprint) {
+        rect(
+          miniX + fp.x * miniTile,
+          miniY + fp.y * miniTile,
+          miniTile,
+          miniTile
+        );
+      }
+    }
+  }
 
   noStroke();
   
@@ -3498,6 +3212,10 @@ function pickContrastingTextColor(rgb) {
 }
 
 function drawPlacedBuildingLetter(px, py, tileSize, building) {
+  const label = building.label || building.letter || "";
+  if (!label) {
+    return;
+  }
   const rgb = building.color;
   const tc = pickContrastingTextColor(rgb);
   const cx = px + tileSize / 2;
@@ -3510,7 +3228,7 @@ function drawPlacedBuildingLetter(px, py, tileSize, building) {
   textSize(14);
   textStyle(BOLD);
   textAlign(CENTER, CENTER);
-  text(building.label || building.letter || "??", 0, 0);
+  text(label, 0, 0);
   pop();
   textStyle(NORMAL);
 }
@@ -3969,12 +3687,47 @@ function getPlacedBuildingDisplayName(tile) {
   return et != null ? String(et) : null;
 }
 
-function getMapHoverTooltipLabel(tile) {
-  const buildingName = getPlacedBuildingDisplayName(tile);
+function getRocketPortHoverLabelAtTile(col, row) {
+  if (!drawGame.state) {
+    return null;
+  }
+  const entities = drawGame.state.entities || [];
+  const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
+  if (!rocket) {
+    return null;
+  }
+  const ports = getEntityConnectionPorts(rocket).filter((port) => port.kind === "input");
+  const matched = ports.find((port) => port.worldX === col && port.worldY === row);
+  if (!matched) {
+    return null;
+  }
+
+  if (matched.name === RESOURCE_TYPES.ELECTRONICS) {
+    return "Electronics Port";
+  }
+  if (matched.name === RESOURCE_TYPES.SHIP_ALLOY) {
+    return "Ship Alloy Port";
+  }
+  if (matched.name === RESOURCE_TYPES.ROCKET_FUEL) {
+    return "Rocket Fuel Port";
+  }
+  return "Rocket Port";
+}
+
+function getMapHoverTooltipLabel(hit) {
+  if (!hit) {
+    return null;
+  }
+  const portLabel = getRocketPortHoverLabelAtTile(hit.col, hit.row);
+  if (portLabel) {
+    return portLabel;
+  }
+
+  const buildingName = getPlacedBuildingDisplayName(hit.tile);
   if (buildingName) {
     return buildingName;
   }
-  return getResourceDisplayName(tile);
+  return getResourceDisplayName(hit.tile);
 }
 
 function getResourceDisplayName(tile) {
@@ -4055,7 +3808,7 @@ function drawResourceHoverTooltip() {
   }
 
   const hit = getTileAtScreenPosition(mouseX, mouseY);
-  const label = hit ? getMapHoverTooltipLabel(hit.tile) : null;
+  const label = getMapHoverTooltipLabel(hit);
   if (!label) {
     return;
   }
@@ -4210,6 +3963,106 @@ function drawActiveTubeFlowTooltip() {
     text(tooltip.label, amountX + amountW + textGap, lineY + lineTextOffsetY);
   }
 
+  pop();
+  return true;
+}
+
+function getHoveredRocketTooltipData() {
+  if (currentState !== "GAME" || !drawGame.state) {
+    return null;
+  }
+  if (isMouseOverResourceTooltipBlockers()) {
+    return null;
+  }
+
+  const hit = getTileAtScreenPosition(mouseX, mouseY);
+  if (!hit) {
+    return null;
+  }
+
+  const { entities } = drawGame.state;
+  const rocketPortMatch = getPortsAtTile(entities, hit.col, hit.row).find(
+    (match) =>
+      match.entity?.type === ENTITY_TYPES.ROCKET_SITE &&
+      match.port?.kind === "input"
+  );
+  if (rocketPortMatch) {
+    const resourceType = rocketPortMatch.port.name || "";
+    return {
+      title: "Rocket Port",
+      label: getResourceTypeLabel(resourceType) || String(resourceType)
+    };
+  }
+
+  let rocketEntity = null;
+  if (hit.tile?.entityId != null) {
+    rocketEntity = getEntityById(entities, hit.tile.entityId);
+  }
+  if (!rocketEntity && hit.tile?.building?.entityType === ENTITY_TYPES.ROCKET_SITE) {
+    const buildingEntityId = hit.tile.building.entityId;
+    if (buildingEntityId != null) {
+      rocketEntity = getEntityById(entities, buildingEntityId);
+    }
+  }
+
+  if (rocketEntity?.type !== ENTITY_TYPES.ROCKET_SITE) {
+    return null;
+  }
+
+  return {
+    title: "Rocket Ship",
+    label: "Rocket Ship"
+  };
+}
+
+function drawRocketHoverTooltip() {
+  const tooltip = getHoveredRocketTooltipData();
+  if (!tooltip) {
+    return false;
+  }
+
+  push();
+  textAlign(LEFT, TOP);
+
+  textStyle(BOLD);
+  textSize(12);
+  const titleW = textWidth(tooltip.title);
+  const titleH = textAscent() + textDescent();
+
+  textStyle(NORMAL);
+  textSize(11);
+  const labelW = textWidth(tooltip.label);
+  const labelH = textAscent() + textDescent();
+
+  const pad = 8;
+  const boxW = max(titleW, labelW) + pad * 2;
+  const boxH = pad * 2 + titleH + 4 + labelH;
+
+  let bx = mouseX + 14;
+  let by = mouseY + 14;
+  if (bx + boxW > width - 6) {
+    bx = mouseX - boxW - 14;
+  }
+  if (by + boxH > height - 6) {
+    by = mouseY - boxH - 14;
+  }
+  bx = constrain(bx, 6, width - boxW - 6);
+  by = constrain(by, 6, height - boxH - 6);
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  noStroke();
+  fill(28, 28, 36);
+  textStyle(BOLD);
+  textSize(12);
+  text(tooltip.title, bx + pad, by + pad);
+
+  textStyle(NORMAL);
+  textSize(11);
+  text(tooltip.label, bx + pad, by + pad + titleH + 4);
   pop();
   return true;
 }
@@ -4506,6 +4359,10 @@ function mousePressed() {
     backButtonGame.checkClick();
     return;
   }
+  if (testEndGameButton.isHovered()) {
+    testEndGameButton.checkClick();
+    return;
+  }
 
   // Prevent accidentally placing buildings when clicking the hotbar/minimap
   if (isMouseOverHotbarArea() || isPointerOverMinimap()) {
@@ -4793,6 +4650,13 @@ function tryApplyNonTubeFacing(entity, nextFacing) {
 
 
 function keyPressed() {
+  if (currentState === "ENDGAME") {
+    if (keyCode === ENTER || key === " " || keyCode === ESCAPE) {
+      currentState = "MENU";
+    }
+    return;
+  }
+
   if (currentState != "GAME") {
     return;
   }
@@ -4926,6 +4790,12 @@ function deleteEntityUnderMouse() {
   }
 
   if (targetId != null) {
+    const targetEntity = entities.find((entry) => entry.id === targetId) || null;
+    // Rocket is pre-placed and should not be removable.
+    if (targetEntity && targetEntity.type === ENTITY_TYPES.ROCKET_SITE) {
+      return;
+    }
+
     const index = entities.findIndex((entry) => entry.id === targetId);
     if (index !== -1) {
       if (drawGame.state.isRestrictedMode && targetEntity) {
@@ -4938,9 +4808,7 @@ function deleteEntityUnderMouse() {
       const footprintTiles = getSafeFootprintTilesAt(
         targetEntity.type,
         targetEntity.tileX,
-        targetEntity.tileY,
-        targetEntity.state?.facing || "E",
-        targetEntity.state
+        targetEntity.tileY
       );
       for (const entry of footprintTiles) {
         const tile = map.tiles[entry.y]?.[entry.x];
@@ -4990,7 +4858,6 @@ function syncTileBuildingFacing(entity) {
     return;
   }
   tile.building.facing = entity.state.facing || "E";
-  tile.building.shape = entity.state?.shape || null;
 }
 
 function repairEntityUnderMouse() {
