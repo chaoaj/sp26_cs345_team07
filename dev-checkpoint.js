@@ -120,15 +120,28 @@
     tile.building = null;
   }
 
-  function clearNonShuttleEntities(state, shuttleId) {
+  function clearNonShuttleEntities(state, shuttleId, additionalPreserveIds = null) {
+    const preserveIds = new Set();
+    if (shuttleId != null) {
+      preserveIds.add(shuttleId);
+    }
+    if (additionalPreserveIds && typeof additionalPreserveIds[Symbol.iterator] === "function") {
+      for (const value of additionalPreserveIds) {
+        const id = Number(value);
+        if (Number.isFinite(id)) {
+          preserveIds.add(id);
+        }
+      }
+    }
+
     const rows = state.map.tiles.length;
     const cols = rows > 0 ? state.map.tiles[0].length : 0;
 
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
         const tile = state.map.tiles[y][x];
-        if (tile.entityId === shuttleId) {
-          if (tile.building && tile.building.entityId !== shuttleId) {
+        if (tile.entityId != null && preserveIds.has(tile.entityId)) {
+          if (tile.building && !preserveIds.has(tile.building.entityId)) {
             tile.building = null;
           }
           continue;
@@ -137,7 +150,7 @@
       }
     }
 
-    state.entities = state.entities.filter((entity) => entity.id === shuttleId);
+    state.entities = state.entities.filter((entity) => preserveIds.has(entity.id));
     state.selectedBuilding = null;
   }
 
@@ -465,6 +478,25 @@
     return state.entities.find((entity) => entity.type === ENTITY_TYPES.SHUTTLE) || null;
   }
 
+  function findExistingRocketSiteEntity(state) {
+    if (!state || !Array.isArray(state.entities)) {
+      return null;
+    }
+    return state.entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE) || null;
+  }
+
+  function getRestrictedCheckpointPreserveIds(state, shuttle) {
+    const ids = new Set();
+    if (shuttle && shuttle.id != null) {
+      ids.add(shuttle.id);
+    }
+    const rocket = findExistingRocketSiteEntity(state);
+    if (rocket && rocket.id != null) {
+      ids.add(rocket.id);
+    }
+    return ids;
+  }
+
   function ensureShuttleOrThrow(state) {
     let shuttle = findExistingShuttleEntity(state);
     if (!shuttle && typeof spawnRestrictedModeShuttle === "function") {
@@ -476,6 +508,58 @@
     }
     state.shuttleEntityId = shuttle.id;
     return shuttle;
+  }
+
+  function restoreShuttleFootprintOnMap(state, shuttle) {
+    if (!state || !shuttle) {
+      return;
+    }
+
+    const facing = (shuttle.state && shuttle.state.facing) || "E";
+    const footprint = getFootprintTilesAt(
+      shuttle,
+      shuttle.tileX,
+      shuttle.tileY,
+      facing,
+      shuttle.state
+    );
+
+    for (const tilePos of footprint) {
+      if (!isInsideMap(state, tilePos.x, tilePos.y)) {
+        continue;
+      }
+      const tile = tileAt(state, tilePos.x, tilePos.y);
+      if (!tile) {
+        continue;
+      }
+      if (tile.entityId != null && tile.entityId !== shuttle.id) {
+        continue;
+      }
+      tile.entityId = shuttle.id;
+      tile.entity = shuttle;
+      tile.item = ENTITY_TYPES.SHUTTLE;
+      tile.colorOverride = null;
+    }
+
+    const anchor = tileAt(state, shuttle.tileX, shuttle.tileY);
+    if (anchor) {
+      const color = typeof getEntityFillRgb === "function"
+        ? getEntityFillRgb(ENTITY_TYPES.SHUTTLE)
+        : [230, 230, 120];
+      const label = typeof getEntityShortLabel === "function"
+        ? getEntityShortLabel(ENTITY_TYPES.SHUTTLE)
+        : "SH";
+      anchor.building = {
+        color: color.slice(),
+        label,
+        name: "Crashed Shuttle",
+        entityType: ENTITY_TYPES.SHUTTLE,
+        facing,
+        entityId: shuttle.id
+      };
+    }
+
+    state.shuttleEntityId = shuttle.id;
   }
 
   function stabilizeConnections(state, passes = 4) {
@@ -715,7 +799,9 @@
 
   function buildRestrictedCheckpointFromSnapshotOrThrow(state, snapshot) {
     const shuttle = ensureShuttleOrThrow(state);
-    clearNonShuttleEntities(state, shuttle.id);
+    const preserveIds = getRestrictedCheckpointPreserveIds(state, shuttle);
+    clearNonShuttleEntities(state, shuttle.id, preserveIds);
+    restoreShuttleFootprintOnMap(state, shuttle);
 
     const tubeEntries = getSnapshotArray(snapshot, "tubes");
     const tubeCoordSet = collectTubeSet(tubeEntries);
@@ -865,6 +951,7 @@
     }
 
     stabilizeConnections(state, 4);
+    restoreShuttleFootprintOnMap(state, shuttle);
 
     if (buildingWarnings.length > 0 || tubeWarnings.length > 0) {
       console.warn("DevCheckpoint snapshot placement warnings:", {
@@ -902,7 +989,8 @@
     const smelterOrePerBar = 2;
 
     const shuttle = ensureShuttleOrThrow(state);
-    clearNonShuttleEntities(state, shuttle.id);
+    const preserveIds = getRestrictedCheckpointPreserveIds(state, shuttle);
+    clearNonShuttleEntities(state, shuttle.id, preserveIds);
 
     // Real ore->bar lines into the shuttle.
     ensureMineableNodeOrThrow(state, 18, 10);
@@ -1174,6 +1262,8 @@
         return false;
       }
       buildRestrictedCheckpointFromSnapshotOrThrow(state, snapshot);
+      const shuttle = ensureShuttleOrThrow(state);
+      restoreShuttleFootprintOnMap(state, shuttle);
       console.log("DevCheckpoint: snapshot checkpoint applied.");
       return true;
     } catch (error) {

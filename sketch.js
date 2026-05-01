@@ -442,8 +442,16 @@ function drawGame() {
     }
 
     const entities = [];
-    const rocketTileX = 26;
-    const rocketTileY = 31;
+    const rocketMinCenterX = ROCKET_HALF_WIDTH_TILES;
+    const rocketMaxCenterX = mapCols - 1 - ROCKET_HALF_WIDTH_TILES;
+    const rocketMinCenterY = ROCKET_HALF_HEIGHT_TILES;
+    const rocketMaxCenterY = mapRows - 1 - ROCKET_HALF_HEIGHT_TILES;
+    const rocketTileX = constrain(floor(mapCols / 2), rocketMinCenterX, rocketMaxCenterX);
+    const rocketTileY = constrain(
+      mapRows - 1 - ROCKET_HALF_HEIGHT_TILES - 1,
+      rocketMinCenterY,
+      rocketMaxCenterY
+    );
     const rocketEntity = createEntity(
       ENTITY_TYPES.ROCKET_SITE,
       rocketTileX,
