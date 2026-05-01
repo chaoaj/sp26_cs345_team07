@@ -189,7 +189,7 @@ function preload() {
   hotbarOutlineImg = loadImage('resources/UI/hotbarFrame.png');
   copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
   ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
-  // heliumDepositImg = loadImage();
+  heliumDepositImg = loadImage('resources/resourceNodes/helium3Deposit.png');
 }
 
 function centerCanvas() {
@@ -1793,6 +1793,7 @@ function getOrBuildWorldLayer(state) {
       let depositImg = null; 
       if (tile.type === "iron") depositImg = ironDepositImg;
       else if (tile.type === "copper") depositImg = copperDepositImg;
+      else if (tile.type === "helium3") depositImg = heliumDepositImg;
 
       if (!depositImg && tile.type !== "empty" && tile.type !== "dirt") {
         const tileColor = getTileBaseColor(tile);
@@ -1814,6 +1815,7 @@ function getOrBuildWorldLayer(state) {
         
         if (tile.type === "iron") depositImg = ironDepositImg;
         else if (tile.type === "copper") depositImg = copperDepositImg;
+        else if (tile.type === "helium3") depositImg = heliumDepositImg;
 
         if (depositImg && depositImg.width > 0) {
           layer.image(depositImg, px, py, tileSize * 2, tileSize * 2);
