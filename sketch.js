@@ -13,6 +13,9 @@ let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
 let heliumImg, modularComponentImg, rocketFuelImg, electronicsImg, shipAlloyImg;
 let sideBarFrameImg, sideBarTabOpen, sideBarTabClosed;
 
+let creditsButtonSettings, backButtonCredits;
+let creditsScrollY = 600;
+
 let ironOre = 0, ironBar = 0, ironPlate = 0;
 let copperOre = 0, copperBar = 0, copperPlate = 0, copperWire = 0;
 let helium = 0, rocketFuel = 0;
@@ -306,7 +309,7 @@ function requestBackgroundMusicStart() {
   playBackgroundMusicTrack(0);
 }
 
-
+// FIXED: Moved Credits button initialization to the Settings menu layout and restored Quit button position
 function setup() {
   canvas = createCanvas(600, 600);
   centerCanvas();
@@ -315,7 +318,7 @@ function setup() {
   stars = [];
   for (let i = 0; i < 1200; i++) {
     stars.push({
-      x: random(0, 2000), // Random starting seed pool
+      x: random(0, 2000), 
       y: random(0, 2000),
       r: random(1, 3),
       alpha: random(100, 255)
@@ -336,14 +339,26 @@ function setup() {
     currentState = "MENU";
   });
   testEndGameButton = new Button(140, 20, 120, 40, "Test End", () => {
-    currentState = "ENDGAME";
+    currentState = "CREDITS";
+    creditsScrollY = height;
   });
-  backButtonSettings = new Button(250, 430, 100, 40, "<- Return", () => {
+  
+  // Positioned side-by-side at the bottom of the settings panel
+  backButtonSettings = new Button(180, 430, 110, 40, "<- Return", () => {
     currentState = "MENU";
   });
+  creditsButtonSettings = new Button(310, 430, 110, 40, "Credits", () => {
+    currentState = "CREDITS";
+    creditsScrollY = height;
+  });
+  
+  backButtonCredits = new Button(30, 20, 100, 40, "<-- Back", () => {
+    currentState = "MENU";
+  });
+  
   setupSettings();
   bootstrapBackgroundMusic();
-};
+}
 
 function preload() {
   bgTiles[0] = loadImage('resources/tiles/tile1.png');
@@ -424,14 +439,15 @@ function draw() {
     background(0);
     drawGame();
     hideSettingsUI();
-  } else if (currentState == "ENDGAME") {
-    drawEndGame();
+  } else if (currentState == "CREDITS") {
+    drawCredits();
     hideSettingsUI();
   } else if (currentState == "SETTINGS") {
     drawSettings();
   }
 }
 
+// FIXED: Removed the Credits button from the main menu rendering
 function drawMenu() {
   if (titlePage) {
     image(titlePage, 0, 0, width, height);
@@ -442,27 +458,102 @@ function drawMenu() {
   stroke(0);
   strokeWeight(3);
 
-  startButton.draw();
-  settingsButton.draw();
-  escapeButton.draw();
+  if (startButton) startButton.draw();
+  if (settingsButton) settingsButton.draw();
+  if (escapeButton) escapeButton.draw();
 
-  rect(
-    startButton.x,
-    startButton.y,
-    startButton.w,
-    (escapeButton.y + escapeButton.h) - startButton.y,
-    2
-  );
+  if (startButton && escapeButton) {
+    rect(
+      startButton.x,
+      startButton.y,
+      startButton.w,
+      (escapeButton.y + escapeButton.h) - startButton.y,
+      2
+    );
+  }
 
-  rect(
-    settingsButton.x,
-    settingsButton.y,
-    settingsButton.w,
-    55,
-    2
-  );
+  if (settingsButton) {
+    rect(settingsButton.x, settingsButton.y, settingsButton.w, 55, 2);
+  }
 
   pop();
+}
+
+// FIXED: Text now scrolls entirely off the screen and gracefully returns to the Main Menu!
+function drawCredits() {
+  background(10, 10, 15);
+  
+  // Let the global scroll value decrease forever
+  creditsScrollY -= 1; 
+  
+  // Draw gently scrolling parallax stars background
+  push();
+  noStroke();
+  for (let star of stars) {
+    let sx = star.x % width;
+    let sy = (star.y + (height - creditsScrollY) * 0.2) % height; 
+    if (sy < 0) sy += height;
+    fill(255, star.alpha);
+    ellipse(sx, sy, star.r, star.r);
+  }
+  pop();
+
+  // Draw Scrolling Text
+  push();
+  textAlign(CENTER, TOP);
+  
+  // No more max() clamping! Let the text follow the scroll infinitely
+  let y = creditsScrollY;
+  
+  textSize(36);
+  textStyle(BOLD);
+  fill(235, 242, 255);
+  text("ROCKET LAUNCH SUCCESSFUL", width/2, y);
+  y += 100;
+  
+  textSize(28);
+  fill(200, 214, 245);
+  text("CREDITS", width/2, y);
+  y += 80;
+  
+  textSize(20);
+  fill(150, 180, 240);
+  text("Developers", width/2, y);
+  y += 30;
+  textSize(24);
+  fill(255);
+  text("Danial Abbasi", width/2, y);
+  y += 45;
+  text("John Rosario Cruz", width/2, y);
+  y += 45;
+  text("Samuel Bohdan", width/2, y);
+  y += 45;
+  text("Steven Lorence", width/2, y);
+  y += 45;
+  text("Will Vinson", width/2, y);
+  y += 80;
+
+  textSize(20);
+  fill(150, 180, 240);
+  text("Music", width/2, y);
+  y += 30;
+  textSize(24);
+  fill(255);
+  text("Jack Devitt", width/2, y);
+  y += 80;
+
+  textSize(16);
+  fill(200, 214, 245);
+  text("Thank you for playing!", width/2, y);
+
+  pop();
+  
+  // Once the final text clears the top of the canvas, automatically return to the menu
+  if (creditsScrollY < -600) {
+    currentState = "MENU";
+  }
+  
+  if (backButtonCredits) backButtonCredits.draw();
 }
 
 function getRocketFootprintTiles(centerTileX, centerTileY) {
@@ -788,6 +879,7 @@ function drawGame() {
   updateRestrictedModeShuttleIntake(entities, dt);
   if (updateRocketConstructionProgress(entities, dt)) {
     currentState = "ENDGAME";
+    creditsScrollY = height;
     return;
   }
 
@@ -3188,8 +3280,9 @@ function drawSettings() {
   stroke(0);
   strokeWeight(2);
   pop();
-  backButtonSettings.draw();
-  drawSettingsUI();
+  if (backButtonSettings) backButtonSettings.draw();
+  if (creditsButtonSettings) creditsButtonSettings.draw();
+  if (typeof drawSettingsUI === "function") drawSettingsUI();
 }
 
 function sideBarText(resource) {
@@ -4985,26 +5078,28 @@ function drawHotbar() {
   pop();
 }
 
+// FIXED: Routed the click detection for the Credits button to the SETTINGS state
 function mousePressed() {
   requestBackgroundMusicStart();
   if (currentState == "MENU") {
-    startButton.checkClick();
-    settingsButton.checkClick();
-    escapeButton.checkClick();
+    if (startButton) startButton.checkClick();
+    if (settingsButton) settingsButton.checkClick();
+    if (escapeButton) escapeButton.checkClick();
     return;
   } else if (currentState == "SETTINGS") {
-    backButtonSettings.checkClick();
+    if (backButtonSettings) backButtonSettings.checkClick();
+    if (creditsButtonSettings) creditsButtonSettings.checkClick();
+    return;
+  } else if (currentState == "CREDITS") {
+    if (backButtonCredits) backButtonCredits.checkClick();
     return;
   }
 
   if (currentState != "GAME") return;
 
-  // Sidebar tab
   let tabW = 25;
   let tabH = 60;
   let tabX = sidebarX + sidebarWidth;
-  
-  // Sidebar fix
   let mapY = drawGame.state ? drawGame.state.config.topMargin : 80;
   let tabY = 425 / 2 - tabH / 2 + mapY;
   
@@ -5013,22 +5108,19 @@ function mousePressed() {
     return;
   }
 
-  // UI back button
-  if (backButtonGame.isHovered()) {
+  if (backButtonGame && backButtonGame.isHovered()) {
     backButtonGame.checkClick();
     return;
   }
-  if (testEndGameButton.isHovered()) {
+  if (testEndGameButton && testEndGameButton.isHovered()) {
     testEndGameButton.checkClick();
     return;
   }
 
-  // Prevent accidentally placing buildings when clicking the hotbar/minimap
   if (isMouseOverHotbarArea() || isPointerOverMinimap()) {
     return;
   }
 
-  // Try to place an entity
   placeSelectedEntityAtMouse();
 }
 
@@ -5310,7 +5402,7 @@ function tryApplyNonTubeFacing(entity, nextFacing) {
 
 function keyPressed() {
   requestBackgroundMusicStart();
-  if (currentState === "ENDGAME") {
+  if (currentState === "CREDITS" || currentState === "ENDGAME") {
     if (keyCode === ENTER || key === " " || keyCode === ESCAPE) {
       currentState = "MENU";
     }
