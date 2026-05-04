@@ -519,7 +519,7 @@ function drawCredits() {
   textSize(20);
   fill(150, 180, 240);
   text("Developers", width/2, y);
-  y += 30;
+  y += 50;
   textSize(24);
   fill(255);
   text("Danial Abbasi", width/2, y);
@@ -3403,9 +3403,47 @@ function isMouseOverSidebarResourceIcon() {
   return !!getHoveredSidebarResourceItem();
 }
 
+// FIXED: Added a custom override just for Helium-3 to display text instead of a recipe!
 function drawSidebarResourceHoverTooltip(hoveredItem) {
   if (!hoveredItem || !hoveredItem.resourceType) {
     return false;
+  }
+
+  //for helium3, instead of showing recipes (since there are none)
+  if (hoveredItem.resourceType === RESOURCE_TYPES.HELIUM3) {
+    const msg = "Used in rocket fuel.";
+    push();
+    textAlign(LEFT, TOP);
+    textSize(12);
+    textStyle(BOLD);
+    
+    const pad = 8;
+    const textH = textAscent() + textDescent();
+    const boxW = textWidth(msg) + pad * 2;
+    const boxH = textH + pad * 2;
+
+    let bx = mouseX + 14;
+    let by = mouseY + 14;
+    if (bx + boxW > width - 6) {
+      bx = mouseX - boxW - 14;
+    }
+    if (by + boxH > height - 6) {
+      by = mouseY - boxH - 14;
+    }
+    bx = constrain(bx, 6, width - boxW - 6);
+    by = constrain(by, 6, height - boxH - 6);
+
+    fill(252, 252, 255, 248);
+    stroke(55, 55, 68);
+    strokeWeight(1);
+    rect(bx, by, boxW, boxH, 5);
+
+    noStroke();
+    fill(28, 28, 36);
+    text(msg, bx + pad, by + pad);
+    pop();
+    
+    return true;
   }
 
   const uses = getSidebarResourceBuildUses(hoveredItem.resourceType);
