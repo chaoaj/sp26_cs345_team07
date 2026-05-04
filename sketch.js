@@ -316,7 +316,7 @@ function setup() {
   textAlign(CENTER, CENTER);
 
   stars = [];
-  for (let i = 0; i < 1200; i++) {
+  for (let i = 0; i < 400; i++) {
     stars.push({
       x: random(0, 2000), 
       y: random(0, 2000),
