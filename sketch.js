@@ -5580,7 +5580,6 @@ function deleteEntityUnderMouse() {
   }
 
   if (targetId != null) {
-    const targetEntity = entities.find((entry) => entry.id === targetId) || null;
     // Rocket is pre-placed and should not be removable.
     if (targetEntity && targetEntity.type === ENTITY_TYPES.ROCKET_SITE) {
       return;
@@ -5594,12 +5593,17 @@ function deleteEntityUnderMouse() {
       }
       entities.splice(index, 1);
     }
+    
     if (targetEntity) {
+      // FIXED: Pass facing and state here so the correct footprint is cleared!
       const footprintTiles = getSafeFootprintTilesAt(
         targetEntity.type,
         targetEntity.tileX,
-        targetEntity.tileY
+        targetEntity.tileY,
+        targetEntity.state?.facing || "E",
+        targetEntity.state
       );
+      
       for (const entry of footprintTiles) {
         const tile = map.tiles[entry.y]?.[entry.x];
         if (!tile || tile.entityId !== targetId) continue;
