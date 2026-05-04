@@ -308,7 +308,15 @@ class MinerState extends EntityState {
    * @returns {void}
    */
   updateOutputRate() {
-    this.outputRate = (this.isOn && this.isActive && this.outputType) ? 2 : 0;
+    if (this.isOn && this.isActive && this.outputType) {
+      if (this.outputType === RESOURCE_TYPES.HELIUM3) {
+        this.outputRate = 0.2; // 1 Helium-3 every 5 seconds
+      } else {
+        this.outputRate = 2;   // 2 Ores per second for Iron and Copper
+      }
+    } else {
+      this.outputRate = 0;
+    }
   }
 
   /**
