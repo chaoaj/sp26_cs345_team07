@@ -511,8 +511,8 @@ function drawGame() {
 
   if (!drawGame.state) {
     const tileSize = 32;
-    const mapCols = 50;
-    const mapRows = 50;
+    const mapCols = 75;
+    const mapRows = 75;
     const tiles = [];
 
     for (let y = 0; y < mapRows; y++) {
@@ -590,6 +590,40 @@ function drawGame() {
       return true;
     };
 
+    const placeScatteredResourceBlocks = (nodeKey, count, maxAttempts = 1200) => {
+      let placed = 0;
+      let attempts = 0;
+      while (placed < count && attempts < maxAttempts) {
+        attempts++;
+        const x = Math.floor(Math.random() * (mapCols - 1));
+        const y = Math.floor(Math.random() * (mapRows - 1));
+
+        let canPlace = true;
+        for (let oy = 0; oy < 2 && canPlace; oy++) {
+          for (let ox = 0; ox < 2; ox++) {
+            const tx = x + ox;
+            const ty = y + oy;
+            const tile = tiles[ty] && tiles[ty][tx];
+            if (
+              !tile ||
+              tile.entityId != null ||
+              tile.type !== "empty"
+            ) {
+              canPlace = false;
+              break;
+            }
+          }
+        }
+        if (!canPlace) {
+          continue;
+        }
+        if (!placeResourceNodeBlock2x2(x, y, nodeKey)) {
+          continue;
+        }
+        placed++;
+      }
+    };
+
     if (restrictedMode) {
       applyRestrictedModeResourceLayout(
         tiles,
@@ -609,6 +643,10 @@ function drawGame() {
       placeResourceNodeBlock2x2(14, 12, "copper");
 
       placeResourceNodeBlock2x2(17, 18, "helium3");
+
+      // Additional random scatter so the map has more distributed ore nodes.
+      placeScatteredResourceBlocks("iron", 12);
+      placeScatteredResourceBlocks("copper", 12);
     }
 
     const entities = [];
@@ -618,7 +656,7 @@ function drawGame() {
     const rocketMaxCenterY = mapRows - 1 - ROCKET_HALF_HEIGHT_TILES;
     const rocketTileX = constrain(floor(mapCols / 2), rocketMinCenterX, rocketMaxCenterX);
     const rocketTileY = constrain(
-      mapRows - 1 - ROCKET_HALF_HEIGHT_TILES - 1,
+      mapRows - 1 - ROCKET_HALF_HEIGHT_TILES - 2,
       rocketMinCenterY,
       rocketMaxCenterY
     );
@@ -1034,8 +1072,8 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourc
 
   // Sparse scatter across the map to keep exploration useful.
   const sparseScatterPlan = [
-    { type: "iron", count: 3 },
-    { type: "copper", count: 3 },
+    { type: "iron", count: 10 },
+    { type: "copper", count: 10 },
     { type: "helium3", count: 2 }
   ];
 
@@ -1077,6 +1115,29 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourc
       }
       placed++;
     }
+  }
+
+  // Ensure specific checkpoint miner tiles are always on iron nodes.
+  // This is applied last so random scatter cannot override it.
+  const forcedIronBlocks = [
+    { x: 10, y: 26 }, // covers (10,26) and (10,27)
+    { x: 10, y: 27 }, // covers (10,28)
+    { x: 12, y: 28 }, // covers (12,29)
+    { x: 14, y: 27 }, // covers (14,28)
+    { x: 17, y: 26 }  // covers (17,26)
+  ];
+  for (const block of forcedIronBlocks) {
+    placeResourceNodeBlock2x2(block.x, block.y, "iron");
+  }
+
+  // Ensure checkpoint miner tiles for IDs 8, 9, 10 are copper nodes.
+  // Snapshot coords: (38,29), (37,29), (39,29).
+  const forcedCopperBlocks = [
+    { x: 37, y: 29 }, // covers (37,29) and (38,29)
+    { x: 39, y: 29 }  // covers (39,29)
+  ];
+  for (const block of forcedCopperBlocks) {
+    placeResourceNodeBlock2x2(block.x, block.y, "copper");
   }
 }
 
@@ -1925,8 +1986,12 @@ function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterS
   }
 
   const frameCount = 6;
-  const frameW = sprite.width / frameCount;
+  // Use integer frame slices to avoid texture bleeding between animation frames.
+  const frameW = floor(sprite.width / frameCount);
   const frameH = sprite.height;
+  if (frameW <= 0 || frameH <= 0) {
+    return false;
+  }
   const isOn = smelterState?.isOn != null
     ? smelterState.isOn
     : !!smelterState?.isActive;
@@ -1944,10 +2009,12 @@ function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterS
   // West uses the same side asset orientation as East; only ports are reversed
   // through entity facing/port rotation logic.
   const shouldMirrorWest = false;
-  const srcX = frameIndex * frameW;
+  const srcX = min(frameIndex * frameW, max(0, sprite.width - frameW));
 
   imageMode(CORNER);
   noTint();
+  const previousSmoothing = drawingContext.imageSmoothingEnabled;
+  drawingContext.imageSmoothingEnabled = false;
   if (shouldMirrorWest) {
     push();
     translate(spriteX + targetWidth / 2, 0);
@@ -1977,6 +2044,7 @@ function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterS
       frameH
     );
   }
+  drawingContext.imageSmoothingEnabled = previousSmoothing;
   return true;
 }
 
@@ -2687,7 +2755,7 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       drawHeight,
       entity.state?.facing || "E",
       255,
-      { preferSideForEast: true }
+      { preferSideForEast: true, mirrorWest: true }
     );
   const drewMergerSprite =
     entity.type === ENTITY_TYPES.MERGER &&
@@ -2698,7 +2766,7 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       drawHeight,
       entity.state?.facing || "E",
       255,
-      { preferSideForEast: true }
+      { preferSideForEast: true, mirrorWest: true }
     );
   const drewCustomSprite = drewMinerSprite || drewSmelterSprite || drewSplitterSprite || drewMergerSprite;
 
