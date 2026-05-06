@@ -316,7 +316,7 @@ function setup() {
   textAlign(CENTER, CENTER);
 
   stars = [];
-  for (let i = 0; i < 1200; i++) {
+  for (let i = 0; i < 400; i++) {
     stars.push({
       x: random(0, 2000), 
       y: random(0, 2000),
@@ -519,7 +519,7 @@ function drawCredits() {
   textSize(20);
   fill(150, 180, 240);
   text("Developers", width/2, y);
-  y += 30;
+  y += 50;
   textSize(24);
   fill(255);
   text("Danial Abbasi", width/2, y);
@@ -2010,6 +2010,7 @@ function getSmelterManualPixelOffset(facing) {
   };
 }
 
+// FIXED: Removed noTint() from inside the function so it can be drawn transparently during previews
 function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterState, nowSeconds) {
   const sprite = getSmelterSpriteForFacing(facing);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
@@ -2033,13 +2034,11 @@ function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterS
   const manualOffset = getSmelterManualPixelOffset(facing);
   const spriteX = round(px + (drawWidth - targetWidth) / 2 + manualOffset.xOffsetPx);
   const spriteY = round(py + drawHeight - targetHeight + manualOffset.yOffsetPx);
-  // West uses the same side asset orientation as East; only ports are reversed
-  // through entity facing/port rotation logic.
   const shouldMirrorWest = false;
   const srcX = frameIndex * frameW;
 
   imageMode(CORNER);
-  noTint();
+  
   if (shouldMirrorWest) {
     push();
     translate(spriteX + targetWidth / 2, 0);
@@ -2109,7 +2108,12 @@ function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha =
   const shouldMirrorWest = !!options.mirrorWest && (facing || "E") === "W";
 
   imageMode(CORNER);
-  noTint();
+  if (alpha < 255) {
+    tint(255, alpha);
+  } else {
+    noTint();
+  }
+
   if (shouldMirrorWest) {
     push();
     translate(spriteX + targetWidth / 2, 0);
@@ -2153,14 +2157,17 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   const visualScale = 2;
   const targetWidth = round(sprite.width * visualScale);
   const targetHeight = round(sprite.height * visualScale);
-  // Render exact PNG pixels (no scaling). Anchor to footprint base so any
-  // excess height naturally overhangs upward.
   const spriteX = round(px + (drawWidth - targetWidth) / 2);
   const spriteY = round(py + drawHeight - targetHeight);
   const shouldMirrorWest = !!options.mirrorWest && (facing || "E") === "W";
 
   imageMode(CORNER);
-  noTint();
+  if (alpha < 255) {
+    tint(255, alpha);
+  } else {
+    noTint();
+  }
+
   if (shouldMirrorWest) {
     push();
     translate(spriteX + targetWidth / 2, 0);
@@ -3403,9 +3410,47 @@ function isMouseOverSidebarResourceIcon() {
   return !!getHoveredSidebarResourceItem();
 }
 
+// FIXED: Added a custom override just for Helium-3 to display text instead of a recipe!
 function drawSidebarResourceHoverTooltip(hoveredItem) {
   if (!hoveredItem || !hoveredItem.resourceType) {
     return false;
+  }
+
+  //for helium3, instead of showing recipes (since there are none)
+  if (hoveredItem.resourceType === RESOURCE_TYPES.HELIUM3) {
+    const msg = "Used in rocket fuel.";
+    push();
+    textAlign(LEFT, TOP);
+    textSize(12);
+    textStyle(BOLD);
+    
+    const pad = 8;
+    const textH = textAscent() + textDescent();
+    const boxW = textWidth(msg) + pad * 2;
+    const boxH = textH + pad * 2;
+
+    let bx = mouseX + 14;
+    let by = mouseY + 14;
+    if (bx + boxW > width - 6) {
+      bx = mouseX - boxW - 14;
+    }
+    if (by + boxH > height - 6) {
+      by = mouseY - boxH - 14;
+    }
+    bx = constrain(bx, 6, width - boxW - 6);
+    by = constrain(by, 6, height - boxH - 6);
+
+    fill(252, 252, 255, 248);
+    stroke(55, 55, 68);
+    strokeWeight(1);
+    rect(bx, by, boxW, boxH, 5);
+
+    noStroke();
+    fill(28, 28, 36);
+    text(msg, bx + pad, by + pad);
+    pop();
+    
+    return true;
   }
 
   const uses = getSidebarResourceBuildUses(hoveredItem.resourceType);
@@ -4140,17 +4185,9 @@ function drawPlacementPortTileHighlights(
   }
 }
 
+// FIXED: Unified the fade for all sprites to 150, and restored the pulsing border for generic buildings!
 function drawBuildingPlacementHologram(
-  px,
-  py,
-  tileSize,
-  colorRgb,
-  label,
-  facing,
-  entityType,
-  options,
-  baseCol = null,
-  baseRow = null
+  px, py, tileSize, colorRgb, label, facing, entityType, options, baseCol = null, baseRow = null
 ) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
@@ -4174,7 +4211,6 @@ function drawBuildingPlacementHologram(
   }
   const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
   const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
-  // Offsets are in tile-center coordinates; convert to local rect top-left.
   const footprintLeft = (minOffsetX - 0.5) * tileSize;
   const footprintTop = (minOffsetY - 0.5) * tileSize;
   const footprintWidth = footprintWidthTiles * tileSize;
@@ -4191,6 +4227,9 @@ function drawBuildingPlacementHologram(
     entityType === ENTITY_TYPES.MINER &&
     minerSpriteSheetImg &&
     minerSpriteSheetImg.width > 0;
+  const useSmelterHologram = 
+    entityType === ENTITY_TYPES.SMELTER &&
+    getSmelterSpriteForFacing(previewFacing);
   const useSplitterHologram =
     entityType === ENTITY_TYPES.SPLITTER &&
     getSplitterSpriteForFacing(previewFacing, { preferSideForEast: true });
@@ -4201,10 +4240,19 @@ function drawBuildingPlacementHologram(
     entityType === ENTITY_TYPES.TUBE &&
     (pipeSideOffImg || pipeFrontOffImg || pipeCurve1OffImg || pipeCurve2OffImg);
 
-  if (!useMinerOffHologram && !useSplitterHologram && !useMergerHologram && !useTubeHologram) {
-    stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
-    strokeWeight(2);
-    fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
+  const previewAlpha = 150; // The standard hologram fade opacity!
+
+  if (!useMinerOffHologram && !useSmelterHologram && !useSplitterHologram && !useMergerHologram && !useTubeHologram) {
+    const pulse = Math.sin(millis() / 150) * 50;
+    stroke(
+      constrain(colorRgb[0] + pulse, 0, 255), 
+      constrain(colorRgb[1] + pulse, 0, 255), 
+      constrain(colorRgb[2] + pulse, 0, 255), 
+      255
+    );
+    strokeWeight(3); 
+    fill(colorRgb[0], colorRgb[1], colorRgb[2], 230);
+    
     rect(
       footprintLeft + 3,
       footprintTop + 3,
@@ -4215,7 +4263,6 @@ function drawBuildingPlacementHologram(
   }
 
   if (useMinerOffHologram) {
-    // Match the off-state miner visual (frame 8 / index 7).
     const frameW = 18;
     const frameH = 32;
     const totalFrames = max(1, floor(minerSpriteSheetImg.width / frameW));
@@ -4226,7 +4273,7 @@ function drawBuildingPlacementHologram(
     const spriteBottomY = footprintTop + footprintHeight - 1;
     const spriteY = spriteBottomY - spriteHeight - 6;
     imageMode(CORNER);
-    tint(255, 225);
+    tint(255, previewAlpha);
     image(
       minerSpriteSheetImg,
       spriteX,
@@ -4239,6 +4286,18 @@ function drawBuildingPlacementHologram(
       frameH
     );
     noTint();
+  } else if (useSmelterHologram) {
+    tint(255, previewAlpha);
+    drawPlacedSmelterSprite(
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      previewFacing,
+      { isOn: false }, 
+      millis() / 1000
+    );
+    noTint();
   } else if (useSplitterHologram) {
     drawPlacedSplitterSprite(
       footprintLeft,
@@ -4246,7 +4305,7 @@ function drawBuildingPlacementHologram(
       footprintWidth,
       footprintHeight,
       previewFacing,
-      225,
+      previewAlpha,
       { preferSideForEast: true, mirrorWest: true }
     );
   } else if (useMergerHologram) {
@@ -4256,7 +4315,7 @@ function drawBuildingPlacementHologram(
       footprintWidth,
       footprintHeight,
       previewFacing,
-      225,
+      previewAlpha,
       { preferSideForEast: true, mirrorWest: true }
     );
   } else if (useTubeHologram) {
@@ -4266,12 +4325,12 @@ function drawBuildingPlacementHologram(
       footprintWidth,
       footprintHeight,
       previewOptions,
-      225,
+      previewAlpha,
       baseCol,
       baseRow
     );
   } else {
-    fill(35, 35, 42, 200);
+    fill(35, 35, 42, 240);
     noStroke();
     textSize(14);
     textStyle(BOLD);
@@ -5542,7 +5601,6 @@ function deleteEntityUnderMouse() {
   }
 
   if (targetId != null) {
-    const targetEntity = entities.find((entry) => entry.id === targetId) || null;
     // Rocket is pre-placed and should not be removable.
     if (targetEntity && targetEntity.type === ENTITY_TYPES.ROCKET_SITE) {
       return;
@@ -5556,12 +5614,17 @@ function deleteEntityUnderMouse() {
       }
       entities.splice(index, 1);
     }
+    
     if (targetEntity) {
+      // FIXED: Pass facing and state here so the correct footprint is cleared!
       const footprintTiles = getSafeFootprintTilesAt(
         targetEntity.type,
         targetEntity.tileX,
-        targetEntity.tileY
+        targetEntity.tileY,
+        targetEntity.state?.facing || "E",
+        targetEntity.state
       );
+      
       for (const entry of footprintTiles) {
         const tile = map.tiles[entry.y]?.[entry.x];
         if (!tile || tile.entityId !== targetId) continue;
