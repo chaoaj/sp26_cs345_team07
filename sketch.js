@@ -2731,6 +2731,9 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const py = bounds.py;
   const drawWidth = bounds.drawWidth;
   const drawHeight = bounds.drawHeight;
+  const rotatePlacedConstructorContext = (drawFn) => {
+    drawFn();
+  };
 
   const drewMinerSprite =
     entity.type === ENTITY_TYPES.MINER &&
@@ -2772,31 +2775,39 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
 
   if (!drewCustomSprite) {
     // Regular building fallback rendering when no custom sprite is used.
-    stroke(50);
-    const rgb = getEntityFillRgb(entity.type);
-    fill(rgb[0], rgb[1], rgb[2]);
-    rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
+    rotatePlacedConstructorContext(() => {
+      stroke(50);
+      const rgb = getEntityFillRgb(entity.type);
+      fill(rgb[0], rgb[1], rgb[2]);
+      rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
+    });
   }
 
   if (entity.state.isBroken) {
-    stroke(255, 0, 0);
-    strokeWeight(3);
-    line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
-    line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
-    strokeWeight(1);
+    rotatePlacedConstructorContext(() => {
+      stroke(255, 0, 0);
+      strokeWeight(3);
+      line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
+      line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
+      strokeWeight(1);
+    });
   }
 
   if (!drewCustomSprite) {
-    noStroke();
-    const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
-    fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-    circle(px + drawWidth - 8, py + 8, 8);
+    rotatePlacedConstructorContext(() => {
+      noStroke();
+      const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
+      fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
+      circle(px + drawWidth - 8, py + 8, 8);
+    });
   }
 
   if (!drewCustomSprite) {
-    fill(20);
-    noStroke();
-    text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+    rotatePlacedConstructorContext(() => {
+      fill(20);
+      noStroke();
+      text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+    });
   }
 }
 
@@ -3995,7 +4006,8 @@ function drawPlacementPorts(
   baseCol = null,
   baseRow = null,
   entityType = null,
-  facing = "E"
+  facing = "E",
+  blockedOffsetKeys = null
 ) {
   const arrowLen = tileSize * 0.45;
   const headLen = 6;
@@ -4036,6 +4048,9 @@ function drawPlacementPorts(
   };
 
   for (const port of ports) {
+    if (blockedOffsetKeys && blockedOffsetKeys.has(`${port.offset.x},${port.offset.y}`)) {
+      continue;
+    }
     if (baseCol != null && baseRow != null) {
       const tileX = baseCol + port.offset.x;
       const tileY = baseRow + port.offset.y;
@@ -4083,7 +4098,8 @@ function drawPlacementPortTileHighlights(
   originX = 0,
   originY = 0,
   baseCol = null,
-  baseRow = null
+  baseRow = null,
+  blockedOffsetKeys = null
 ) {
   const colorForKind = (kind) => {
     if (kind === "input") return [255, 170, 0];
@@ -4093,6 +4109,9 @@ function drawPlacementPortTileHighlights(
 
   noStroke();
   for (const port of ports) {
+    if (blockedOffsetKeys && blockedOffsetKeys.has(`${port.offset.x},${port.offset.y}`)) {
+      continue;
+    }
     if (baseCol != null && baseRow != null) {
       const tileX = baseCol + port.offset.x;
       const tileY = baseRow + port.offset.y;
@@ -4155,9 +4174,20 @@ function drawBuildingPlacementHologram(
   const footprintWidth = footprintWidthTiles * tileSize;
   const footprintHeight = footprintHeightTiles * tileSize;
   const ports = getPlacementPreviewPorts(entityType, previewOptions);
+  const footprintOffsetKeySet = new Set(
+    footprintOffsets.map((offset) => `${offset.x},${offset.y}`)
+  );
 
   if (ports.length) {
-    drawPlacementPortTileHighlights(ports, tileSize, cx, cy, baseCol, baseRow);
+    drawPlacementPortTileHighlights(
+      ports,
+      tileSize,
+      cx,
+      cy,
+      baseCol,
+      baseRow,
+      footprintOffsetKeySet
+    );
   }
 
   push();
@@ -4264,7 +4294,8 @@ function drawBuildingPlacementHologram(
       baseCol,
       baseRow,
       entityType,
-      previewOptions.facing
+      previewOptions.facing,
+      footprintOffsetKeySet
     );
   }
   textStyle(NORMAL);
@@ -5135,6 +5166,23 @@ function placeSelectedEntityAtMouse() {
     options
   );
 
+  const canPlaceTubeOnConstructorOutputPort = (targetX, targetY, occupiedEntityId) => {
+    if (type !== ENTITY_TYPES.TUBE || occupiedEntityId == null) {
+      return false;
+    }
+    const occupiedEntity = getEntityById(entities, occupiedEntityId);
+    if (!occupiedEntity || occupiedEntity.type !== ENTITY_TYPES.CONSTRUCTOR) {
+      return false;
+    }
+    const ports = getEntityConnectionPorts(occupiedEntity);
+    return ports.some(
+      (port) =>
+        port.kind === "output" &&
+        port.worldX === targetX &&
+        port.worldY === targetY
+    );
+  };
+
   for (const entry of footprintTiles) {
     if (
       entry.x < 0 ||
@@ -5149,7 +5197,10 @@ function placeSelectedEntityAtMouse() {
       return;
     }
     const occupiedTile = map.tiles[entry.y][entry.x];
-    if (occupiedTile.entityId !== null) {
+    if (
+      occupiedTile.entityId !== null &&
+      !canPlaceTubeOnConstructorOutputPort(entry.x, entry.y, occupiedTile.entityId)
+    ) {
       return;
     }
   }

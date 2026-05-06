@@ -179,8 +179,8 @@ const ENTITY_PORT_DEFS = {
     { name: "output", kind: "output", offset: { x: 1, y: 1 } }
   ],
   [ENTITY_TYPES.CONSTRUCTOR]: [
-    { name: "input", kind: "input", offset: { x: 0, y: -1 } },
-    { name: "input", kind: "input", offset: { x: 0, y: 1 } },
+    { name: "input", kind: "input", offset: { x: 0, y: -2 } },
+    { name: "input", kind: "input", offset: { x: 0, y: 2 } },
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.MERGER]: [
@@ -212,6 +212,11 @@ const ENTITY_PORT_DEFS = {
 };
 
 const ENTITY_FOOTPRINT_DEFS = {
+  [ENTITY_TYPES.CONSTRUCTOR]: [
+    { x: 0, y: -1 },
+    { x: 0, y: 0 },
+    { x: 0, y: 1 }
+  ],
   [ENTITY_TYPES.SMELTER]: [
     { x: 0, y: 0 },
     { x: 0, y: 1 }
