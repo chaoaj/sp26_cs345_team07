@@ -16,6 +16,9 @@ let sideBarFrameImg, sideBarTabOpen, sideBarTabClosed;
 let creditsButtonSettings, backButtonCredits;
 let creditsScrollY = 600;
 
+let helpButton;
+let showHelpMenu = false;
+
 let ironOre = 0, ironBar = 0, ironPlate = 0;
 let copperOre = 0, copperBar = 0, copperPlate = 0, copperWire = 0;
 let helium = 0, rocketFuel = 0;
@@ -325,6 +328,9 @@ function setup() {
     });
   }
 
+  helpButton = new Button(width - 160, 10, 40, 40, "?", () => {
+    showHelpMenu = !showHelpMenu;
+  });
   startButton = new Button (90, 350, 150, 55, "Start", () => {
     currentState = "GAME";
   });
@@ -479,14 +485,11 @@ function drawMenu() {
   pop();
 }
 
-// FIXED: Text now scrolls entirely off the screen and gracefully returns to the Main Menu!
 function drawCredits() {
   background(10, 10, 15);
   
-  // Let the global scroll value decrease forever
   creditsScrollY -= 1; 
   
-  // Draw gently scrolling parallax stars background
   push();
   noStroke();
   for (let star of stars) {
@@ -496,13 +499,11 @@ function drawCredits() {
     fill(255, star.alpha);
     ellipse(sx, sy, star.r, star.r);
   }
-  pop();
 
-  // Draw Scrolling Text
+  pop();
   push();
   textAlign(CENTER, TOP);
   
-  // No more max() clamping! Let the text follow the scroll infinitely
   let y = creditsScrollY;
   
   textSize(36);
@@ -536,10 +537,21 @@ function drawCredits() {
   textSize(20);
   fill(150, 180, 240);
   text("Music", width/2, y);
-  y += 30;
+  y += 50;
   textSize(24);
   fill(255);
   text("Jack Devitt", width/2, y);
+  y += 45;
+  text("John Rosario Cruz", width/2, y);
+  y += 80;
+
+  textSize(20);
+  fill(150, 180, 240);
+  text("Graphics", width/2, y);
+  y += 50;
+  textSize(24);
+  fill(255);
+  text("Will Vinson", width/2, y);
   y += 80;
 
   textSize(16);
@@ -548,7 +560,6 @@ function drawCredits() {
 
   pop();
   
-  // Once the final text clears the top of the canvas, automatically return to the menu
   if (creditsScrollY < -600) {
     currentState = "MENU";
   }
@@ -1030,6 +1041,67 @@ push();
   drawActiveTubeFlowTooltip();
   drawRocketHoverTooltip();
   updatePlayerAnimation();
+  if (helpButton) helpButton.draw();
+  if (showHelpMenu) drawHelpMenu();
+}
+
+function drawHelpMenu() {
+  push();
+  fill(25, 25, 30, 220);
+  noStroke();
+  rect(0, 0, width, height);
+
+  // Draw the menu box
+  fill(40, 40, 50, 240);
+  stroke(80, 80, 100);
+  strokeWeight(2);
+  let boxW = 340;
+  let boxH = 320;
+  rect(width / 2 - boxW / 2, height / 2 - boxH / 2, boxW, boxH, 8);
+
+  // Menu Title
+  fill(240, 240, 255);
+  noStroke();
+  textSize(22);
+  textStyle(BOLD);
+  textAlign(CENTER, TOP);
+  text("Controls & Keybinds", width / 2, height / 2 - boxH / 2 + 20);
+
+  // Keybind List
+  textSize(14);
+  textStyle(NORMAL);
+  textAlign(LEFT, TOP);
+  let startX = width / 2 - 130;
+  let startY = height / 2 - boxH / 2 + 70;
+  let lh = 26;
+
+  fill(200, 210, 230);
+  text("W, A, S, D", startX, startY);
+  text("1 - 6", startX, startY + lh);
+  text("Click", startX, startY + lh * 2);
+  text("R", startX, startY + lh * 3);
+  text("C", startX, startY + lh * 4);
+  text("X", startX, startY + lh * 5);
+  text("O", startX, startY + lh * 6);
+  text("I", startX, startY + lh * 7);
+
+  fill(255);
+  startX += 90;
+  text("-  Move Player", startX, startY);
+  text("-  Select Hotbar Item", startX, startY + lh);
+  text("-  Place Selected Item", startX, startY + lh * 2);
+  text("-  Rotate Item / Building", startX, startY + lh * 3);
+  text("-  Toggle Tube Shape (Corner/Straight)", startX, startY + lh * 4);
+  text("-  Delete Building Under Mouse", startX, startY + lh * 5);
+  text("-  Turn Building On / Off", startX, startY + lh * 6);
+  text("-  Inspect Building (Dev Console)", startX, startY + lh * 7);
+
+  // Footer instruction
+  textAlign(CENTER, BOTTOM);
+  textSize(12);
+  fill(150, 160, 180);
+  text("Click the '?' button again to close", width / 2, height / 2 + boxH / 2 - 15);
+  pop();
 }
 
 function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourceNodeBlock2x2) {
@@ -5137,7 +5209,6 @@ function drawHotbar() {
   pop();
 }
 
-// FIXED: Routed the click detection for the Credits button to the SETTINGS state
 function mousePressed() {
   requestBackgroundMusicStart();
   if (currentState == "MENU") {
@@ -5155,6 +5226,14 @@ function mousePressed() {
   }
 
   if (currentState != "GAME") return;
+
+  if (helpButton && helpButton.isHovered()) {
+    helpButton.checkClick();
+    return;
+  }
+  if (showHelpMenu) {
+    return;
+  }
 
   let tabW = 25;
   let tabH = 60;
