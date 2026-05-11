@@ -13,6 +13,9 @@ let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
 let heliumImg, modularComponentImg, rocketFuelImg, electronicsImg, shipAlloyImg;
 let sideBarFrameImg, sideBarTabOpen, sideBarTabClosed;
 
+let creditsButtonSettings, backButtonCredits;
+let creditsScrollY = 600;
+
 let ironOre = 0, ironBar = 0, ironPlate = 0;
 let copperOre = 0, copperBar = 0, copperPlate = 0, copperWire = 0;
 let helium = 0, rocketFuel = 0;
@@ -306,16 +309,16 @@ function requestBackgroundMusicStart() {
   playBackgroundMusicTrack(0);
 }
 
-
+// FIXED: Moved Credits button initialization to the Settings menu layout and restored Quit button position
 function setup() {
   canvas = createCanvas(600, 600);
   centerCanvas();
   textAlign(CENTER, CENTER);
 
   stars = [];
-  for (let i = 0; i < 1200; i++) {
+  for (let i = 0; i < 400; i++) {
     stars.push({
-      x: random(0, 2000), // Random starting seed pool
+      x: random(0, 2000), 
       y: random(0, 2000),
       r: random(1, 3),
       alpha: random(100, 255)
@@ -336,14 +339,26 @@ function setup() {
     currentState = "MENU";
   });
   testEndGameButton = new Button(140, 20, 120, 40, "Test End", () => {
-    currentState = "ENDGAME";
+    currentState = "CREDITS";
+    creditsScrollY = height;
   });
-  backButtonSettings = new Button(250, 430, 100, 40, "<- Return", () => {
+  
+  // Positioned side-by-side at the bottom of the settings panel
+  backButtonSettings = new Button(180, 430, 110, 40, "<- Return", () => {
     currentState = "MENU";
   });
+  creditsButtonSettings = new Button(310, 430, 110, 40, "Credits", () => {
+    currentState = "CREDITS";
+    creditsScrollY = height;
+  });
+  
+  backButtonCredits = new Button(30, 20, 100, 40, "<-- Back", () => {
+    currentState = "MENU";
+  });
+  
   setupSettings();
   bootstrapBackgroundMusic();
-};
+}
 
 function preload() {
   bgTiles[0] = loadImage('resources/tiles/tile1.png');
@@ -427,14 +442,15 @@ function draw() {
     background(0);
     drawGame();
     hideSettingsUI();
-  } else if (currentState == "ENDGAME") {
-    drawEndGame();
+  } else if (currentState == "CREDITS") {
+    drawCredits();
     hideSettingsUI();
   } else if (currentState == "SETTINGS") {
     drawSettings();
   }
 }
 
+// FIXED: Removed the Credits button from the main menu rendering
 function drawMenu() {
   if (titlePage) {
     image(titlePage, 0, 0, width, height);
@@ -445,27 +461,102 @@ function drawMenu() {
   stroke(0);
   strokeWeight(3);
 
-  startButton.draw();
-  settingsButton.draw();
-  escapeButton.draw();
+  if (startButton) startButton.draw();
+  if (settingsButton) settingsButton.draw();
+  if (escapeButton) escapeButton.draw();
 
-  rect(
-    startButton.x,
-    startButton.y,
-    startButton.w,
-    (escapeButton.y + escapeButton.h) - startButton.y,
-    2
-  );
+  if (startButton && escapeButton) {
+    rect(
+      startButton.x,
+      startButton.y,
+      startButton.w,
+      (escapeButton.y + escapeButton.h) - startButton.y,
+      2
+    );
+  }
 
-  rect(
-    settingsButton.x,
-    settingsButton.y,
-    settingsButton.w,
-    55,
-    2
-  );
+  if (settingsButton) {
+    rect(settingsButton.x, settingsButton.y, settingsButton.w, 55, 2);
+  }
 
   pop();
+}
+
+// FIXED: Text now scrolls entirely off the screen and gracefully returns to the Main Menu!
+function drawCredits() {
+  background(10, 10, 15);
+  
+  // Let the global scroll value decrease forever
+  creditsScrollY -= 1; 
+  
+  // Draw gently scrolling parallax stars background
+  push();
+  noStroke();
+  for (let star of stars) {
+    let sx = star.x % width;
+    let sy = (star.y + (height - creditsScrollY) * 0.2) % height; 
+    if (sy < 0) sy += height;
+    fill(255, star.alpha);
+    ellipse(sx, sy, star.r, star.r);
+  }
+  pop();
+
+  // Draw Scrolling Text
+  push();
+  textAlign(CENTER, TOP);
+  
+  // No more max() clamping! Let the text follow the scroll infinitely
+  let y = creditsScrollY;
+  
+  textSize(36);
+  textStyle(BOLD);
+  fill(235, 242, 255);
+  text("ROCKET LAUNCH SUCCESSFUL", width/2, y);
+  y += 100;
+  
+  textSize(28);
+  fill(200, 214, 245);
+  text("CREDITS", width/2, y);
+  y += 80;
+  
+  textSize(20);
+  fill(150, 180, 240);
+  text("Developers", width/2, y);
+  y += 50;
+  textSize(24);
+  fill(255);
+  text("Danial Abbasi", width/2, y);
+  y += 45;
+  text("John Rosario Cruz", width/2, y);
+  y += 45;
+  text("Samuel Bohdan", width/2, y);
+  y += 45;
+  text("Steven Lorence", width/2, y);
+  y += 45;
+  text("Will Vinson", width/2, y);
+  y += 80;
+
+  textSize(20);
+  fill(150, 180, 240);
+  text("Music", width/2, y);
+  y += 30;
+  textSize(24);
+  fill(255);
+  text("Jack Devitt", width/2, y);
+  y += 80;
+
+  textSize(16);
+  fill(200, 214, 245);
+  text("Thank you for playing!", width/2, y);
+
+  pop();
+  
+  // Once the final text clears the top of the canvas, automatically return to the menu
+  if (creditsScrollY < -600) {
+    currentState = "MENU";
+  }
+  
+  if (backButtonCredits) backButtonCredits.draw();
 }
 
 function getRocketFootprintTiles(centerTileX, centerTileY) {
@@ -833,6 +924,7 @@ function drawGame() {
   updateRestrictedModeShuttleIntake(entities, dt);
   if (updateRocketConstructionProgress(entities, dt)) {
     currentState = "ENDGAME";
+    creditsScrollY = height;
     return;
   }
 
@@ -2013,8 +2105,6 @@ function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterS
   const manualOffset = getSmelterManualPixelOffset(facing);
   const spriteX = round(px + (drawWidth - targetWidth) / 2 + manualOffset.xOffsetPx);
   const spriteY = round(py + drawHeight - targetHeight + manualOffset.yOffsetPx);
-  // West uses the same side asset orientation as East; only ports are reversed
-  // through entity facing/port rotation logic.
   const shouldMirrorWest = false;
   const srcX = min(frameIndex * frameW, max(0, sprite.width - frameW));
 
@@ -2148,7 +2238,12 @@ function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha =
   const shouldMirrorWest = !!options.mirrorWest && (facing || "E") === "W";
 
   imageMode(CORNER);
-  noTint();
+  if (alpha < 255) {
+    tint(255, alpha);
+  } else {
+    noTint();
+  }
+
   if (shouldMirrorWest) {
     push();
     translate(spriteX + targetWidth / 2, 0);
@@ -2192,14 +2287,17 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   const visualScale = 2;
   const targetWidth = round(sprite.width * visualScale);
   const targetHeight = round(sprite.height * visualScale);
-  // Render exact PNG pixels (no scaling). Anchor to footprint base so any
-  // excess height naturally overhangs upward.
   const spriteX = round(px + (drawWidth - targetWidth) / 2);
   const spriteY = round(py + drawHeight - targetHeight);
   const shouldMirrorWest = !!options.mirrorWest && (facing || "E") === "W";
 
   imageMode(CORNER);
-  noTint();
+  if (alpha < 255) {
+    tint(255, alpha);
+  } else {
+    noTint();
+  }
+
   if (shouldMirrorWest) {
     push();
     translate(spriteX + targetWidth / 2, 0);
@@ -3346,8 +3444,9 @@ function drawSettings() {
   stroke(0);
   strokeWeight(2);
   pop();
-  backButtonSettings.draw();
-  drawSettingsUI();
+  if (backButtonSettings) backButtonSettings.draw();
+  if (creditsButtonSettings) creditsButtonSettings.draw();
+  if (typeof drawSettingsUI === "function") drawSettingsUI();
 }
 
 function sideBarText(resource) {
@@ -3468,9 +3567,47 @@ function isMouseOverSidebarResourceIcon() {
   return !!getHoveredSidebarResourceItem();
 }
 
+// FIXED: Added a custom override just for Helium-3 to display text instead of a recipe!
 function drawSidebarResourceHoverTooltip(hoveredItem) {
   if (!hoveredItem || !hoveredItem.resourceType) {
     return false;
+  }
+
+  //for helium3, instead of showing recipes (since there are none)
+  if (hoveredItem.resourceType === RESOURCE_TYPES.HELIUM3) {
+    const msg = "Used in rocket fuel.";
+    push();
+    textAlign(LEFT, TOP);
+    textSize(12);
+    textStyle(BOLD);
+    
+    const pad = 8;
+    const textH = textAscent() + textDescent();
+    const boxW = textWidth(msg) + pad * 2;
+    const boxH = textH + pad * 2;
+
+    let bx = mouseX + 14;
+    let by = mouseY + 14;
+    if (bx + boxW > width - 6) {
+      bx = mouseX - boxW - 14;
+    }
+    if (by + boxH > height - 6) {
+      by = mouseY - boxH - 14;
+    }
+    bx = constrain(bx, 6, width - boxW - 6);
+    by = constrain(by, 6, height - boxH - 6);
+
+    fill(252, 252, 255, 248);
+    stroke(55, 55, 68);
+    strokeWeight(1);
+    rect(bx, by, boxW, boxH, 5);
+
+    noStroke();
+    fill(28, 28, 36);
+    text(msg, bx + pad, by + pad);
+    pop();
+    
+    return true;
   }
 
   const uses = getSidebarResourceBuildUses(hoveredItem.resourceType);
@@ -4213,17 +4350,9 @@ function drawPlacementPortTileHighlights(
   }
 }
 
+// FIXED: Unified the fade for all sprites to 150, and restored the pulsing border for generic buildings!
 function drawBuildingPlacementHologram(
-  px,
-  py,
-  tileSize,
-  colorRgb,
-  label,
-  facing,
-  entityType,
-  options,
-  baseCol = null,
-  baseRow = null
+  px, py, tileSize, colorRgb, label, facing, entityType, options, baseCol = null, baseRow = null
 ) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
@@ -4247,7 +4376,6 @@ function drawBuildingPlacementHologram(
   }
   const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
   const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
-  // Offsets are in tile-center coordinates; convert to local rect top-left.
   const footprintLeft = (minOffsetX - 0.5) * tileSize;
   const footprintTop = (minOffsetY - 0.5) * tileSize;
   const footprintWidth = footprintWidthTiles * tileSize;
@@ -4275,6 +4403,9 @@ function drawBuildingPlacementHologram(
     entityType === ENTITY_TYPES.MINER &&
     minerSpriteSheetImg &&
     minerSpriteSheetImg.width > 0;
+  const useSmelterHologram = 
+    entityType === ENTITY_TYPES.SMELTER &&
+    getSmelterSpriteForFacing(previewFacing);
   const useSplitterHologram =
     entityType === ENTITY_TYPES.SPLITTER &&
     getSplitterSpriteForFacing(previewFacing, { preferSideForEast: true });
@@ -4312,7 +4443,6 @@ function drawBuildingPlacementHologram(
   }
 
   if (useMinerOffHologram) {
-    // Match the off-state miner visual (frame 8 / index 7).
     const frameW = 18;
     const frameH = 32;
     const totalFrames = max(1, floor(minerSpriteSheetImg.width / frameW));
@@ -4323,7 +4453,7 @@ function drawBuildingPlacementHologram(
     const spriteBottomY = footprintTop + footprintHeight - 1;
     const spriteY = spriteBottomY - spriteHeight - 6;
     imageMode(CORNER);
-    tint(255, 225);
+    tint(255, previewAlpha);
     image(
       minerSpriteSheetImg,
       spriteX,
@@ -4337,6 +4467,7 @@ function drawBuildingPlacementHologram(
     );
     noTint();
   } else if (useSmelterHologram) {
+    tint(255, previewAlpha);
     drawPlacedSmelterSprite(
       footprintLeft,
       footprintTop,
@@ -4354,7 +4485,7 @@ function drawBuildingPlacementHologram(
       footprintWidth,
       footprintHeight,
       previewFacing,
-      225,
+      previewAlpha,
       { preferSideForEast: true, mirrorWest: true }
     );
   } else if (useMergerHologram) {
@@ -4364,7 +4495,7 @@ function drawBuildingPlacementHologram(
       footprintWidth,
       footprintHeight,
       previewFacing,
-      225,
+      previewAlpha,
       { preferSideForEast: true, mirrorWest: true }
     );
   } else if (useConstructorHologram) {
@@ -4384,12 +4515,12 @@ function drawBuildingPlacementHologram(
       footprintWidth,
       footprintHeight,
       previewOptions,
-      225,
+      previewAlpha,
       baseCol,
       baseRow
     );
   } else {
-    fill(35, 35, 42, 200);
+    fill(35, 35, 42, 240);
     noStroke();
     textSize(14);
     textStyle(BOLD);
@@ -5209,26 +5340,28 @@ function drawHotbar() {
   pop();
 }
 
+// FIXED: Routed the click detection for the Credits button to the SETTINGS state
 function mousePressed() {
   requestBackgroundMusicStart();
   if (currentState == "MENU") {
-    startButton.checkClick();
-    settingsButton.checkClick();
-    escapeButton.checkClick();
+    if (startButton) startButton.checkClick();
+    if (settingsButton) settingsButton.checkClick();
+    if (escapeButton) escapeButton.checkClick();
     return;
   } else if (currentState == "SETTINGS") {
-    backButtonSettings.checkClick();
+    if (backButtonSettings) backButtonSettings.checkClick();
+    if (creditsButtonSettings) creditsButtonSettings.checkClick();
+    return;
+  } else if (currentState == "CREDITS") {
+    if (backButtonCredits) backButtonCredits.checkClick();
     return;
   }
 
   if (currentState != "GAME") return;
 
-  // Sidebar tab
   let tabW = 25;
   let tabH = 60;
   let tabX = sidebarX + sidebarWidth;
-  
-  // Sidebar fix
   let mapY = drawGame.state ? drawGame.state.config.topMargin : 80;
   let tabY = 425 / 2 - tabH / 2 + mapY;
   
@@ -5237,22 +5370,19 @@ function mousePressed() {
     return;
   }
 
-  // UI back button
-  if (backButtonGame.isHovered()) {
+  if (backButtonGame && backButtonGame.isHovered()) {
     backButtonGame.checkClick();
     return;
   }
-  if (testEndGameButton.isHovered()) {
+  if (testEndGameButton && testEndGameButton.isHovered()) {
     testEndGameButton.checkClick();
     return;
   }
 
-  // Prevent accidentally placing buildings when clicking the hotbar/minimap
   if (isMouseOverHotbarArea() || isPointerOverMinimap()) {
     return;
   }
 
-  // Try to place an entity
   placeSelectedEntityAtMouse();
 }
 
@@ -5554,7 +5684,7 @@ function tryApplyNonTubeFacing(entity, nextFacing) {
 
 function keyPressed() {
   requestBackgroundMusicStart();
-  if (currentState === "ENDGAME") {
+  if (currentState === "CREDITS" || currentState === "ENDGAME") {
     if (keyCode === ENTER || key === " " || keyCode === ESCAPE) {
       currentState = "MENU";
     }
@@ -5694,7 +5824,6 @@ function deleteEntityUnderMouse() {
   }
 
   if (targetId != null) {
-    const targetEntity = entities.find((entry) => entry.id === targetId) || null;
     // Rocket is pre-placed and should not be removable.
     if (targetEntity && targetEntity.type === ENTITY_TYPES.ROCKET_SITE) {
       return;
@@ -5708,12 +5837,17 @@ function deleteEntityUnderMouse() {
       }
       entities.splice(index, 1);
     }
+    
     if (targetEntity) {
+      // FIXED: Pass facing and state here so the correct footprint is cleared!
       const footprintTiles = getSafeFootprintTilesAt(
         targetEntity.type,
         targetEntity.tileX,
-        targetEntity.tileY
+        targetEntity.tileY,
+        targetEntity.state?.facing || "E",
+        targetEntity.state
       );
+      
       for (const entry of footprintTiles) {
         const tile = map.tiles[entry.y]?.[entry.x];
         if (!tile || tile.entityId !== targetId) continue;
