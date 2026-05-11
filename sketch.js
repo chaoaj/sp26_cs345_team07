@@ -1,6 +1,6 @@
 // sketch.js
 let currentState = "MENU";
-let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton;
+let startButton, settingsButton, backButtonGame, testEndGameButton, backButtonSettings, escapeButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 6;
@@ -22,7 +22,8 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg;
+let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
+let ironDepositImg, copperDepositImg, heliumDepositImg;
 
 let bgTiles = [];
 let stars = [];
@@ -32,6 +33,8 @@ let currentAnimation = "idle";
 let currentFrame = 0;
 let facingLeft = false;
 const animationFPS = 10;
+const ROCKET_HALF_WIDTH_TILES = 1;   // 3 tiles wide
+const ROCKET_HALF_HEIGHT_TILES = 2;  // 5 tiles tall
 
 const spriteDimensions = {
   front: {
@@ -109,6 +112,200 @@ let sidebarMaxVisibleItems = 12;
 const RESTRICTED_SHUTTLE_COL = 25;
 const RESTRICTED_SHUTTLE_ROW = 6;
 
+// Manual per-facing pixel offsets for corner tube sprites.
+// Adjust x/y here as needed; defaults are intentionally zero.
+const CORNER_TUBE_MANUAL_PIXEL_OFFSETS = {
+  E: { x: 1, y: 0 },
+  S: { x: 1, y: 0 },
+  W: { x: 0, y: 0 },
+  N: { x: 0, y: 0 }
+};
+
+// Manual per-facing pixel offsets for smelter sprites.
+// Shift left by 1px by default for all facings.
+const SMELTER_MANUAL_PIXEL_OFFSETS = {
+  E: { x: -3, y: 0 },
+  S: { x: 0, y: -1 },
+  W: { x: -3, y: 0 },
+  N: { x: 0, y: -1 }
+};
+
+// Base orientation transform for corner tube facings.
+const CORNER_TUBE_BASE_VISUAL_TRANSFORMS = Object.freeze({
+  E: Object.freeze({ angle: 0, mirrorX: false }),
+  S: Object.freeze({ angle: 0, mirrorX: true }),
+  W: Object.freeze({ angle: 0, mirrorX: false }),
+  N: Object.freeze({ angle: 0, mirrorX: true })
+});
+
+const BACKGROUND_MUSIC_SEQUENCE = Object.freeze([
+  Object.freeze({
+    title: "Dance of the Moon Rocks",
+    file: "resources/music/Dance of the Moon Rocks.m4a",
+    postDelayMs: 2 * 60 * 1000
+  }),
+  Object.freeze({
+    title: "Lunar Blues",
+    file: "resources/music/Lunar Blues.m4a",
+    postDelayMs: () => randomIntInRange(2 * 60 * 1000, 4 * 60 * 1000)
+  })
+]);
+
+let backgroundMusicPlayers = [];
+let backgroundMusicBootstrapped = false;
+let backgroundMusicStarted = false;
+let backgroundMusicCurrentIndex = -1;
+let backgroundMusicTimerId = null;
+let backgroundMusicScheduleToken = 0;
+let backgroundMusicLastVolume = null;
+let backgroundMusicWarnedMissing = false;
+
+function randomIntInRange(minInclusive, maxInclusive) {
+  const min = Number(minInclusive) || 0;
+  const max = Number(maxInclusive) || min;
+  if (max <= min) return Math.floor(min);
+  const delta = max - min;
+  return Math.floor(min + Math.random() * (delta + 1));
+}
+
+function getMusicSliderVolume() {
+  const raw = Number(typeof musicVolume === "number" ? musicVolume : 0.5);
+  if (!Number.isFinite(raw)) return 0.5;
+  return Math.max(0, Math.min(1, raw));
+}
+
+function applyBackgroundMusicVolume() {
+  const volume = getMusicSliderVolume();
+  if (backgroundMusicLastVolume === volume) {
+    return;
+  }
+  backgroundMusicLastVolume = volume;
+  for (const track of backgroundMusicPlayers) {
+    if (track?.audio) {
+      track.audio.volume = volume;
+    }
+  }
+}
+
+function bootstrapBackgroundMusic() {
+  if (backgroundMusicBootstrapped) {
+    return;
+  }
+  backgroundMusicBootstrapped = true;
+  backgroundMusicPlayers = BACKGROUND_MUSIC_SEQUENCE.map((entry, index) => {
+    const audio = new Audio(entry.file);
+    audio.preload = "auto";
+    audio.loop = false;
+    audio.volume = getMusicSliderVolume();
+    audio.addEventListener("ended", () => {
+      onBackgroundMusicTrackEnded(index);
+    });
+    audio.addEventListener("error", () => {
+      if (!backgroundMusicWarnedMissing) {
+        console.warn(
+          "Background music file missing/unloadable. " +
+          "Add .m4a files under resources/music/."
+        );
+        backgroundMusicWarnedMissing = true;
+      }
+    });
+    return { ...entry, audio };
+  });
+}
+
+function resolveTrackPostDelayMs(track) {
+  if (!track) return 0;
+  if (typeof track.postDelayMs === "function") {
+    const v = Number(track.postDelayMs());
+    return Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+  }
+  const fixed = Number(track.postDelayMs);
+  return Number.isFinite(fixed) ? Math.max(0, Math.floor(fixed)) : 0;
+}
+
+function clearBackgroundMusicTimer() {
+  if (backgroundMusicTimerId != null) {
+    clearTimeout(backgroundMusicTimerId);
+    backgroundMusicTimerId = null;
+  }
+}
+
+function scheduleBackgroundMusicTrack(index, delayMs) {
+  clearBackgroundMusicTimer();
+  const safeDelay = Math.max(0, Number(delayMs) || 0);
+  const token = ++backgroundMusicScheduleToken;
+  backgroundMusicTimerId = setTimeout(() => {
+    if (token !== backgroundMusicScheduleToken) {
+      return;
+    }
+    playBackgroundMusicTrack(index);
+  }, safeDelay);
+}
+
+function onBackgroundMusicTrackEnded(endedIndex) {
+  if (!backgroundMusicStarted || endedIndex !== backgroundMusicCurrentIndex) {
+    return;
+  }
+  const track = backgroundMusicPlayers[endedIndex];
+  const waitMs = resolveTrackPostDelayMs(track);
+  const nextIndex = (endedIndex + 1) % backgroundMusicPlayers.length;
+  scheduleBackgroundMusicTrack(nextIndex, waitMs);
+}
+
+function playBackgroundMusicTrack(index) {
+  if (!backgroundMusicPlayers.length) {
+    return;
+  }
+
+  const safeIndex = ((index % backgroundMusicPlayers.length) + backgroundMusicPlayers.length) % backgroundMusicPlayers.length;
+  backgroundMusicCurrentIndex = safeIndex;
+  applyBackgroundMusicVolume();
+
+  for (let i = 0; i < backgroundMusicPlayers.length; i++) {
+    const other = backgroundMusicPlayers[i]?.audio;
+    if (!other || i === safeIndex) {
+      continue;
+    }
+    if (!other.paused) {
+      other.pause();
+    }
+    if (other.currentTime !== 0) {
+      other.currentTime = 0;
+    }
+  }
+
+  const activeTrack = backgroundMusicPlayers[safeIndex];
+  const activeAudio = activeTrack?.audio;
+  if (!activeAudio) {
+    return;
+  }
+
+  activeAudio.currentTime = 0;
+  const playPromise = activeAudio.play();
+  if (playPromise && typeof playPromise.catch === "function") {
+    playPromise.catch(() => {
+      const waitMs = resolveTrackPostDelayMs(activeTrack);
+      const nextIndex = (safeIndex + 1) % backgroundMusicPlayers.length;
+      scheduleBackgroundMusicTrack(nextIndex, waitMs);
+    });
+  }
+}
+
+function requestBackgroundMusicStart() {
+  bootstrapBackgroundMusic();
+  if (backgroundMusicStarted || backgroundMusicPlayers.length === 0) {
+    return;
+  }
+  backgroundMusicStarted = true;
+  if (typeof userStartAudio === "function") {
+    userStartAudio();
+  }
+  // Start immediately inside the user gesture call stack (click/key),
+  // otherwise browsers may block playback if it runs in a timeout.
+  clearBackgroundMusicTimer();
+  playBackgroundMusicTrack(0);
+}
+
 
 function setup() {
   canvas = createCanvas(600, 600);
@@ -138,10 +335,14 @@ function setup() {
   backButtonGame = new Button(30, 20, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
+  testEndGameButton = new Button(140, 20, 120, 40, "Test End", () => {
+    currentState = "ENDGAME";
+  });
   backButtonSettings = new Button(250, 430, 100, 40, "<- Return", () => {
     currentState = "MENU";
   });
   setupSettings();
+  bootstrapBackgroundMusic();
 };
 
 function preload() {
@@ -151,10 +352,24 @@ function preload() {
   bgTiles[3] = loadImage('resources/tiles/tile4.png');
 
   pipeFrontOffImg = loadImage('resources/pipes/pipeFrontOff.png');
+  pipeFrontOnImg = loadImage('resources/pipes/pipeFrontOn.png');
   pipeCurve1OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
   pipeCurve1OnImg = loadImage('resources/pipes/pipeCurve1On.png');
-  pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve1Off.png');
-  pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve1On.png');
+  pipeCurve2OffImg = loadImage('resources/pipes/pipeCurve2Off.png');
+  pipeCurve2OnImg = loadImage('resources/pipes/pipeCurve2On.png');
+  pipeSideOffImg = loadImage('resources/pipes/pipeSideOff.png');
+  pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
+  pipeSideOnMiniImg = pipeSideOnImg;
+  minerSpriteSheetImg = loadImage('resources/miner/miner.png');
+  smelterFrontImg = loadImage('resources/smelter/smelterFront.png');
+  smelterSideImg = loadImage('resources/smelter/smelterSide.png');
+  smelterBackImg = loadImage('resources/smelter/smelterBack.png');
+  splitterFrontImg = loadImage('resources/splitter/merger/splitterFront.png');
+  splitterBackImg = loadImage('resources/splitter/merger/splitterBack.png');
+  splitterSideImg = loadImage('resources/splitter/merger/splitterSide.png');
+  mergerFrontImg = loadImage('resources/splitter/merger/mergerFront.png');
+  mergerBackImg = loadImage('resources/splitter/merger/mergerBack.png');
+  mergerSideImg = loadImage('resources/splitter/merger/mergerSide.png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -183,7 +398,7 @@ function preload() {
   hotbarOutlineImg = loadImage('resources/UI/hotbarFrame.png');
   copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
   ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
-  // heliumDepositImg = loadImage();
+  heliumDepositImg = loadImage('resources/resourceNodes/helium3Deposit.png');
 }
 
 function centerCanvas() {
@@ -200,6 +415,7 @@ function windowResized() {
 }
 
 function draw() {
+  applyBackgroundMusicVolume();
   cursor('default');
   if (currentState == "MENU") {
     drawMenu();
@@ -207,6 +423,9 @@ function draw() {
   } else if (currentState == "GAME") {
     background(0);
     drawGame();
+    hideSettingsUI();
+  } else if (currentState == "ENDGAME") {
+    drawEndGame();
     hideSettingsUI();
   } else if (currentState == "SETTINGS") {
     drawSettings();
@@ -246,6 +465,38 @@ function drawMenu() {
   pop();
 }
 
+function getRocketFootprintTiles(centerTileX, centerTileY) {
+  const tiles = [];
+  for (let dy = -ROCKET_HALF_HEIGHT_TILES; dy <= ROCKET_HALF_HEIGHT_TILES; dy++) {
+    for (let dx = -ROCKET_HALF_WIDTH_TILES; dx <= ROCKET_HALF_WIDTH_TILES; dx++) {
+      tiles.push({
+        x: centerTileX + dx,
+        y: centerTileY + dy,
+        isCenter: dx === 0 && dy === 0
+      });
+    }
+  }
+  return tiles;
+}
+
+function drawEndGame() {
+  background(20, 28, 44);
+
+  push();
+  fill(235, 242, 255);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(44);
+  text("Rocket Completed!", width / 2, height / 2 - 40);
+  textStyle(NORMAL);
+  textSize(18);
+  text("End-game screen stub", width / 2, height / 2 + 6);
+  textSize(14);
+  fill(200, 214, 245);
+  text("Press Enter, Space, or Esc to return to menu", width / 2, height / 2 + 44);
+  pop();
+}
+
 function drawGame() {
   const restrictedMode = (typeof isRestrictedModeEnabled === "function")
     ? isRestrictedModeEnabled()
@@ -270,6 +521,9 @@ function drawGame() {
         row.push({
           type: "empty",
           resource: null,
+          resourceNodeId: null,
+          resourceNodeOriginX: null,
+          resourceNodeOriginY: null,
           item: null,
           colorOverride: null,
           entity: null,
@@ -294,41 +548,118 @@ function drawGame() {
       }
     }
 
-    const setResourceNode = (col, row, nodeKey) => {
+    const getNodeResourceType = (nodeKey) => {
+      if (nodeKey === "iron") return RESOURCE_TYPES.IRON_ORE;
+      if (nodeKey === "copper") return RESOURCE_TYPES.COPPER_ORE;
+      if (nodeKey === "helium3") return RESOURCE_TYPES.HELIUM3;
+      return null;
+    };
+    const setResourceNodeTile = (col, row, nodeKey, nodeId, originX, originY) => {
+      if (row < 0 || row >= mapRows || col < 0 || col >= mapCols) {
+        return;
+      }
       const t = tiles[row][col];
       t.type = nodeKey;
-      if (nodeKey === "iron") {
-        t.resource = RESOURCE_TYPES.IRON_ORE;
-      } else if (nodeKey === "copper") {
-        t.resource = RESOURCE_TYPES.COPPER_ORE;
-      } else if (nodeKey === "helium3") {
-        t.resource = RESOURCE_TYPES.HELIUM3;
+      t.resource = getNodeResourceType(nodeKey);
+      t.resourceNodeId = nodeId || null;
+      t.resourceNodeOriginX = Number.isFinite(originX) ? originX : null;
+      t.resourceNodeOriginY = Number.isFinite(originY) ? originY : null;
+    };
+    const placeResourceNodeBlock2x2 = (topLeftCol, topLeftRow, nodeKey) => {
+      if (
+        topLeftCol < 0 ||
+        topLeftCol + 1 >= mapCols ||
+        topLeftRow < 0 ||
+        topLeftRow + 1 >= mapRows
+      ) {
+        return false;
       }
+      const nodeId = `${nodeKey}:${topLeftCol},${topLeftRow}`;
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          setResourceNodeTile(
+            topLeftCol + dx,
+            topLeftRow + dy,
+            nodeKey,
+            nodeId,
+            topLeftCol,
+            topLeftRow
+          );
+        }
+      }
+      return true;
     };
 
     if (restrictedMode) {
-      applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceNode);
+      applyRestrictedModeResourceLayout(
+        tiles,
+        mapCols,
+        mapRows,
+        placeResourceNodeBlock2x2
+      );
     } else {
       // Resource patches for testing in creative mode
-      for (let y = 6; y <= 7; y++) {
-        for (let x = 6; x <= 10; x++) {
-          setResourceNode(x, y, "iron");
-        }
-      }
+      placeResourceNodeBlock2x2(6, 6, "iron");
+      placeResourceNodeBlock2x2(8, 6, "iron");
+      placeResourceNodeBlock2x2(10, 6, "iron");
 
-      for (let y = 10; y <= 12; y++) {
-        for (let x = 12; x <= 16; x++) {
-          setResourceNode(x, y, "copper");
-        }
-      }
+      placeResourceNodeBlock2x2(12, 10, "copper");
+      placeResourceNodeBlock2x2(14, 10, "copper");
+      placeResourceNodeBlock2x2(12, 12, "copper");
+      placeResourceNodeBlock2x2(14, 12, "copper");
 
-      setResourceNode(17, 18, "helium3");
-      setResourceNode(18, 18, "helium3");
-      setResourceNode(17, 19, "helium3");
-      setResourceNode(18, 19, "helium3");
+      placeResourceNodeBlock2x2(17, 18, "helium3");
     }
 
     const entities = [];
+    const rocketMinCenterX = ROCKET_HALF_WIDTH_TILES;
+    const rocketMaxCenterX = mapCols - 1 - ROCKET_HALF_WIDTH_TILES;
+    const rocketMinCenterY = ROCKET_HALF_HEIGHT_TILES;
+    const rocketMaxCenterY = mapRows - 1 - ROCKET_HALF_HEIGHT_TILES;
+    const rocketTileX = constrain(floor(mapCols / 2), rocketMinCenterX, rocketMaxCenterX);
+    const rocketTileY = constrain(
+      mapRows - 1 - ROCKET_HALF_HEIGHT_TILES - 1,
+      rocketMinCenterY,
+      rocketMaxCenterY
+    );
+    const rocketEntity = createEntity(
+      ENTITY_TYPES.ROCKET_SITE,
+      rocketTileX,
+      rocketTileY,
+      {}
+    );
+    rocketEntity.state.facing = "E";
+    rocketEntity.state.isOn = true;
+
+    entities.push(rocketEntity);
+
+    const rocketInputPortSet = new Set(
+      getEntityConnectionPorts(rocketEntity)
+        .filter((port) => port.kind === "input")
+        .map((port) => `${port.worldX},${port.worldY}`)
+    );
+
+    // Occupy a 3x5 footprint centered on the rocket tile.
+    // Leave input-port tiles placeable so tubes can connect on-port.
+    for (const fp of getRocketFootprintTiles(rocketTileX, rocketTileY)) {
+      const row = tiles[fp.y];
+      const tile = row ? row[fp.x] : null;
+      if (!tile) continue;
+      const isRocketInputPort = rocketInputPortSet.has(`${fp.x},${fp.y}`);
+      if (!isRocketInputPort) {
+        tile.entityId = rocketEntity.id;
+        tile.entity = rocketEntity;
+        tile.item = ENTITY_TYPES.ROCKET_SITE;
+      }
+      tile.building = {
+        color: getEntityFillRgb(ENTITY_TYPES.ROCKET_SITE),
+        label: fp.isCenter ? "RO" : "",
+        name: "Rocket Ship",
+        entityType: ENTITY_TYPES.ROCKET_SITE,
+        facing: "E",
+        entityId: rocketEntity.id
+      };
+    }
 
     drawGame.state = {
       config: {
@@ -366,7 +697,8 @@ function drawGame() {
         minimapCols: null,
         minimapRows: null
       },
-      animationTimer: 0
+      animationTimer: 0,
+      restrictedBuildRestrictionsDisabled: false
     };
 
     drawGame.state.isRestrictedMode = restrictedMode;
@@ -375,6 +707,7 @@ function drawGame() {
     if (restrictedMode) {
       spawnRestrictedModeShuttle(drawGame.state);
     }
+    updateConnections(entities);
   }
 
   const { config, map, player, feedback, entities } = drawGame.state;
@@ -453,6 +786,10 @@ function drawGame() {
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
   updateRestrictedModeShuttleIntake(entities, dt);
+  if (updateRocketConstructionProgress(entities, dt)) {
+    currentState = "ENDGAME";
+    return;
+  }
 
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
@@ -495,6 +832,7 @@ push();
   stroke(200);
   strokeWeight(1);
   const portOverlay = new Map();
+  const rocketPortOverlay = new Set();
   const markPort = (x, y, kind) => {
     const key = `${x},${y}`;
     const existing = portOverlay.get(key);
@@ -510,6 +848,9 @@ push();
       : getEntityConnectionPorts(entity);
     for (const port of ports) {
       markPort(port.worldX, port.worldY, port.kind);
+      if (entity.type === ENTITY_TYPES.ROCKET_SITE && port.kind === "input") {
+        rocketPortOverlay.add(`${port.worldX},${port.worldY}`);
+      }
     }
   }
 
@@ -520,10 +861,11 @@ push();
       // FIXED: Only draw the port connection highlights, and make them semi-transparent so the ground shows through!
       // We removed the solid box that used to hide the tiles behind buildings.
       if (portType) {
+        const isRocketInputPort = rocketPortOverlay.has(`${x},${y}`);
         if (portType === "output") {
           fill(70, 200, 90, 120);
         } else if (portType === "input") {
-          fill(80, 130, 230, 120);
+          fill(80, 130, 230, isRocketInputPort ? 48 : 120);
         } else if (portType === "both") {
           fill(60, 190, 190, 120);
         }
@@ -580,8 +922,9 @@ push();
 
   pop();
 
-  drawMiniMap(map, player, config, feedback);
+  drawMiniMap(map, player, config, feedback, entities);
   backButtonGame.draw();
+  testEndGameButton.draw();
   drawHotbar();
   drawSideBar();
   if (drawGame.state.isRestrictedMode) {
@@ -593,11 +936,12 @@ push();
   }
   drawBuildCostFeedbackMessage();
   drawActiveTubeFlowTooltip();
+  drawRocketHoverTooltip();
   updatePlayerAnimation();
 }
 
-function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceNode) {
-  if (!Array.isArray(tiles) || typeof setResourceNode !== "function") {
+function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourceNodeBlock2x2) {
+  if (!Array.isArray(tiles) || typeof placeResourceNodeBlock2x2 !== "function") {
     return;
   }
 
@@ -618,6 +962,9 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceN
     ) {
       tile.resource = null;
     }
+    tile.resourceNodeId = null;
+    tile.resourceNodeOriginX = null;
+    tile.resourceNodeOriginY = null;
   };
 
   for (let y = 0; y < mapRows; y++) {
@@ -636,15 +983,34 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceN
   }
 
   const placeDepositPatch = (centerX, centerY, radiusX, radiusY, type) => {
-    for (let dy = -radiusY; dy <= radiusY; dy++) {
-      for (let dx = -radiusX; dx <= radiusX; dx++) {
-        const x = centerX + dx;
-        const y = centerY + dy;
-        if (!isInside(x, y) || isReserved(x, y)) {
+    const anchorX = centerX - 1;
+    const anchorY = centerY - 1;
+    for (let by = -radiusY; by <= radiusY; by++) {
+      for (let bx = -radiusX; bx <= radiusX; bx++) {
+        const topLeftX = anchorX + bx * 2;
+        const topLeftY = anchorY + by * 2;
+        let canPlace = true;
+        for (let oy = 0; oy < 2 && canPlace; oy++) {
+          for (let ox = 0; ox < 2; ox++) {
+            const x = topLeftX + ox;
+            const y = topLeftY + oy;
+            if (!isInside(x, y) || isReserved(x, y)) {
+              canPlace = false;
+              break;
+            }
+          }
+        }
+        if (!canPlace) {
           continue;
         }
-        setResourceNode(x, y, type);
-        reserve(x, y);
+        if (!placeResourceNodeBlock2x2(topLeftX, topLeftY, type)) {
+          continue;
+        }
+        for (let oy = 0; oy < 2; oy++) {
+          for (let ox = 0; ox < 2; ox++) {
+            reserve(topLeftX + ox, topLeftY + oy);
+          }
+        }
       }
     }
   };
@@ -680,19 +1046,35 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, setResourceN
 
     while (placed < group.count && attempts < maxAttempts) {
       attempts++;
-      const x = Math.floor(Math.random() * mapCols);
-      const y = Math.floor(Math.random() * mapRows);
-      if (!isInside(x, y) || isReserved(x, y)) {
+      const x = Math.floor(Math.random() * (mapCols - 1));
+      const y = Math.floor(Math.random() * (mapRows - 1));
+      let canPlace = true;
+      for (let oy = 0; oy < 2 && canPlace; oy++) {
+        for (let ox = 0; ox < 2; ox++) {
+          const tx = x + ox;
+          const ty = y + oy;
+          if (!isInside(tx, ty) || isReserved(tx, ty)) {
+            canPlace = false;
+            break;
+          }
+          const tile = tiles[ty] && tiles[ty][tx];
+          if (!tile || tile.entityId != null || tile.type !== "empty") {
+            canPlace = false;
+            break;
+          }
+        }
+      }
+      if (!canPlace) {
         continue;
       }
-
-      const tile = tiles[y] && tiles[y][x];
-      if (!tile || tile.entityId != null || tile.type !== "empty") {
+      if (!placeResourceNodeBlock2x2(x, y, group.type)) {
         continue;
       }
-
-      setResourceNode(x, y, group.type);
-      reserve(x, y);
+      for (let oy = 0; oy < 2; oy++) {
+        for (let ox = 0; ox < 2; ox++) {
+          reserve(x + ox, y + oy);
+        }
+      }
       placed++;
     }
   }
@@ -1094,13 +1476,24 @@ function addProducedResource(resourceType, count) {
   }
 }
 
-function getSafeFootprintOffsets(entityType) {
+function getSafeFootprintOffsets(entityType, facing = "E", options = null) {
   const fallback = [{ x: 0, y: 0 }];
   if (typeof getEntityFootprintOffsets !== "function") {
     return fallback;
   }
 
-  const offsets = getEntityFootprintOffsets(entityType);
+  let offsets = null;
+  if (
+    entityType === ENTITY_TYPES.TUBE &&
+    typeof getTubeFootprintOffsets === "function"
+  ) {
+    const tubeShape = (typeof options === "string"
+      ? options
+      : options?.shape) || TUBE_SHAPES.STRAIGHT;
+    offsets = getTubeFootprintOffsets(tubeShape);
+  } else {
+    offsets = getEntityFootprintOffsets(entityType);
+  }
   if (!Array.isArray(offsets) || offsets.length === 0) {
     return fallback;
   }
@@ -1112,11 +1505,15 @@ function getSafeFootprintOffsets(entityType) {
       Number.isFinite(offset.y)
   );
 
-  return normalized.length > 0 ? normalized : fallback;
+  const baseOffsets = normalized.length > 0 ? normalized : fallback;
+  if (facing !== "E" && typeof rotateOffsetFromEast === "function") {
+    return baseOffsets.map((offset) => rotateOffsetFromEast(offset, facing));
+  }
+  return baseOffsets;
 }
 
-function getSafeFootprintTilesAt(entityType, tileX, tileY) {
-  const offsets = getSafeFootprintOffsets(entityType);
+function getSafeFootprintTilesAt(entityType, tileX, tileY, facing = "E", options = null) {
+  const offsets = getSafeFootprintOffsets(entityType, facing, options);
   return offsets.map((offset) => ({
     x: tileX + offset.x,
     y: tileY + offset.y
@@ -1155,6 +1552,80 @@ function updateFactoryProduction(entities, dt) {
     state.productionAccumulator -= produced;
     addProducedResource(state.outputType, produced);
   }
+}
+
+function updateRocketConstructionProgress(entities, dt) {
+  const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
+  if (!rocket || !rocket.state) {
+    return false;
+  }
+
+  const rocketState = rocket.state;
+  if (rocketState.completed) {
+    return true;
+  }
+
+  const required = rocketState.required || {};
+  const delivered = rocketState.delivered || {};
+  const rocketPorts = getEntityConnectionPorts(rocket).filter((port) => port.kind === "input");
+  const portByCoord = new Map();
+  for (const port of rocketPorts) {
+    portByCoord.set(`${port.worldX},${port.worldY}`, port.name);
+  }
+
+  const entitiesById = new Map(entities.map((entity) => [entity.id, entity]));
+  const increments = {
+    [RESOURCE_TYPES.ELECTRONICS]: 0,
+    [RESOURCE_TYPES.SHIP_ALLOY]: 0,
+    [RESOURCE_TYPES.ROCKET_FUEL]: 0
+  };
+
+  for (const tube of entities) {
+    if (tube.type !== ENTITY_TYPES.TUBE) continue;
+    if (tube.state?.toEntityId !== rocket.id) continue;
+    if (!(tube.state?.isConnected)) continue;
+
+    const sourceEntity = entitiesById.get(tube.state.fromEntityId);
+    const outputType = sourceEntity?.state?.outputType || tube.state.carriedItem || null;
+    const outputRate = Number(tube.state.outputRate) || 0;
+    if (!outputType || outputRate <= 0) continue;
+
+    const touchedPortNames = new Set();
+    const tubePortTiles = getTubePortTiles(tube);
+    for (const portTile of tubePortTiles) {
+      const portName = portByCoord.get(`${portTile.worldX},${portTile.worldY}`);
+      if (portName) {
+        touchedPortNames.add(portName);
+      }
+    }
+
+    for (const portName of touchedPortNames) {
+      if (portName === outputType && increments[portName] != null) {
+        increments[portName] += outputRate * dt;
+      }
+    }
+  }
+
+  for (const [resourceType, amount] of Object.entries(increments)) {
+    if (amount <= 0 || required[resourceType] == null) continue;
+    const current = Number(delivered[resourceType]) || 0;
+    delivered[resourceType] = min(required[resourceType], current + amount);
+  }
+
+  const requiredTotal = Object.values(required).reduce((sum, value) => sum + Number(value || 0), 0);
+  const deliveredTotal = Object.entries(required).reduce((sum, [type, value]) => {
+    return sum + min(Number(value || 0), Number(delivered[type] || 0));
+  }, 0);
+  rocketState.buildProgress = requiredTotal > 0 ? deliveredTotal / requiredTotal : 0;
+
+  const complete = Object.entries(required).every(([type, value]) => {
+    return Number(delivered[type] || 0) >= Number(value || 0);
+  });
+  rocketState.completed = complete;
+  rocketState.isActive = !complete && deliveredTotal > 0;
+  rocketState.isOn = complete;
+
+  return complete;
 }
 
 function drawPlayerSprite(player, tileSize) {
@@ -1387,96 +1858,928 @@ function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
   return wave < 0.34;
 }
 
+function drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, minerState, nowSeconds) {
+  if (!minerSpriteSheetImg || minerSpriteSheetImg.width <= 0) {
+    return false;
+  }
+
+  // resources/miner/info.txt: 28 frames, each frame 18x32.
+  const frameW = 18;
+  const frameH = 32;
+  const totalFrames = max(1, floor(minerSpriteSheetImg.width / frameW));
+  const offFrameIndex = min(7, totalFrames - 1); // "frame 8" in 1-based indexing
+  const isOn = minerState?.isOn !== false;
+  const animationFps = 10;
+  const frameIndex = isOn
+    ? floor(nowSeconds * animationFps) % totalFrames
+    : offFrameIndex;
+  const targetHeight = max(drawHeight + 8, tileSize * 1.35);
+  const targetWidth = targetHeight * (frameW / frameH);
+  const spriteX = px + (drawWidth - targetWidth) / 2;
+  const spriteBottomY = py + drawHeight - 1;
+  const spriteY = spriteBottomY - targetHeight - 6;
+
+  imageMode(CORNER);
+  noTint();
+  image(
+    minerSpriteSheetImg,
+    spriteX,
+    spriteY,
+    targetWidth,
+    targetHeight,
+    frameIndex * frameW,
+    0,
+    frameW,
+    frameH
+  );
+  return true;
+}
+
+function getSmelterSpriteForFacing(facing) {
+  const dir = facing || "E";
+  if (dir === "E" || dir === "W") {
+    return smelterSideImg || smelterFrontImg || null;
+  }
+  if (dir === "S") {
+    return smelterBackImg || smelterFrontImg || smelterSideImg || null;
+  }
+  return smelterFrontImg || smelterBackImg || smelterSideImg || null;
+}
+
+function getSmelterManualPixelOffset(facing) {
+  const dir = facing || "E";
+  const key = SMELTER_MANUAL_PIXEL_OFFSETS[dir] ? dir : "E";
+  const manual = SMELTER_MANUAL_PIXEL_OFFSETS[key] || {};
+  const manualX = Number(manual.x);
+  const manualY = Number(manual.y);
+  return {
+    xOffsetPx: Number.isFinite(manualX) ? manualX : 0,
+    yOffsetPx: Number.isFinite(manualY) ? manualY : 0
+  };
+}
+
+function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterState, nowSeconds) {
+  const sprite = getSmelterSpriteForFacing(facing);
+  if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
+    return false;
+  }
+
+  const frameCount = 6;
+  const frameW = sprite.width / frameCount;
+  const frameH = sprite.height;
+  const isOn = smelterState?.isOn != null
+    ? smelterState.isOn
+    : !!smelterState?.isActive;
+  const animationFps = 8;
+  const frameIndex = isOn
+    ? floor(nowSeconds * animationFps) % frameCount
+    : 0;
+
+  const visualScale = 2;
+  const targetWidth = round(frameW * visualScale);
+  const targetHeight = round(frameH * visualScale);
+  const manualOffset = getSmelterManualPixelOffset(facing);
+  const spriteX = round(px + (drawWidth - targetWidth) / 2 + manualOffset.xOffsetPx);
+  const spriteY = round(py + drawHeight - targetHeight + manualOffset.yOffsetPx);
+  // West uses the same side asset orientation as East; only ports are reversed
+  // through entity facing/port rotation logic.
+  const shouldMirrorWest = false;
+  const srcX = frameIndex * frameW;
+
+  imageMode(CORNER);
+  noTint();
+  if (shouldMirrorWest) {
+    push();
+    translate(spriteX + targetWidth / 2, 0);
+    scale(-1, 1);
+    image(
+      sprite,
+      -targetWidth / 2,
+      spriteY,
+      targetWidth,
+      targetHeight,
+      srcX,
+      0,
+      frameW,
+      frameH
+    );
+    pop();
+  } else {
+    image(
+      sprite,
+      spriteX,
+      spriteY,
+      targetWidth,
+      targetHeight,
+      srcX,
+      0,
+      frameW,
+      frameH
+    );
+  }
+  return true;
+}
+
+function getSplitterSpriteForFacing(facing, options = {}) {
+  const preferSideForEast = !!options.preferSideForEast;
+  const dir = facing || "E";
+  if (dir === "E") {
+    if (preferSideForEast) {
+      return splitterSideImg || splitterFrontImg || splitterBackImg || null;
+    }
+    return splitterFrontImg || splitterBackImg || splitterSideImg || null;
+  }
+  if (dir === "W") {
+    return splitterSideImg || splitterBackImg || splitterFrontImg || null;
+  }
+  if (dir === "N") {
+    return splitterFrontImg || splitterBackImg || splitterSideImg || null;
+  }
+  if (dir === "S") {
+    return splitterBackImg || splitterFrontImg || splitterSideImg || null;
+  }
+  return splitterSideImg || splitterFrontImg || splitterBackImg || null;
+}
+
+function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
+  const sprite = getSplitterSpriteForFacing(facing, options);
+  if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
+    return false;
+  }
+
+  const visualScale = 2;
+  const targetWidth = round(sprite.width * visualScale);
+  const targetHeight = round(sprite.height * visualScale);
+  // Render exact PNG pixels (no scaling). Anchor to footprint base so any
+  // excess height naturally overhangs upward.
+  const spriteX = round(px + (drawWidth - targetWidth) / 2);
+  const spriteY = round(py + drawHeight - targetHeight);
+  const shouldMirrorWest = !!options.mirrorWest && (facing || "E") === "W";
+
+  imageMode(CORNER);
+  noTint();
+  if (shouldMirrorWest) {
+    push();
+    translate(spriteX + targetWidth / 2, 0);
+    scale(-1, 1);
+    image(sprite, -targetWidth / 2, spriteY, targetWidth, targetHeight);
+    pop();
+  } else {
+    image(sprite, spriteX, spriteY, targetWidth, targetHeight);
+  }
+  noTint();
+  return true;
+}
+
+function getMergerSpriteForFacing(facing, options = {}) {
+  const preferSideForEast = !!options.preferSideForEast;
+  const dir = facing || "E";
+  if (dir === "E") {
+    if (preferSideForEast) {
+      return mergerSideImg || mergerFrontImg || mergerBackImg || null;
+    }
+    return mergerFrontImg || mergerBackImg || mergerSideImg || null;
+  }
+  if (dir === "W") {
+    return mergerSideImg || mergerBackImg || mergerFrontImg || null;
+  }
+  if (dir === "N") {
+    return mergerFrontImg || mergerBackImg || mergerSideImg || null;
+  }
+  if (dir === "S") {
+    return mergerBackImg || mergerFrontImg || mergerSideImg || null;
+  }
+  return mergerSideImg || mergerFrontImg || mergerBackImg || null;
+}
+
+function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
+  const sprite = getMergerSpriteForFacing(facing, options);
+  if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
+    return false;
+  }
+
+  const visualScale = 2;
+  const targetWidth = round(sprite.width * visualScale);
+  const targetHeight = round(sprite.height * visualScale);
+  // Render exact PNG pixels (no scaling). Anchor to footprint base so any
+  // excess height naturally overhangs upward.
+  const spriteX = round(px + (drawWidth - targetWidth) / 2);
+  const spriteY = round(py + drawHeight - targetHeight);
+  const shouldMirrorWest = !!options.mirrorWest && (facing || "E") === "W";
+
+  imageMode(CORNER);
+  noTint();
+  if (shouldMirrorWest) {
+    push();
+    translate(spriteX + targetWidth / 2, 0);
+    scale(-1, 1);
+    image(sprite, -targetWidth / 2, spriteY, targetWidth, targetHeight);
+    pop();
+  } else {
+    image(sprite, spriteX, spriteY, targetWidth, targetHeight);
+  }
+  noTint();
+  return true;
+}
+
+function getCornerTubeDisplayFrameSize(facing) {
+  const useCurve2Family = facing === "N" || facing === "W";
+  const offImg = useCurve2Family
+    ? (pipeCurve2OffImg || pipeCurve1OffImg)
+    : (pipeCurve1OffImg || pipeCurve2OffImg);
+  const onImg = useCurve2Family
+    ? (pipeCurve2OnImg || pipeCurve1OnImg)
+    : (pipeCurve1OnImg || pipeCurve2OnImg);
+
+  const offFrameW = offImg && offImg.width > 0 ? offImg.width / 8 : 0;
+  const offFrameH = offImg && offImg.height > 0 ? offImg.height : 0;
+  const onFrameW = onImg && onImg.width > 0 ? onImg.width : 0;
+  const onFrameH = onImg && onImg.height > 0 ? onImg.height : 0;
+
+  const frameW = max(1, round(max(offFrameW, onFrameW)));
+  const frameH = max(1, round(max(offFrameH, onFrameH)));
+  return { frameW, frameH };
+}
+
+function drawTubePlacementHologramSprite(
+  footprintLeft,
+  footprintTop,
+  footprintWidth,
+  footprintHeight,
+  previewOptions,
+  alpha = 225,
+  baseCol = null,
+  baseRow = null
+) {
+  const tubeVisualScale = 2;
+  const facing = previewOptions?.facing || "E";
+  const shape = previewOptions?.shape || TUBE_SHAPES.STRAIGHT;
+  const previewTube = {
+    tileX: baseCol != null ? baseCol : 0,
+    tileY: baseRow != null ? baseRow : 0,
+    state: { facing, shape }
+  };
+
+  const offsets = getTubePortOffsets(previewTube);
+  const isCorner = shape === TUBE_SHAPES.CORNER;
+  let isHorizontalStraight = false;
+  let img = null;
+  let numFrames = 1;
+  let frameIndex = 0;
+
+  if (isCorner) {
+    const useCurve2Family = facing === "N" || facing === "W";
+    img = useCurve2Family
+      ? (pipeCurve2OffImg || pipeCurve1OffImg)
+      : (pipeCurve1OffImg || pipeCurve2OffImg);
+    numFrames = 8;
+  } else {
+    isHorizontalStraight = offsets.input.y === offsets.output.y;
+    img = isHorizontalStraight
+      ? (pipeSideOffImg || pipeFrontOffImg)
+      : pipeFrontOffImg;
+    if (img === pipeSideOffImg) {
+      numFrames = 8;
+    } else if (img === pipeFrontOffImg) {
+      numFrames = 8;
+    }
+  }
+
+  if (!img || img.width <= 0 || img.height <= 0) {
+    return false;
+  }
+
+  const frameW = img.width / max(1, numFrames);
+  const frameH = img.height;
+  const cornerDisplaySize = isCorner
+    ? getCornerTubeDisplayFrameSize(facing)
+    : null;
+  const targetW = round(
+    (cornerDisplaySize ? cornerDisplaySize.frameW : frameW) * tubeVisualScale
+  );
+  const targetH = round(
+    (cornerDisplaySize ? cornerDisplaySize.frameH : frameH) * tubeVisualScale
+  );
+  imageMode(CORNER);
+  tint(255, alpha);
+  if (isCorner) {
+    const cornerVisual = getCornerTubeVisualTransform(facing);
+    push();
+    translate(
+      footprintLeft + footprintWidth / 2,
+      footprintTop + footprintHeight / 2
+    );
+    rotate(cornerVisual.angle);
+    if (cornerVisual.mirrorX) {
+      scale(-1, 1);
+    }
+    image(
+      img,
+      -targetW / 2 + (cornerVisual.xOffsetPx || 0),
+      footprintHeight / 2 - targetH + (cornerVisual.yOffsetPx || 0),
+      targetW,
+      targetH,
+      frameIndex * frameW,
+      0,
+      frameW,
+      frameH
+    );
+    pop();
+  } else {
+    const spriteX = round(footprintLeft + (footprintWidth - targetW) / 2);
+    const spriteY = round(footprintTop + footprintHeight - targetH);
+    image(
+      img,
+      spriteX,
+      spriteY,
+      targetW,
+      targetH,
+      frameIndex * frameW,
+      0,
+      frameW,
+      frameH
+    );
+  }
+  noTint();
+  return true;
+}
+
+const TUBE_LAYER_BANDS = Object.freeze({
+  under: Object.freeze({ start: 0.68, end: 1.0 }),
+  body: Object.freeze({ start: 0.26, end: 0.78 }),
+  over: Object.freeze({ start: 0.0, end: 0.36 })
+});
+
+function getEntityDrawBounds(entity, tileSize) {
+  const footprintFacing = entity.state?.facing || "E";
+  const footprintOffsets = getSafeFootprintOffsets(
+    entity.type,
+    footprintFacing,
+    entity.state
+  );
+  let minOffsetX = Infinity;
+  let maxOffsetX = -Infinity;
+  let minOffsetY = Infinity;
+  let maxOffsetY = -Infinity;
+  for (const offset of footprintOffsets) {
+    minOffsetX = min(minOffsetX, offset.x);
+    maxOffsetX = max(maxOffsetX, offset.x);
+    minOffsetY = min(minOffsetY, offset.y);
+    maxOffsetY = max(maxOffsetY, offset.y);
+  }
+  const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
+  const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
+  const px = (entity.tileX + minOffsetX) * tileSize;
+  const py = (entity.tileY + minOffsetY) * tileSize;
+  const drawWidth = footprintWidthTiles * tileSize;
+  const drawHeight = footprintHeightTiles * tileSize;
+  return {
+    px,
+    py,
+    drawWidth,
+    drawHeight,
+    tileX: entity.tileX,
+    tileY: entity.tileY
+  };
+}
+
+function toCardinalDirectionKey(offset) {
+  if (!offset) return null;
+  if (offset.x === 1 && offset.y === 0) return "E";
+  if (offset.x === -1 && offset.y === 0) return "W";
+  if (offset.x === 0 && offset.y === 1) return "S";
+  if (offset.x === 0 && offset.y === -1) return "N";
+  return null;
+}
+
+function compareTubeDescriptorsForRender(a, b) {
+  if (a.zLane !== b.zLane) {
+    return a.zLane - b.zLane;
+  }
+  if (a.tileY !== b.tileY) {
+    return a.tileY - b.tileY;
+  }
+  if (a.tileX !== b.tileX) {
+    return a.tileX - b.tileX;
+  }
+  return (a.entity?.id || 0) - (b.entity?.id || 0);
+}
+
+function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
+  const bounds = getEntityDrawBounds(entity, tileSize);
+  const state = entity.state || {};
+  const offsets = getTubePortOffsets(entity);
+  const isCorner = state.shape === TUBE_SHAPES.CORNER;
+  const cornerFacing = state.facing || "E";
+  const cornerVisual = getCornerTubeVisualTransform(cornerFacing);
+  const isFlowing = state.flowState === "flowing";
+  const zLaneRaw = Number(state.zLane);
+  const zLane = Number.isFinite(zLaneRaw) ? zLaneRaw : 0;
+  let img = null;
+  let frontOverlayImg = null;
+  let numFrames = 1;
+  let frameIndex = 0;
+  const connectionMask = { N: false, E: false, S: false, W: false };
+  const inputDir = toCardinalDirectionKey(offsets.input);
+  const outputDir = toCardinalDirectionKey(offsets.output);
+  if (inputDir) connectionMask[inputDir] = true;
+  if (outputDir) connectionMask[outputDir] = true;
+
+  if (isCorner) {
+    const useCurve2Family = cornerFacing === "N" || cornerFacing === "W";
+    const offImg = useCurve2Family
+      ? (pipeCurve2OffImg || pipeCurve1OffImg)
+      : (pipeCurve1OffImg || pipeCurve2OffImg);
+    const onImg = useCurve2Family
+      ? (pipeCurve2OnImg || pipeCurve1OnImg)
+      : (pipeCurve1OnImg || pipeCurve2OnImg);
+    const hasValidIo = state.hasOpenPort === false;
+    const hasSupplySignal = isFlowing || (Number(state.outputRate) || 0) > 0;
+    const cornerIsOn = hasValidIo && hasSupplySignal;
+    img = cornerIsOn ? (onImg || offImg) : (offImg || onImg);
+    if (cornerIsOn) {
+      numFrames = 1;
+    } else {
+      // Follow side-pipe light propagation form: static base shape, light-only flash frames.
+      numFrames = 8;
+      const flashPattern = [0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7];
+      const flashTick = Math.floor(nowMs / 220);
+      const primaryDir = offsets.output.y !== 0 ? offsets.output.y : offsets.output.x;
+      const directionSign = primaryDir < 0 ? 1 : -1;
+      const patternLen = flashPattern.length;
+      const phaseRaw = entity.tileX + entity.tileY;
+      const phase = ((phaseRaw % patternLen) + patternLen) % patternLen;
+      const tickDirected = directionSign * flashTick;
+      const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
+      frameIndex = flashPattern[patternIndex] % numFrames;
+    }
+  } else {
+    const isHorizontalStraight = offsets.input.y === offsets.output.y;
+    const horizontalFlowDirection = isHorizontalStraight
+      ? Math.sign(offsets.output.x - offsets.input.x)
+      : 0;
+    const verticalFlowDirection = !isHorizontalStraight
+      ? Math.sign(offsets.output.y - offsets.input.y)
+      : 0;
+    const reverseSideOffLight = horizontalFlowDirection < 0;
+    const reverseFrontOffLight = verticalFlowDirection < 0;
+    const hasValidIo = state.hasOpenPort === false;
+    const hasSupplySignal = isFlowing || (Number(state.outputRate) || 0) > 0;
+    const sideIsOn = hasValidIo && hasSupplySignal;
+    const verticalIsOn = !isHorizontalStraight && hasValidIo && hasSupplySignal;
+    img = isHorizontalStraight
+      ? (sideIsOn
+          ? (pipeSideOnImg || pipeSideOnMiniImg || pipeFrontOffImg)
+          : (pipeSideOffImg || pipeFrontOffImg))
+      : (verticalIsOn
+          ? (pipeFrontOnImg || pipeFrontOffImg)
+          : (pipeFrontOffImg || pipeFrontOnImg));
+
+    if (img === pipeFrontOffImg) {
+      numFrames = 8;
+    } else if (img === pipeSideOffImg) {
+      // pipeSideOff is an 8-frame horizontal strip (144x16 => 8 * 18x16).
+      numFrames = 8;
+    } else if (img === pipeFrontOnImg) {
+      numFrames = 1;
+    }
+
+    const animateOffSideTube = img === pipeSideOffImg;
+    const animateOffFrontTube =
+      img === pipeFrontOffImg &&
+      !isHorizontalStraight &&
+      !isFlowing &&
+      !hasValidIo;
+    if (numFrames > 1 && animateOffSideTube) {
+      // Flashing pattern (not scrolling): mostly hold base frame with periodic
+      // alternate light sets so the tube feels stationary while lights pulse.
+      const flashPattern = [0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7];
+      const flashTick = Math.floor(nowMs / 220);
+      const directionSign = reverseSideOffLight ? 1 : -1;
+      const patternLen = flashPattern.length;
+      const phaseRaw = isHorizontalStraight ? entity.tileX : entity.tileY;
+      const phase = ((phaseRaw % patternLen) + patternLen) % patternLen;
+      const tickDirected = directionSign * flashTick;
+      const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
+      const frameFromPattern = flashPattern[patternIndex];
+      frameIndex = frameFromPattern % numFrames;
+    } else if (numFrames > 1 && animateOffFrontTube) {
+      const flashPattern = [0, 0, 0, 2, 0, 0, 0, 5, 0, 0, 0, 7];
+      const flashTick = Math.floor(nowMs / 220);
+      const directionSign = reverseFrontOffLight ? 1 : -1;
+      const patternLen = flashPattern.length;
+      const phaseRaw = entity.tileY;
+      const phase = ((phaseRaw % patternLen) + patternLen) % patternLen;
+      const tickDirected = directionSign * flashTick;
+      const patternIndex = ((tickDirected + phase) % patternLen + patternLen) % patternLen;
+      const frameFromPattern = flashPattern[patternIndex];
+      frameIndex = frameFromPattern % numFrames;
+    } else if (numFrames > 1 && hasValidIo && hasSupplySignal && !isFlowing && isHorizontalStraight) {
+      frameIndex = Math.floor(nowMs / 150) % numFrames;
+    }
+  }
+
+  const hasSprite = !!(img && img.width > 0 && img.height > 0);
+  const frameW = hasSprite ? (img.width / max(1, numFrames)) : tileSize;
+  const frameH = hasSprite ? img.height : tileSize;
+  return {
+    entity,
+    tileX: bounds.tileX,
+    tileY: bounds.tileY,
+    px: bounds.px,
+    py: bounds.py,
+    drawWidth: bounds.drawWidth,
+    drawHeight: bounds.drawHeight,
+    zLane,
+    isCorner,
+    rotationAngle: facingToAngle(state.facing || "E"),
+    cornerRotationAngle: cornerVisual.angle,
+    cornerMirrorX: cornerVisual.mirrorX,
+    cornerXOffsetPx: cornerVisual.xOffsetPx || 0,
+    cornerYOffsetPx: cornerVisual.yOffsetPx || 0,
+    connectionMask,
+    neighborMask: { N: false, E: false, S: false, W: false },
+    img,
+    frontOverlayImg,
+    hasSprite,
+    numFrames,
+    frameW,
+    frameH,
+    frameIndex
+  };
+}
+
+function annotateTubeDescriptorNeighbors(descriptors) {
+  const lookup = new Map();
+  for (const descriptor of descriptors) {
+    lookup.set(
+      `${descriptor.zLane}|${descriptor.tileX},${descriptor.tileY}`,
+      descriptor
+    );
+  }
+
+  const offsets = {
+    N: { x: 0, y: -1 },
+    E: { x: 1, y: 0 },
+    S: { x: 0, y: 1 },
+    W: { x: -1, y: 0 }
+  };
+  const opposite = { N: "S", E: "W", S: "N", W: "E" };
+
+  for (const descriptor of descriptors) {
+    for (const key of ["N", "E", "S", "W"]) {
+      const offset = offsets[key];
+      const neighborKey =
+        `${descriptor.zLane}|${descriptor.tileX + offset.x},${descriptor.tileY + offset.y}`;
+      const neighbor = lookup.get(neighborKey);
+      if (!neighbor) {
+        descriptor.neighborMask[key] = false;
+        continue;
+      }
+      if (!descriptor.connectionMask[key]) {
+        descriptor.neighborMask[key] = false;
+        continue;
+      }
+      const reciprocalKey = opposite[key];
+      descriptor.neighborMask[key] = !!neighbor.connectionMask[reciprocalKey];
+    }
+  }
+}
+
+function drawConnectedVerticalFrontTubeLayer(descriptor, layerName) {
+  const band = TUBE_LAYER_BANDS[layerName] || TUBE_LAYER_BANDS.body;
+  const frameH = descriptor.frameH;
+  const frameW = descriptor.frameW;
+  const srcX = descriptor.frameIndex * frameW;
+  const hasNorthJoin = !!descriptor.neighborMask.N;
+  const hasSouthJoin = !!descriptor.neighborMask.S;
+
+  // Remove rounded caps at joined edges so stacked N/S segments read as one run.
+  // Keep top seam pixels on the "over" layer so south tiles can visually
+  // sit on top of north neighbors at the join.
+  const capPx = max(3, round(frameH * 0.22));
+  const isOverLayer = layerName === "over";
+  const trimTop = hasNorthJoin && !isOverLayer ? capPx : 0;
+  // Preserve standalone bottom cap so the circular entrance stays visible
+  // in the placed tile; joined segments trim their south cap.
+  const trimBottom = hasSouthJoin ? capPx : 0;
+  let srcStart = trimTop;
+  let srcEnd = frameH - trimBottom;
+  if (srcEnd <= srcStart + 1) {
+    srcStart = 0;
+    srcEnd = frameH;
+  }
+
+  // Small overlap into connected neighbors to hide seams.
+  // Depth rule: south tiles should visually sit on top of north tiles.
+  // So only extend upward into the north neighbor; do not extend downward
+  // into the south neighbor (the south tile will own that seam).
+  const defaultTopOverhang = max(2, round(descriptor.drawHeight * 0.20));
+  const scaleY = descriptor.drawHeight / frameH;
+  const capPxScaled = ceil(capPx * scaleY);
+  const joinPx = max(defaultTopOverhang, round(capPxScaled * 1.35));
+  // Keep anchor connection-invariant so adding/removing neighbors never shifts
+  // a tube vertically. Increase fixed north bleed to strengthen overlap.
+  const extraNorthBleedPx = max(3, round(descriptor.drawHeight * 0.14) + 10);
+  const topLiftPx = max(joinPx, capPxScaled) + extraNorthBleedPx;
+  const dstBaseTop = descriptor.py - topLiftPx;
+  const bottomOverhangPx = 0;
+  const dstBaseBottom = descriptor.py + descriptor.drawHeight + bottomOverhangPx;
+  const dstBaseH = max(1, dstBaseBottom - dstBaseTop);
+
+  // Keep tube proportions stable across connection states by mapping with
+  // full-frame scale. Trims remove geometry instead of re-stretching it.
+  const srcLayerStart = floor(frameH * band.start);
+  const srcLayerEnd = ceil(frameH * band.end);
+  const clampedStart = constrain(srcLayerStart, srcStart, srcEnd - 1);
+  const clampedEnd = constrain(srcLayerEnd, clampedStart + 1, srcEnd);
+  const srcH = max(1, clampedEnd - clampedStart);
+  const pixelsPerSourceY = dstBaseH / frameH;
+  const dstY = round(dstBaseTop + clampedStart * pixelsPerSourceY);
+  const dstH = max(1, round(srcH * pixelsPerSourceY));
+
+  image(
+    descriptor.img,
+    descriptor.px,
+    dstY,
+    descriptor.drawWidth,
+    dstH,
+    srcX,
+    clampedStart,
+    frameW,
+    srcH
+  );
+
+  if (isOverLayer && hasNorthJoin) {
+    const seamCapPx = capPx;
+    const seamSrcStart = 0;
+    const seamSrcEnd = min(seamCapPx, frameH);
+    const seamSrcH = max(1, seamSrcEnd - seamSrcStart);
+    const seamDstH = max(1, round((seamSrcH / frameH) * descriptor.drawHeight));
+    const seamDstY = round(descriptor.py - seamDstH);
+    image(
+      descriptor.img,
+      descriptor.px,
+      seamDstY,
+      descriptor.drawWidth,
+      seamDstH,
+      srcX,
+      seamSrcStart,
+      frameW,
+      seamSrcH
+    );
+  }
+}
+
+function drawFrontTubeOverlay(descriptor) {
+  if (!descriptor || !descriptor.frontOverlayImg) {
+    return;
+  }
+  const overlay = descriptor.frontOverlayImg;
+  if (!overlay || overlay.width <= 0 || overlay.height <= 0) {
+    return;
+  }
+  const baseFrameW = max(1, descriptor.frameW);
+  const baseFrameH = max(1, descriptor.frameH);
+  const targetW = descriptor.drawWidth * (overlay.width / baseFrameW);
+  const targetH = descriptor.drawHeight * (overlay.height / baseFrameH);
+  const x = round(descriptor.px + (descriptor.drawWidth - targetW) / 2);
+  const y = round(descriptor.py + (descriptor.drawHeight - targetH) / 2);
+  imageMode(CORNER);
+  image(overlay, x, y, targetW, targetH);
+}
+
+function drawTubeDescriptorLayer(descriptor, layerName) {
+  if (!descriptor) {
+    return;
+  }
+
+  if (layerName !== "body") {
+    return;
+  }
+
+  if (!descriptor.hasSprite) {
+    stroke(50);
+    fill(120);
+    rect(
+      descriptor.px + 4,
+      descriptor.py + 4,
+      descriptor.drawWidth - 8,
+      descriptor.drawHeight - 8,
+      4
+    );
+    return;
+  }
+
+  const tubeVisualScale = 2;
+  const srcX = descriptor.frameIndex * descriptor.frameW;
+  const frameW = descriptor.frameW;
+  const frameH = descriptor.frameH;
+  const cornerFacing = descriptor.entity?.state?.facing || "E";
+  const cornerDisplaySize = descriptor.isCorner
+    ? getCornerTubeDisplayFrameSize(cornerFacing)
+    : null;
+  const targetW = round(
+    (cornerDisplaySize ? cornerDisplaySize.frameW : frameW) * tubeVisualScale
+  );
+  const targetH = round(
+    (cornerDisplaySize ? cornerDisplaySize.frameH : frameH) * tubeVisualScale
+  );
+  const spriteX = round(descriptor.px + (descriptor.drawWidth - targetW) / 2);
+  const spriteY = round(descriptor.py + descriptor.drawHeight - targetH);
+
+  imageMode(CORNER);
+  if (descriptor.isCorner) {
+    push();
+    translate(
+      descriptor.px + descriptor.drawWidth / 2,
+      descriptor.py + descriptor.drawHeight / 2
+    );
+    rotate(
+      Number.isFinite(descriptor.cornerRotationAngle)
+        ? descriptor.cornerRotationAngle
+        : descriptor.rotationAngle
+    );
+    if (descriptor.cornerMirrorX) {
+      scale(-1, 1);
+    }
+    image(
+      descriptor.img,
+      -targetW / 2 + (descriptor.cornerXOffsetPx || 0),
+      descriptor.drawHeight / 2 - targetH + (descriptor.cornerYOffsetPx || 0),
+      targetW,
+      targetH,
+      srcX,
+      0,
+      frameW,
+      frameH
+    );
+    pop();
+  } else {
+    image(
+      descriptor.img,
+      spriteX,
+      spriteY,
+      targetW,
+      targetH,
+      srcX,
+      0,
+      frameW,
+      frameH
+    );
+  }
+}
+
+function drawTubeDescriptorsInLayeredPasses(descriptors) {
+  if (!Array.isArray(descriptors) || descriptors.length === 0) {
+    return;
+  }
+
+  const sorted = [...descriptors].sort(compareTubeDescriptorsForRender);
+  for (const descriptor of sorted) {
+    drawTubeDescriptorLayer(descriptor, "body");
+  }
+}
+
+function getEntitySouthmostRenderTileY(entity) {
+  if (!entity) {
+    return 0;
+  }
+  const facing = entity.state?.facing || "E";
+  const offsets = getSafeFootprintOffsets(entity.type, facing, entity.state);
+  let maxOffsetY = -Infinity;
+  for (const offset of offsets) {
+    maxOffsetY = max(maxOffsetY, offset.y);
+  }
+  if (!Number.isFinite(maxOffsetY)) {
+    maxOffsetY = 0;
+  }
+  return entity.tileY + maxOffsetY;
+}
+
+function drawNonTubeEntity(entity, tileSize, nowSeconds) {
+  const bounds = getEntityDrawBounds(entity, tileSize);
+  const px = bounds.px;
+  const py = bounds.py;
+  const drawWidth = bounds.drawWidth;
+  const drawHeight = bounds.drawHeight;
+
+  const drewMinerSprite =
+    entity.type === ENTITY_TYPES.MINER &&
+    drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
+  const drewSmelterSprite =
+    entity.type === ENTITY_TYPES.SMELTER &&
+    drawPlacedSmelterSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      entity.state?.facing || "E",
+      entity.state,
+      nowSeconds
+    );
+  const drewSplitterSprite =
+    entity.type === ENTITY_TYPES.SPLITTER &&
+    drawPlacedSplitterSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      entity.state?.facing || "E",
+      255,
+      { preferSideForEast: true }
+    );
+  const drewMergerSprite =
+    entity.type === ENTITY_TYPES.MERGER &&
+    drawPlacedMergerSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      entity.state?.facing || "E",
+      255,
+      { preferSideForEast: true }
+    );
+  const drewCustomSprite = drewMinerSprite || drewSmelterSprite || drewSplitterSprite || drewMergerSprite;
+
+  if (!drewCustomSprite) {
+    // Regular building fallback rendering when no custom sprite is used.
+    stroke(50);
+    const rgb = getEntityFillRgb(entity.type);
+    fill(rgb[0], rgb[1], rgb[2]);
+    rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
+  }
+
+  if (entity.state.isBroken) {
+    stroke(255, 0, 0);
+    strokeWeight(3);
+    line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
+    line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
+    strokeWeight(1);
+  }
+
+  if (!drewCustomSprite) {
+    noStroke();
+    const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
+    fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
+    circle(px + drawWidth - 8, py + 8, 8);
+  }
+
+  if (!drewCustomSprite) {
+    fill(20);
+    noStroke();
+    text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+  }
+}
+
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
   const nowSeconds = millis() / 1000;
+  const nowMs = millis();
+  const tubeDescriptors = [];
+  const renderQueue = [];
 
   for (const entity of entities) {
-    const footprintOffsets = getSafeFootprintOffsets(entity.type);
-    let minOffsetX = Infinity;
-    let maxOffsetX = -Infinity;
-    let minOffsetY = Infinity;
-    let maxOffsetY = -Infinity;
-    for (const offset of footprintOffsets) {
-      minOffsetX = min(minOffsetX, offset.x);
-      maxOffsetX = max(maxOffsetX, offset.x);
-      minOffsetY = min(minOffsetY, offset.y);
-      maxOffsetY = max(maxOffsetY, offset.y);
-    }
-
-    const footprintWidthTiles = maxOffsetX - minOffsetX + 1;
-    const footprintHeightTiles = maxOffsetY - minOffsetY + 1;
-    const px = (entity.tileX + minOffsetX) * tileSize;
-    const py = (entity.tileY + minOffsetY) * tileSize;
-    const drawWidth = footprintWidthTiles * tileSize;
-    const drawHeight = footprintHeightTiles * tileSize;
-
+    const sortY = getEntitySouthmostRenderTileY(entity);
+    const sortX = entity?.tileX || 0;
+    const sortId = entity?.id || 0;
     if (entity.type === ENTITY_TYPES.TUBE) {
-      push();
-      translate(px + tileSize / 2, py + tileSize / 2);
-      rotate(facingToAngle(entity.state.facing));
-
-      let imgToDraw = null;
-      let isCorner = entity.state.shape === TUBE_SHAPES.CORNER;
-      let isFlowing = !!entity.state.carriedItem;
-
-      if (isCorner) {
-        let useCurve2 = (entity.tileX + entity.tileY) % 2 === 0;
-        if (isFlowing) imgToDraw = useCurve2 ? (pipeCurve2OnImg || pipeCurve1OnImg) : pipeCurve1OnImg;
-        else imgToDraw = useCurve2 ? (pipeCurve2OffImg || pipeCurve1OffImg) : pipeCurve1OffImg;
-      } else {
-        imgToDraw = pipeFrontOffImg; 
-      }
-
-      if (imgToDraw && imgToDraw.width > 0) {
-        // FIXED: Explicitly define the number of frames based on the sprite sheet!
-        // pipeFrontOff is 8 frames, the curves are 16 frames. 
-        // This calculates the exact width of a single frame and stops the "2 tubes at a time" bug!
-        let numFrames = (imgToDraw === pipeFrontOffImg) ? 8 : 16;
-        let frameW = imgToDraw.width / numFrames;
-        let frameH = imgToDraw.height;
-        let currentFrame = 0;
-        
-        if (numFrames > 1 && entity.state.isConnected) {
-            currentFrame = Math.floor(millis() / 150) % numFrames;
-        }
-
-        imageMode(CORNER);
-        image(imgToDraw, -tileSize / 2, -tileSize / 2, tileSize, tileSize, currentFrame * frameW, 0, frameW, frameH);
-      } else {
-        stroke(50);
-        fill(120);
-        rect(-tileSize / 2 + 4, -tileSize / 2 + 4, tileSize - 8, tileSize - 8, 4);
-      }
-      pop();
+      const descriptor = buildTubeRenderDescriptor(entity, tileSize, nowMs);
+      tubeDescriptors.push(descriptor);
+      renderQueue.push({
+        kind: "tube",
+        sortY,
+        sortX,
+        sortId,
+        descriptor
+      });
     } else {
-      // FIXED: Removed the solid grey background square from regular buildings
-      // Only draw the regular entity color square if there are no images
-      stroke(50);
-      const rgb = getEntityFillRgb(entity.type);
-      fill(rgb[0], rgb[1], rgb[2]);
-
-      rect(px + 4, py + 4, drawWidth - 8, drawHeight - 8, 4);
-
-      if (entity.state.isBroken) {
-        stroke(255, 0, 0);
-        strokeWeight(3);
-        line(px + 6, py + 6, px + drawWidth - 6, py + drawHeight - 6);
-        line(px + drawWidth - 6, py + 6, px + 6, py + drawHeight - 6);
-        strokeWeight(1);
-      }
-
-      noStroke();
-      const powerOn = entity.state.isOn != null ? entity.state.isOn : entity.state.isActive;
-      fill(powerOn ? color(0, 220, 0) : color(220, 0, 0));
-      circle(px + drawWidth - 8, py + 8, 8);
-
-      fill(20);
-      noStroke();
-      text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+      renderQueue.push({
+        kind: "entity",
+        sortY,
+        sortX,
+        sortId,
+        entity
+      });
     }
-    
+  }
+
+  annotateTubeDescriptorNeighbors(tubeDescriptors);
+  renderQueue.sort((a, b) => {
+    if (a.sortY !== b.sortY) return a.sortY - b.sortY;
+    if (a.sortX !== b.sortX) return a.sortX - b.sortX;
+    return a.sortId - b.sortId;
+  });
+  for (const item of renderQueue) {
+    if (item.kind === "tube") {
+      drawTubeDescriptorLayer(item.descriptor, "body");
+    } else {
+      drawNonTubeEntity(item.entity, tileSize, nowSeconds);
+    }
+  }
+
+  for (const entity of entities) {
     drawEntityPorts(entity, tileSize);
   }
 }
@@ -1515,6 +2818,32 @@ function drawDirectionalArrow(cx, cy, dirX, dirY, rgb, arrowLen) {
     baseX - leftX * headWidth * 0.5,
     baseY - leftY * headWidth * 0.5
   );
+}
+
+function collapseDirectionToCardinal(dirX, dirY, preferAxis = "x") {
+  const absX = Math.abs(dirX);
+  const absY = Math.abs(dirY);
+
+  if (absX === 0 && absY === 0) {
+    return { x: 1, y: 0 };
+  }
+
+  if (absX > absY) {
+    return { x: Math.sign(dirX) || 1, y: 0 };
+  }
+  if (absY > absX) {
+    return { x: 0, y: Math.sign(dirY) || 1 };
+  }
+
+  if (preferAxis === "y") {
+    return { x: 0, y: Math.sign(dirY) || 1 };
+  }
+  return { x: Math.sign(dirX) || 1, y: 0 };
+}
+
+function getPreferredArrowAxisForFacing(facing) {
+  const dir = facing || "E";
+  return dir === "N" || dir === "S" ? "y" : "x";
 }
 
 function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
@@ -1592,6 +2921,12 @@ function drawEntityPorts(entity, tileSize) {
   const centerX = entity.tileX * tileSize + tileSize / 2;
   const centerY = entity.tileY * tileSize + tileSize / 2;
   const arrowLen = tileSize * 0.45;
+  const splitterForward = entity.type === ENTITY_TYPES.SPLITTER
+    ? rotateOffsetFromEast({ x: 1, y: 0 }, entity.state?.facing || "E")
+    : null;
+  const mergerForward = entity.type === ENTITY_TYPES.MERGER
+    ? rotateOffsetFromEast({ x: 1, y: 0 }, entity.state?.facing || "E")
+    : null;
 
   for (const port of ports) {
     const forceExposeOutput = shouldExposeConstructorOutputPort(entity, port);
@@ -1613,10 +2948,23 @@ function drawEntityPorts(entity, tileSize) {
     let dirY = dy / len;
 
     if (port.kind === "input") {
-      dirX = -dirX;
-      dirY = -dirY;
+      if (mergerForward) {
+        dirX = mergerForward.x;
+        dirY = mergerForward.y;
+      } else {
+        dirX = -dirX;
+        dirY = -dirY;
+      }
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [255, 210, 0], arrowLen);
     } else if (port.kind === "output") {
+      if (splitterForward) {
+        dirX = splitterForward.x;
+        dirY = splitterForward.y;
+      }
+      const preferAxis = getPreferredArrowAxisForFacing(entity.state?.facing || "E");
+      const collapsed = collapseDirectionToCardinal(dirX, dirY, preferAxis);
+      dirX = collapsed.x;
+      dirY = collapsed.y;
       drawDirectionalArrow(portPx, portPy, dirX, dirY, [230, 60, 60], arrowLen);
       if (forceExposeOutput) {
         drawConstructorOutputItemBadge(
@@ -1648,7 +2996,7 @@ function getEntityShortLabel(type) {
   }
 }
 
-function drawMiniMap(map, player, config, feedback) {
+function drawMiniMap(map, player, config, feedback, entities) {
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
 
   const miniMaxSize = 140;
@@ -1669,6 +3017,35 @@ function drawMiniMap(map, player, config, feedback) {
     miniTile
   );
   image(minimapLayer, miniX, miniY);
+
+  // Overlay dynamic placed items / buildings (including the pre-placed rocket footprint).
+  noStroke();
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tile = map.tiles[y][x];
+      if (!tile || !tile.building || !tile.building.color) continue;
+      const c = tile.building.color;
+      fill(c[0], c[1], c[2]);
+      rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
+    }
+  }
+
+  // Keep rocket readable on minimap even when some port tiles are occupied by tubes.
+  if (entities && entities.length) {
+    for (const entity of entities) {
+      if (entity.type !== ENTITY_TYPES.ROCKET_SITE) continue;
+      fill(180, 180, 255, 180);
+      const footprint = getRocketFootprintTiles(entity.tileX, entity.tileY);
+      for (const fp of footprint) {
+        rect(
+          miniX + fp.x * miniTile,
+          miniY + fp.y * miniTile,
+          miniTile,
+          miniTile
+        );
+      }
+    }
+  }
 
   noStroke();
   
@@ -1697,7 +3074,9 @@ function getOrBuildWorldLayer(state) {
   const { tileSize, mapCols, mapRows } = config;
   const layer = createGraphics(mapCols * tileSize, mapRows * tileSize);
   layer.noStroke();
+  const depositDrawCalls = [];
 
+  // Pass 1: draw base terrain only.
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
@@ -1713,18 +3092,53 @@ function getOrBuildWorldLayer(state) {
         layer.fill(fallbackColor[0], fallbackColor[1], fallbackColor[2]);
         layer.rect(px, py, tileSize, tileSize);
       }
+    }
+  }
 
-      // Then draw specific resource node deposit images on top if they exist
+  // Pass 2: draw resource node overlays.
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      const tile = map.tiles[y][x];
+      const px = x * tileSize;
+      const py = y * tileSize;
       let depositImg = null; // Reset depositImg for each tile
       if (tile.type === "iron") depositImg = ironDepositImg;
       else if (tile.type === "copper") depositImg = copperDepositImg;
-      // else if (tile.type === "helium3") depositImg = heliumDepositImg;
+      else if (tile.type === "helium3") depositImg = heliumDepositImg;
 
       if (depositImg) {
-        // Draw deposit overlay on top of the base terrain tile.
-        layer.image(depositImg, px, py, tileSize, tileSize);
+        const originX = Number.isFinite(tile.resourceNodeOriginX)
+          ? tile.resourceNodeOriginX
+          : x;
+        const originY = Number.isFinite(tile.resourceNodeOriginY)
+          ? tile.resourceNodeOriginY
+          : y;
+        const isNodeRoot = originX === x && originY === y;
+        if (isNodeRoot) {
+          // Draw one icon across the full 2x2 resource node footprint.
+          depositDrawCalls.push({
+            img: depositImg,
+            x: px,
+            y: py,
+            w: tileSize * 2,
+            h: tileSize * 2
+          });
+        } else if (!Number.isFinite(tile.resourceNodeOriginX) || !Number.isFinite(tile.resourceNodeOriginY)) {
+          // Backward-compat fallback for older single-tile nodes.
+          depositDrawCalls.push({
+            img: depositImg,
+            x: px,
+            y: py,
+            w: tileSize,
+            h: tileSize
+          });
+        }
       }
     }
+  }
+
+  for (const drawCall of depositDrawCalls) {
+    layer.image(drawCall.img, drawCall.x, drawCall.y, drawCall.w, drawCall.h);
   }
 
   cache.worldLayer = layer;
@@ -2456,6 +3870,10 @@ function pickContrastingTextColor(rgb) {
 }
 
 function drawPlacedBuildingLetter(px, py, tileSize, building) {
+  const label = building.label || building.letter || "";
+  if (!label) {
+    return;
+  }
   const rgb = building.color;
   const tc = pickContrastingTextColor(rgb);
   const cx = px + tileSize / 2;
@@ -2468,7 +3886,7 @@ function drawPlacedBuildingLetter(px, py, tileSize, building) {
   textSize(14);
   textStyle(BOLD);
   textAlign(CENTER, CENTER);
-  text(building.label || building.letter || "??", 0, 0);
+  text(label, 0, 0);
   pop();
   textStyle(NORMAL);
 }
@@ -2507,11 +3925,19 @@ function drawPlacementPorts(
   originX = 0,
   originY = 0,
   baseCol = null,
-  baseRow = null
+  baseRow = null,
+  entityType = null,
+  facing = "E"
 ) {
   const arrowLen = tileSize * 0.45;
   const headLen = 6;
   const headWidth = 6;
+  const splitterForward = entityType === ENTITY_TYPES.SPLITTER
+    ? rotateOffsetFromEast({ x: 1, y: 0 }, facing || "E")
+    : null;
+  const mergerForward = entityType === ENTITY_TYPES.MERGER
+    ? rotateOffsetFromEast({ x: 1, y: 0 }, facing || "E")
+    : null;
 
   const drawArrow = (cx, cy, dirX, dirY, rgb) => {
     const half = arrowLen / 2;
@@ -2558,10 +3984,23 @@ function drawPlacementPorts(
     let dirY = port.offset.y / len;
 
     if (port.kind === "input") {
-      dirX = -dirX;
-      dirY = -dirY;
+      if (mergerForward) {
+        dirX = mergerForward.x;
+        dirY = mergerForward.y;
+      } else {
+        dirX = -dirX;
+        dirY = -dirY;
+      }
       drawArrow(portPx, portPy, dirX, dirY, [255, 165, 0]);
     } else if (port.kind === "output") {
+      if (splitterForward) {
+        dirX = splitterForward.x;
+        dirY = splitterForward.y;
+      }
+      const preferAxis = getPreferredArrowAxisForFacing(facing || "E");
+      const collapsed = collapseDirectionToCardinal(dirX, dirY, preferAxis);
+      dirX = collapsed.x;
+      dirY = collapsed.y;
       drawArrow(portPx, portPy, dirX, dirY, [0, 200, 0]);
     } else if (port.kind === "both") {
       drawArrow(portPx, portPy, dirX, dirY, [60, 190, 190]);
@@ -2622,7 +4061,14 @@ function drawBuildingPlacementHologram(
 ) {
   const cx = px + tileSize / 2;
   const cy = py + tileSize / 2;
-  const footprintOffsets = getSafeFootprintOffsets(entityType);
+  const previewOptions = {
+    ...(options || {}),
+    facing: facing || ((options && options.facing) || "E")
+  };
+  const previewFacing = previewOptions.facing || "E";
+  const footprintOffsets = getSafeFootprintOffsets(entityType, "E", previewOptions).map((offset) =>
+    rotateOffsetFromEast(offset, previewFacing)
+  );
   let minOffsetX = Infinity;
   let maxOffsetX = -Infinity;
   let minOffsetY = Infinity;
@@ -2640,10 +4086,6 @@ function drawBuildingPlacementHologram(
   const footprintTop = (minOffsetY - 0.5) * tileSize;
   const footprintWidth = footprintWidthTiles * tileSize;
   const footprintHeight = footprintHeightTiles * tileSize;
-  const previewOptions = {
-    ...(options || {}),
-    facing: facing || ((options && options.facing) || "E")
-  };
   const ports = getPlacementPreviewPorts(entityType, previewOptions);
 
   if (ports.length) {
@@ -2652,27 +4094,110 @@ function drawBuildingPlacementHologram(
 
   push();
   translate(cx, cy);
-  rotate(facingToAngle(facing));
-  stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
-  strokeWeight(2);
-  fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
-  rect(
-    footprintLeft + 3,
-    footprintTop + 3,
-    footprintWidth - 6,
-    footprintHeight - 6,
-    4
-  );
-  fill(35, 35, 42, 200);
-  noStroke();
-  textSize(14);
-  textStyle(BOLD);
-  textAlign(CENTER, CENTER);
-  text(label, 0, 0);
+  const useMinerOffHologram =
+    entityType === ENTITY_TYPES.MINER &&
+    minerSpriteSheetImg &&
+    minerSpriteSheetImg.width > 0;
+  const useSplitterHologram =
+    entityType === ENTITY_TYPES.SPLITTER &&
+    getSplitterSpriteForFacing(previewFacing, { preferSideForEast: true });
+  const useMergerHologram =
+    entityType === ENTITY_TYPES.MERGER &&
+    getMergerSpriteForFacing(previewFacing, { preferSideForEast: true });
+  const useTubeHologram =
+    entityType === ENTITY_TYPES.TUBE &&
+    (pipeSideOffImg || pipeFrontOffImg || pipeCurve1OffImg || pipeCurve2OffImg);
+
+  if (!useMinerOffHologram && !useSplitterHologram && !useMergerHologram && !useTubeHologram) {
+    stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
+    strokeWeight(2);
+    fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
+    rect(
+      footprintLeft + 3,
+      footprintTop + 3,
+      footprintWidth - 6,
+      footprintHeight - 6,
+      4
+    );
+  }
+
+  if (useMinerOffHologram) {
+    // Match the off-state miner visual (frame 8 / index 7).
+    const frameW = 18;
+    const frameH = 32;
+    const totalFrames = max(1, floor(minerSpriteSheetImg.width / frameW));
+    const offFrameIndex = min(7, totalFrames - 1);
+    const spriteHeight = max(footprintHeight + 8, tileSize * 1.35);
+    const spriteWidth = spriteHeight * (frameW / frameH);
+    const spriteX = footprintLeft + (footprintWidth - spriteWidth) / 2;
+    const spriteBottomY = footprintTop + footprintHeight - 1;
+    const spriteY = spriteBottomY - spriteHeight - 6;
+    imageMode(CORNER);
+    tint(255, 225);
+    image(
+      minerSpriteSheetImg,
+      spriteX,
+      spriteY,
+      spriteWidth,
+      spriteHeight,
+      offFrameIndex * frameW,
+      0,
+      frameW,
+      frameH
+    );
+    noTint();
+  } else if (useSplitterHologram) {
+    drawPlacedSplitterSprite(
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      previewFacing,
+      225,
+      { preferSideForEast: true, mirrorWest: true }
+    );
+  } else if (useMergerHologram) {
+    drawPlacedMergerSprite(
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      previewFacing,
+      225,
+      { preferSideForEast: true, mirrorWest: true }
+    );
+  } else if (useTubeHologram) {
+    drawTubePlacementHologramSprite(
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      previewOptions,
+      225,
+      baseCol,
+      baseRow
+    );
+  } else {
+    fill(35, 35, 42, 200);
+    noStroke();
+    textSize(14);
+    textStyle(BOLD);
+    textAlign(CENTER, CENTER);
+    text(label, 0, 0);
+  }
   pop();
 
   if (ports.length) {
-    drawPlacementPorts(ports, tileSize, cx, cy, baseCol, baseRow);
+    drawPlacementPorts(
+      ports,
+      tileSize,
+      cx,
+      cy,
+      baseCol,
+      baseRow,
+      entityType,
+      previewOptions.facing
+    );
   }
   textStyle(NORMAL);
 }
@@ -2728,7 +4253,23 @@ function drawSelectedBuildingHighlight(map, tileSize) {
     drawGame.state.selectedBuilding = null;
     return;
   }
-  const footprintOffsets = getSafeFootprintOffsets(tile.building.entityType);
+  const facing = tile.building.facing || "E";
+  const selectedEntity = tile.entityId != null
+    ? getEntityById(drawGame.state.entities, tile.entityId)
+    : null;
+  const footprintShapeSource = selectedEntity?.state || tile.building || null;
+  const footprintOffsets = getSafeFootprintOffsets(
+    tile.building.entityType,
+    facing,
+    footprintShapeSource
+  );
+  const selectedShape =
+    selectedEntity?.state?.shape ||
+    tile.building.shape ||
+    null;
+  const isCornerTubeSelection =
+    tile.building.entityType === ENTITY_TYPES.TUBE &&
+    selectedShape === TUBE_SHAPES.CORNER;
   let minOffsetX = Infinity;
   let maxOffsetX = -Infinity;
   let minOffsetY = Infinity;
@@ -2746,7 +4287,31 @@ function drawSelectedBuildingHighlight(map, tileSize) {
   noFill();
   stroke(255, 210, 60);
   strokeWeight(2.5);
-  rect(left - 2, top - 2, widthTiles * tileSize + 4, heightTiles * tileSize + 4, 4);
+  if (isCornerTubeSelection) {
+    for (const offset of footprintOffsets) {
+      const tileLeft = (sel.col + offset.x) * tileSize;
+      const tileTop = (sel.row + offset.y) * tileSize;
+      rect(tileLeft - 2, tileTop - 2, tileSize + 4, tileSize + 4, 4);
+    }
+  } else {
+    rect(left - 2, top - 2, widthTiles * tileSize + 4, heightTiles * tileSize + 4, 4);
+  }
+}
+
+function getCornerTubeVisualTransform(facing) {
+  const dir = facing || "E";
+  const key = CORNER_TUBE_BASE_VISUAL_TRANSFORMS[dir] ? dir : "E";
+  const base = CORNER_TUBE_BASE_VISUAL_TRANSFORMS[key];
+  const manual = CORNER_TUBE_MANUAL_PIXEL_OFFSETS[key] || {};
+  const manualX = Number(manual.x);
+  const manualY = Number(manual.y);
+
+  return {
+    angle: Number.isFinite(base.angle) ? base.angle : 0,
+    mirrorX: !!base.mirrorX,
+    xOffsetPx: Number.isFinite(manualX) ? manualX : 0,
+    yOffsetPx: Number.isFinite(manualY) ? manualY : 0
+  };
 }
 
 function getTileBaseColor(tile) {
@@ -2780,12 +4345,47 @@ function getPlacedBuildingDisplayName(tile) {
   return et != null ? String(et) : null;
 }
 
-function getMapHoverTooltipLabel(tile) {
-  const buildingName = getPlacedBuildingDisplayName(tile);
+function getRocketPortHoverLabelAtTile(col, row) {
+  if (!drawGame.state) {
+    return null;
+  }
+  const entities = drawGame.state.entities || [];
+  const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
+  if (!rocket) {
+    return null;
+  }
+  const ports = getEntityConnectionPorts(rocket).filter((port) => port.kind === "input");
+  const matched = ports.find((port) => port.worldX === col && port.worldY === row);
+  if (!matched) {
+    return null;
+  }
+
+  if (matched.name === RESOURCE_TYPES.ELECTRONICS) {
+    return "Electronics Port";
+  }
+  if (matched.name === RESOURCE_TYPES.SHIP_ALLOY) {
+    return "Ship Alloy Port";
+  }
+  if (matched.name === RESOURCE_TYPES.ROCKET_FUEL) {
+    return "Rocket Fuel Port";
+  }
+  return "Rocket Port";
+}
+
+function getMapHoverTooltipLabel(hit) {
+  if (!hit) {
+    return null;
+  }
+  const portLabel = getRocketPortHoverLabelAtTile(hit.col, hit.row);
+  if (portLabel) {
+    return portLabel;
+  }
+
+  const buildingName = getPlacedBuildingDisplayName(hit.tile);
   if (buildingName) {
     return buildingName;
   }
-  return getResourceDisplayName(tile);
+  return getResourceDisplayName(hit.tile);
 }
 
 function getResourceDisplayName(tile) {
@@ -2866,7 +4466,7 @@ function drawResourceHoverTooltip() {
   }
 
   const hit = getTileAtScreenPosition(mouseX, mouseY);
-  const label = hit ? getMapHoverTooltipLabel(hit.tile) : null;
+  const label = getMapHoverTooltipLabel(hit);
   if (!label) {
     return;
   }
@@ -3025,6 +4625,106 @@ function drawActiveTubeFlowTooltip() {
   return true;
 }
 
+function getHoveredRocketTooltipData() {
+  if (currentState !== "GAME" || !drawGame.state) {
+    return null;
+  }
+  if (isMouseOverResourceTooltipBlockers()) {
+    return null;
+  }
+
+  const hit = getTileAtScreenPosition(mouseX, mouseY);
+  if (!hit) {
+    return null;
+  }
+
+  const { entities } = drawGame.state;
+  const rocketPortMatch = getPortsAtTile(entities, hit.col, hit.row).find(
+    (match) =>
+      match.entity?.type === ENTITY_TYPES.ROCKET_SITE &&
+      match.port?.kind === "input"
+  );
+  if (rocketPortMatch) {
+    const resourceType = rocketPortMatch.port.name || "";
+    return {
+      title: "Rocket Port",
+      label: getResourceTypeLabel(resourceType) || String(resourceType)
+    };
+  }
+
+  let rocketEntity = null;
+  if (hit.tile?.entityId != null) {
+    rocketEntity = getEntityById(entities, hit.tile.entityId);
+  }
+  if (!rocketEntity && hit.tile?.building?.entityType === ENTITY_TYPES.ROCKET_SITE) {
+    const buildingEntityId = hit.tile.building.entityId;
+    if (buildingEntityId != null) {
+      rocketEntity = getEntityById(entities, buildingEntityId);
+    }
+  }
+
+  if (rocketEntity?.type !== ENTITY_TYPES.ROCKET_SITE) {
+    return null;
+  }
+
+  return {
+    title: "Rocket Ship",
+    label: "Rocket Ship"
+  };
+}
+
+function drawRocketHoverTooltip() {
+  const tooltip = getHoveredRocketTooltipData();
+  if (!tooltip) {
+    return false;
+  }
+
+  push();
+  textAlign(LEFT, TOP);
+
+  textStyle(BOLD);
+  textSize(12);
+  const titleW = textWidth(tooltip.title);
+  const titleH = textAscent() + textDescent();
+
+  textStyle(NORMAL);
+  textSize(11);
+  const labelW = textWidth(tooltip.label);
+  const labelH = textAscent() + textDescent();
+
+  const pad = 8;
+  const boxW = max(titleW, labelW) + pad * 2;
+  const boxH = pad * 2 + titleH + 4 + labelH;
+
+  let bx = mouseX + 14;
+  let by = mouseY + 14;
+  if (bx + boxW > width - 6) {
+    bx = mouseX - boxW - 14;
+  }
+  if (by + boxH > height - 6) {
+    by = mouseY - boxH - 14;
+  }
+  bx = constrain(bx, 6, width - boxW - 6);
+  by = constrain(by, 6, height - boxH - 6);
+
+  fill(252, 252, 255, 248);
+  stroke(55, 55, 68);
+  strokeWeight(1);
+  rect(bx, by, boxW, boxH, 5);
+
+  noStroke();
+  fill(28, 28, 36);
+  textStyle(BOLD);
+  textSize(12);
+  text(tooltip.title, bx + pad, by + pad);
+
+  textStyle(NORMAL);
+  textSize(11);
+  text(tooltip.label, bx + pad, by + pad + titleH + 4);
+  pop();
+  return true;
+}
+
 function getMiniMapTileColor(tile) {
   if (!tile) {
     return [240, 240, 245];
@@ -3168,8 +4868,98 @@ function drawHotbar() {
       let cx = x + slotSize / 2;
       let cy = y + slotSize / 2;
       let iconSize = 18;
+      const useMinerSpriteIcon = (
+        i === 0 &&
+        item.entityType === ENTITY_TYPES.MINER &&
+        minerSpriteSheetImg &&
+        minerSpriteSheetImg.width > 0
+      );
+      const usePipeMiniIcon = (
+        i === 3 &&
+        item.entityType === ENTITY_TYPES.TUBE &&
+        pipeSideOnMiniImg &&
+        pipeSideOnMiniImg.width > 0
+      );
+      const useSmelterFrontIcon = (
+        i === 1 &&
+        item.entityType === ENTITY_TYPES.SMELTER &&
+        smelterFrontImg &&
+        smelterFrontImg.width > 0
+      );
+      const useSplitterFrontIcon = (
+        i === 4 &&
+        item.entityType === ENTITY_TYPES.SPLITTER &&
+        splitterFrontImg &&
+        splitterFrontImg.width > 0
+      );
+      const useMergerFrontIcon = (
+        i === 5 &&
+        item.entityType === ENTITY_TYPES.MERGER &&
+        mergerFrontImg &&
+        mergerFrontImg.width > 0
+      );
 
-      if (item.shape === "circle") {
+      if (useMinerSpriteIcon) {
+        // resources/miner/info.txt: 28 frames, each frame 18x32. Frame 4 => index 3.
+        const frameIndex = 3;
+        const frameW = 18;
+        const frameH = 32;
+        const minerIconHeight = iconSize + 20;
+        const minerIconWidth = minerIconHeight * (frameW / frameH);
+        imageMode(CENTER);
+        noTint();
+        image(
+          minerSpriteSheetImg,
+          cx + 1,
+          cy + 2,
+          minerIconWidth,
+          minerIconHeight,
+          frameIndex * frameW,
+          0,
+          frameW,
+          frameH
+        );
+        imageMode(CORNER);
+      } else if (usePipeMiniIcon) {
+        imageMode(CENTER);
+        const iconAspect = pipeSideOnMiniImg.height / pipeSideOnMiniImg.width;
+        const iconWidth = iconSize + 4;
+        image(pipeSideOnMiniImg, cx, cy, iconWidth, iconWidth * iconAspect);
+        imageMode(CORNER);
+      } else if (useSmelterFrontIcon) {
+        // Smelter front sheet is 192x38; use a single 32x38 frame for the icon.
+        const frameCount = 6;
+        const frameIndex = 0;
+        const frameW = smelterFrontImg.width / frameCount;
+        const frameH = smelterFrontImg.height;
+        imageMode(CENTER);
+        const iconWidth = iconSize + 8;
+        const iconHeight = iconWidth * (frameH / frameW);
+        image(
+          smelterFrontImg,
+          cx,
+          cy - 3,
+          iconWidth,
+          iconHeight,
+          frameIndex * frameW,
+          0,
+          frameW,
+          frameH
+        );
+        imageMode(CORNER);
+      } else if (useSplitterFrontIcon) {
+        imageMode(CENTER);
+        const iconWidth = iconSize + 8;
+        const iconHeight = iconWidth * (splitterFrontImg.height / splitterFrontImg.width);
+        image(splitterFrontImg, cx, cy + 1, iconWidth, iconHeight);
+        imageMode(CORNER);
+      } else if (useMergerFrontIcon) {
+        imageMode(CENTER);
+        const iconWidth = iconSize + 8;
+        const iconHeight = iconWidth * (mergerFrontImg.height / mergerFrontImg.width);
+        image(mergerFrontImg, cx, cy + 1, iconWidth, iconHeight);
+        imageMode(CORNER);
+      } else if (item.shape === "circle") {
         ellipse(cx, cy, iconSize, iconSize);
       } else if (item.shape === "triangle") {
         triangle(
@@ -3186,20 +4976,17 @@ function drawHotbar() {
     fill(30);
     noStroke();
     textSize(12);
-    textStyle(NORMAL);
-    text(i + 1, x + slotSize / 2, y + slotSize - 8);
+    textStyle(BOLD);
+    textAlign(LEFT, TOP);
+    text(i + 1, x + 4, y + 3);
+    textAlign(CENTER, CENTER);
 
-    // Draw entity type label below slot number
-    if (HOTBAR_ENTITY_TYPES[i]) {
-      fill(80);
-      textSize(7);
-      text(getEntityShortLabel(HOTBAR_ENTITY_TYPES[i]), x + slotSize / 2, y - 6);
-    }
   }
   pop();
 }
 
 function mousePressed() {
+  requestBackgroundMusicStart();
   if (currentState == "MENU") {
     startButton.checkClick();
     settingsButton.checkClick();
@@ -3229,6 +5016,10 @@ function mousePressed() {
   // UI back button
   if (backButtonGame.isHovered()) {
     backButtonGame.checkClick();
+    return;
+  }
+  if (testEndGameButton.isHovered()) {
+    testEndGameButton.checkClick();
     return;
   }
 
@@ -3261,7 +5052,20 @@ function placeSelectedEntityAtMouse() {
 
   const type = HOTBAR_ENTITY_TYPES[selectedHotbarSlot];
   if (!type) return;
-  const footprintTiles = getSafeFootprintTilesAt(type, tileX, tileY);
+  const tile = map.tiles[tileY][tileX];
+  const options = getPlacementOptionsForTile(type, tile);
+  const placementFacing = drawGame.state.placementFacing || options?.facing || "E";
+  const isRestrictedMode = !!drawGame.state.isRestrictedMode;
+  const bypassRestrictedBuildRules =
+    isRestrictedMode &&
+    !!drawGame.state.restrictedBuildRestrictionsDisabled;
+  const footprintTiles = getSafeFootprintTilesAt(
+    type,
+    tileX,
+    tileY,
+    placementFacing,
+    options
+  );
 
   for (const entry of footprintTiles) {
     if (
@@ -3272,7 +5076,7 @@ function placeSelectedEntityAtMouse() {
     ) {
       return;
     }
-    if (!isTileWithinModificationRange(entry.y, entry.x)) {
+    if (!bypassRestrictedBuildRules && !isTileWithinModificationRange(entry.y, entry.x)) {
       triggerModificationRangeBlink();
       return;
     }
@@ -3282,12 +5086,8 @@ function placeSelectedEntityAtMouse() {
     }
   }
 
-  const tile = map.tiles[tileY][tileX];
-
   // Build placement options based on entity type and tile
-  const options = getPlacementOptionsForTile(type, tile);
-  const isRestrictedMode = !!drawGame.state.isRestrictedMode;
-  if (isRestrictedMode) {
+  if (isRestrictedMode && !bypassRestrictedBuildRules) {
     const restrictedInventory = getRestrictedModeShuttleInventory();
     const missingResources = getMissingBuildResources(type, restrictedInventory);
     if (missingResources.length > 0) {
@@ -3298,7 +5098,7 @@ function placeSelectedEntityAtMouse() {
   }
 
   const newEntity = createEntity(type, tileX, tileY, options);
-  newEntity.state.facing = drawGame.state.placementFacing || "E";
+  newEntity.state.facing = placementFacing;
 
   entities.push(newEntity);
 
@@ -3318,6 +5118,7 @@ function placeSelectedEntityAtMouse() {
       name: hotbarItem.name,
       entityType: hotbarItem.entityType,
       facing: newEntity.state.facing,
+      shape: newEntity.state?.shape || null,
       entityId: newEntity.id
     };
     if (drawGame.state) {
@@ -3351,8 +5152,171 @@ function getPlacementOptionsForTile(type, tile) {
   return getPlacementOptionsForEntity(type, tile);
 }
 
+function tryApplyTubeGeometry(entity, nextFacing, nextShape) {
+  if (!drawGame.state || !entity || entity.type !== ENTITY_TYPES.TUBE) {
+    return false;
+  }
+
+  const { map, config } = drawGame.state;
+  const mapCols = config.mapCols;
+  const mapRows = config.mapRows;
+  const currentFacing = entity.state?.facing || "E";
+  const currentShape = entity.state?.shape || TUBE_SHAPES.STRAIGHT;
+  const resolvedFacing = nextFacing || currentFacing;
+  const resolvedShape = nextShape || currentShape;
+  const currentTiles = getSafeFootprintTilesAt(
+    entity.type,
+    entity.tileX,
+    entity.tileY,
+    currentFacing,
+    { shape: currentShape }
+  );
+  const nextTiles = getSafeFootprintTilesAt(
+    entity.type,
+    entity.tileX,
+    entity.tileY,
+    resolvedFacing,
+    { shape: resolvedShape }
+  );
+
+  for (const entry of nextTiles) {
+    if (
+      entry.x < 0 || entry.x >= mapCols ||
+      entry.y < 0 || entry.y >= mapRows
+    ) {
+      return false;
+    }
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile) {
+      return false;
+    }
+    if (tile.entityId != null && tile.entityId !== entity.id) {
+      return false;
+    }
+  }
+
+  const nextSet = new Set(nextTiles.map((entry) => `${entry.x},${entry.y}`));
+  for (const entry of currentTiles) {
+    if (nextSet.has(`${entry.x},${entry.y}`)) {
+      continue;
+    }
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile || tile.entityId !== entity.id) {
+      continue;
+    }
+    tile.entityId = null;
+    tile.entity = null;
+    tile.item = null;
+    tile.colorOverride = null;
+    if (tile.building && tile.building.entityId === entity.id) {
+      tile.building = null;
+    }
+  }
+
+  entity.state.facing = resolvedFacing;
+  entity.state.shape = resolvedShape;
+  syncTileBuildingFacing(entity);
+
+  for (const entry of nextTiles) {
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile) {
+      continue;
+    }
+    tile.entityId = entity.id;
+    tile.entity = entity;
+    tile.item = entity.type;
+    tile.colorOverride = null;
+  }
+
+  return true;
+}
+
+function tryApplyNonTubeFacing(entity, nextFacing) {
+  if (!drawGame.state || !entity || entity.type === ENTITY_TYPES.TUBE) {
+    return false;
+  }
+
+  const { map, config } = drawGame.state;
+  const mapCols = config.mapCols;
+  const mapRows = config.mapRows;
+  const currentFacing = entity.state?.facing || "E";
+  const resolvedFacing = nextFacing || currentFacing;
+  const currentTiles = getSafeFootprintTilesAt(
+    entity.type,
+    entity.tileX,
+    entity.tileY,
+    currentFacing,
+    entity.state
+  );
+  const nextTiles = getSafeFootprintTilesAt(
+    entity.type,
+    entity.tileX,
+    entity.tileY,
+    resolvedFacing,
+    entity.state
+  );
+
+  for (const entry of nextTiles) {
+    if (
+      entry.x < 0 || entry.x >= mapCols ||
+      entry.y < 0 || entry.y >= mapRows
+    ) {
+      return false;
+    }
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile) {
+      return false;
+    }
+    if (tile.entityId != null && tile.entityId !== entity.id) {
+      return false;
+    }
+  }
+
+  const nextSet = new Set(nextTiles.map((entry) => `${entry.x},${entry.y}`));
+  for (const entry of currentTiles) {
+    if (nextSet.has(`${entry.x},${entry.y}`)) {
+      continue;
+    }
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile || tile.entityId !== entity.id) {
+      continue;
+    }
+    tile.entityId = null;
+    tile.entity = null;
+    tile.item = null;
+    tile.colorOverride = null;
+    if (tile.building && tile.building.entityId === entity.id) {
+      tile.building = null;
+    }
+  }
+
+  entity.state.facing = resolvedFacing;
+  syncTileBuildingFacing(entity);
+
+  for (const entry of nextTiles) {
+    const tile = map.tiles[entry.y]?.[entry.x];
+    if (!tile) {
+      continue;
+    }
+    tile.entityId = entity.id;
+    tile.entity = entity;
+    tile.item = entity.type;
+    tile.colorOverride = null;
+  }
+
+  return true;
+}
+
 
 function keyPressed() {
+  requestBackgroundMusicStart();
+  if (currentState === "ENDGAME") {
+    if (keyCode === ENTER || key === " " || keyCode === ESCAPE) {
+      currentState = "MENU";
+    }
+    return;
+  }
+
   if (currentState != "GAME") {
     return;
   }
@@ -3363,6 +5327,8 @@ function keyPressed() {
     keyIsDown(SHIFT)
   ) {
     if (drawGame.state && drawGame.state.isRestrictedMode) {
+      drawGame.state.restrictedBuildRestrictionsDisabled = true;
+      console.log("Restricted mode build restrictions disabled (range + cost checks bypassed).");
       if (
         typeof DevCheckpoint !== "undefined" &&
         typeof DevCheckpoint.applyRestrictedLateGameSkip === "function"
@@ -3398,10 +5364,17 @@ function keyPressed() {
           ? TUBE_SHAPES.STRAIGHT
           : TUBE_SHAPES.CORNER;
     } else if (hoveredEntity && hoveredEntity.type === ENTITY_TYPES.TUBE) {
-      hoveredEntity.state.shape = hoveredEntity.state.shape === TUBE_SHAPES.CORNER
+      const nextShape = hoveredEntity.state.shape === TUBE_SHAPES.CORNER
         ? TUBE_SHAPES.STRAIGHT
         : TUBE_SHAPES.CORNER;
-      updateConnections(drawGame.state.entities);
+      const applied = tryApplyTubeGeometry(
+        hoveredEntity,
+        hoveredEntity.state.facing || "E",
+        nextShape
+      );
+      if (applied) {
+        updateConnections(drawGame.state.entities);
+      }
     }
   } else if (key === 'r' || key === 'R') {
     if (selectedHotbarSlot >= 0 && getSelectedHotbarItem()) {
@@ -3411,9 +5384,14 @@ function keyPressed() {
       const current = hoveredEntity.state.facing || "E";
       const index = order.indexOf(current);
       const next = index === -1 ? "E" : order[(index + 1) % order.length];
-      hoveredEntity.state.facing = next;
-      syncTileBuildingFacing(hoveredEntity);
-      updateConnections(drawGame.state.entities);
+      const applied = tryApplyTubeGeometry(
+        hoveredEntity,
+        next,
+        hoveredEntity.state.shape || TUBE_SHAPES.STRAIGHT
+      );
+      if (applied) {
+        updateConnections(drawGame.state.entities);
+      }
     } else if (
       hoveredEntity &&
       (hoveredEntity.type === ENTITY_TYPES.MINER ||
@@ -3426,9 +5404,10 @@ function keyPressed() {
       const current = hoveredEntity.state.facing || "E";
       const index = order.indexOf(current);
       const next = index === -1 ? "E" : order[(index + 1) % order.length];
-      hoveredEntity.state.facing = next;
-      syncTileBuildingFacing(hoveredEntity);
-      updateConnections(drawGame.state.entities);
+      const applied = tryApplyNonTubeFacing(hoveredEntity, next);
+      if (applied) {
+        updateConnections(drawGame.state.entities);
+      }
     } else {
       repairEntityUnderMouse();
     }
@@ -3471,6 +5450,12 @@ function deleteEntityUnderMouse() {
   }
 
   if (targetId != null) {
+    const targetEntity = entities.find((entry) => entry.id === targetId) || null;
+    // Rocket is pre-placed and should not be removable.
+    if (targetEntity && targetEntity.type === ENTITY_TYPES.ROCKET_SITE) {
+      return;
+    }
+
     const index = entities.findIndex((entry) => entry.id === targetId);
     if (index !== -1) {
       if (drawGame.state.isRestrictedMode && targetEntity) {
@@ -3636,15 +5621,32 @@ function updateConnections(entities) {
 }
 
 function logConnectionDebug(entities) {
+  const miners = [];
   const tubes = [];
   const splitters = [];
+  const mergers = [];
   const smelters = [];
+  const constructors = [];
 
   for (const entity of entities) {
-    if (entity.type === ENTITY_TYPES.TUBE) {
+    if (entity.type === ENTITY_TYPES.MINER) {
+      miners.push({
+        id: entity.id,
+        at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
+        inputRate: entity.state.inputRate ?? 0,
+        outputRate: entity.state.outputRate ?? 0,
+        outputType: entity.state.outputType || null,
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
+      });
+    } else if (entity.type === ENTITY_TYPES.TUBE) {
       tubes.push({
         id: entity.id,
         at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
+        shape: entity.state?.shape || TUBE_SHAPES.STRAIGHT,
         from: entity.state.fromEntityId || null,
         to: entity.state.toEntityId || null,
         component: entity.state.componentId ?? null,
@@ -3655,29 +5657,80 @@ function logConnectionDebug(entities) {
       splitters.push({
         id: entity.id,
         at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
         inputRate: entity.state.inputRate ?? 0,
         outputRate: entity.state.outputRate ?? 0,
+        inputType: entity.state.inputType || null,
         outputType: entity.state.outputType || null,
-        isActive: !!entity.state.isActive
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
+      });
+    } else if (entity.type === ENTITY_TYPES.MERGER) {
+      mergers.push({
+        id: entity.id,
+        at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
+        inputRate: entity.state.inputRate ?? 0,
+        outputRate: entity.state.outputRate ?? 0,
+        inputType: entity.state.inputType || null,
+        outputType: entity.state.outputType || null,
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
       });
     } else if (entity.type === ENTITY_TYPES.SMELTER) {
       smelters.push({
         id: entity.id,
         at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
         inputRate: entity.state.inputRate ?? 0,
         outputRate: entity.state.outputRate ?? 0,
         inputType: entity.state.inputType || null,
         outputType: entity.state.outputType || null,
-        isOn: !!entity.state.isOn
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
+      });
+    } else if (entity.type === ENTITY_TYPES.CONSTRUCTOR) {
+      constructors.push({
+        id: entity.id,
+        at: `${entity.tileX},${entity.tileY}`,
+        facing: entity.state?.facing || "E",
+        inputRate: entity.state.inputRate ?? 0,
+        outputRate: entity.state.outputRate ?? 0,
+        inputSlots: Array.isArray(entity.state.inputSlots)
+          ? entity.state.inputSlots.map((slot) => ({
+              type: slot?.type || null,
+              count: slot?.count ?? 0
+            }))
+          : [],
+        outputType: entity.state.outputType || null,
+        outputCount: entity.state.outputCount ?? 0,
+        outputBuffer: entity.state.outputBuffer ?? 0,
+        isOn: !!entity.state.isOn,
+        isActive: !!entity.state.isActive,
+        isConnected: !!entity.state.isConnected
       });
     }
   }
 
-  console.log("Connection debug:", {
+  const snapshot = {
+    miners,
     tubes,
     splitters,
-    smelters
-  });
+    mergers,
+    smelters,
+    constructors
+  };
+
+  console.log("Connection debug:", snapshot);
+
+  try {
+    globalThis.__lastConnectionDebug = JSON.parse(JSON.stringify(snapshot));
+  } catch (_error) {
+    globalThis.__lastConnectionDebug = snapshot;
+  }
 }
 
 function getIncomingTubeInputs(entities, targetId) {
@@ -3891,6 +5944,10 @@ function updateSplitterMergerRates(entities) {
     }
 
     const inputs = incoming.get(entity.id) || [];
+    const inputConnectionCount = inputs.length;
+    const outputConnectionCount = outgoingCount.get(entity.id) || 0;
+    const hasValidIoConnection =
+      inputConnectionCount > 0 && outputConnectionCount > 0;
     const totalRate = inputs.reduce((sum, entry) => sum + entry.rate, 0);
     const types = inputs.map((entry) => entry.outputType).filter(Boolean);
     const sharedType = types.length > 0 && types.every((type) => type === types[0])
@@ -3898,17 +5955,24 @@ function updateSplitterMergerRates(entities) {
       : null;
 
     if (entity.type === ENTITY_TYPES.SPLITTER) {
-      const outputCount = outgoingCount.get(entity.id) || 0;
-      const perOutputRate = outputCount > 0 ? totalRate / outputCount : 0;
-      entity.state.inputRate = totalRate;
-      entity.state.outputRate = sharedType ? perOutputRate : 0;
-      entity.state.outputType = sharedType;
-      entity.state.isActive = !!sharedType && totalRate > 0;
+      const perOutputRate = outputConnectionCount > 0
+        ? totalRate / outputConnectionCount
+        : 0;
+      entity.state.inputRate = hasValidIoConnection ? totalRate : 0;
+      entity.state.outputRate =
+        hasValidIoConnection && sharedType ? perOutputRate : 0;
+      entity.state.outputType = hasValidIoConnection ? sharedType : null;
+      entity.state.isOn = hasValidIoConnection;
+      entity.state.isActive =
+        hasValidIoConnection && !!sharedType && totalRate > 0;
     } else {
-      entity.state.inputRate = totalRate;
-      entity.state.outputRate = sharedType ? totalRate : 0;
-      entity.state.outputType = sharedType;
-      entity.state.isActive = !!sharedType && totalRate > 0;
+      entity.state.inputRate = hasValidIoConnection ? totalRate : 0;
+      entity.state.outputRate =
+        hasValidIoConnection && sharedType ? totalRate : 0;
+      entity.state.outputType = hasValidIoConnection ? sharedType : null;
+      entity.state.isOn = hasValidIoConnection;
+      entity.state.isActive =
+        hasValidIoConnection && !!sharedType && totalRate > 0;
     }
   }
 }

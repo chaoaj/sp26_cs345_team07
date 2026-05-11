@@ -116,9 +116,22 @@ const TUBE_PORT_DEFS = {
     output: { x: 0, y: 1 } 
   },
   [TUBE_SHAPES.CORNER]: { 
-    input: { x: 1, y: 0 }, 
-    output: { x: 0, y: 1 } 
+    // 3-tile L corner: ports connect at arm endpoints.
+    input: { x: 2, y: 0 }, 
+    output: { x: 0, y: 2 } 
   }
+};
+
+// Tube footprint offsets in east-facing orientation.
+const TUBE_FOOTPRINT_DEFS = {
+  [TUBE_SHAPES.STRAIGHT]: [
+    { x: 0, y: 0 }
+  ],
+  [TUBE_SHAPES.CORNER]: [
+    { x: 0, y: 0 },
+    { x: 1, y: 0 },
+    { x: 0, y: 1 }
+  ]
 };
 
 /**
@@ -163,7 +176,7 @@ const ENTITY_PORT_DEFS = {
   ],
   [ENTITY_TYPES.SMELTER]: [
     { name: "input", kind: "input", offset: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 1, y: 0 } }
+    { name: "output", kind: "output", offset: { x: 1, y: 1 } }
   ],
   [ENTITY_TYPES.CONSTRUCTOR]: [
     { name: "input", kind: "input", offset: { x: 0, y: -1 } },
@@ -171,14 +184,14 @@ const ENTITY_PORT_DEFS = {
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.MERGER]: [
-    { name: "input", kind: "input", offset: { x: 0, y: -1 } },
-    { name: "input", kind: "input", offset: { x: 0, y: 1 } },
+    { name: "inputNorth", kind: "input", offset: { x: -1, y: -1 } },
+    { name: "inputSouth", kind: "input", offset: { x: -1, y: 1 } },
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.SPLITTER]: [
     { name: "input", kind: "input", offset: { x: -1, y: 0 } },
-    { name: "output", kind: "output", offset: { x: 0, y: -1 } },
-    { name: "output", kind: "output", offset: { x: 0, y: 1 } }
+    { name: "outputNorth", kind: "output", offset: { x: 1, y: -1 } },
+    { name: "outputSouth", kind: "output", offset: { x: 1, y: 1 } }
   ],
   [ENTITY_TYPES.SHUTTLE]: [
     { name: "inputLeft", kind: "input", offset: { x: -2, y: 0 } },
@@ -187,7 +200,11 @@ const ENTITY_PORT_DEFS = {
     { name: "inputDown", kind: "input", offset: { x: 0, y: 2 } }
   ],
   [ENTITY_TYPES.ROCKET_SITE]: [
-    { name: "input", kind: "input", offset: { x: -1, y: 0 } }
+    // 3x5 rocket footprint (centered on entity tile):
+    // ports sit one tile outside the ship on left, right, and bottom.
+    { name: RESOURCE_TYPES.ELECTRONICS, kind: "input", offset: { x: -2, y: 0 } },
+    { name: RESOURCE_TYPES.SHIP_ALLOY, kind: "input", offset: { x: 2, y: 0 } },
+    { name: RESOURCE_TYPES.ROCKET_FUEL, kind: "input", offset: { x: 0, y: 3 } }
   ],
   [ENTITY_TYPES.EXTRACTOR]: [
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
@@ -195,10 +212,32 @@ const ENTITY_PORT_DEFS = {
 };
 
 const ENTITY_FOOTPRINT_DEFS = {
+  [ENTITY_TYPES.SMELTER]: [
+    { x: 0, y: 0 },
+    { x: 0, y: 1 }
+  ],
+  [ENTITY_TYPES.SPLITTER]: [
+    { x: 0, y: -1 },
+    { x: 0, y: 0 },
+    { x: 0, y: 1 }
+  ],
+  [ENTITY_TYPES.MERGER]: [
+    { x: 0, y: -1 },
+    { x: 0, y: 0 },
+    { x: 0, y: 1 }
+  ],
   [ENTITY_TYPES.SHUTTLE]: [
     { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
     { x: -1, y: 0 },  { x: 0, y: 0 },  { x: 1, y: 0 },
     { x: -1, y: 1 },  { x: 0, y: 1 },  { x: 1, y: 1 }
+  ],
+  // Vertically long rocket footprint (3 columns x 5 rows), centered on entity tile.
+  [ENTITY_TYPES.ROCKET_SITE]: [
+    { x: -1, y: -2 }, { x: 0, y: -2 }, { x: 1, y: -2 },
+    { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
+    { x: -1, y: 0 },  { x: 0, y: 0 },  { x: 1, y: 0 },
+    { x: -1, y: 1 },  { x: 0, y: 1 },  { x: 1, y: 1 },
+    { x: -1, y: 2 },  { x: 0, y: 2 },  { x: 1, y: 2 }
   ]
 };
 
@@ -412,6 +451,7 @@ class TubeState extends EntityState {
     super();
     this.isOn = true;
     this.isActive = true;
+    this.zLane = 0;
     this.shape = shape === TUBE_SHAPES.CORNER ? shape : TUBE_SHAPES.STRAIGHT;
     this.facing = facing || "E";
     this.carriedItem = null;
@@ -561,6 +601,10 @@ function getTubePortOffsets(tube) {
   };
 }
 
+function getTubeFootprintOffsets(shape = TUBE_SHAPES.STRAIGHT) {
+  return TUBE_FOOTPRINT_DEFS[shape] || TUBE_FOOTPRINT_DEFS[TUBE_SHAPES.STRAIGHT];
+}
+
 function getTubePortTiles(tube) {
   const offsets = getTubePortOffsets(tube);
   const isCorner = tube.state?.shape === TUBE_SHAPES.CORNER;
@@ -586,25 +630,56 @@ function getTubeConnectionOffsets(tube) {
   return [offsets.input, offsets.output];
 }
 
-function getTubePortConnections(entities, tube) {
-  const offsets = getTubeConnectionOffsets(tube);
-  const offsetKeys = new Set(offsets.map((offset) => `${offset.x},${offset.y}`));
-  const portMatches = getPortsAtTile(entities, tube.tileX, tube.tileY);
-  const connections = [];
+function getEntityFootprintOffsetsForFacing(entity) {
+  const facing = entity.state?.facing || "E";
+  const offsets = entity.type === ENTITY_TYPES.TUBE
+    ? getTubeFootprintOffsets(entity.state?.shape || TUBE_SHAPES.STRAIGHT)
+    : getEntityFootprintOffsets(entity.type);
+  return offsets.map((offset) => rotateOffsetFromEast(offset, facing));
+}
 
-  for (const match of portMatches) {
-    const dx = match.entity.tileX - tube.tileX;
-    const dy = match.entity.tileY - tube.tileY;
-    const normalizedDx = Math.sign(dx);
-    const normalizedDy = Math.sign(dy);
-    if (
-      (normalizedDx === 0 && normalizedDy === 0) ||
-      (normalizedDx !== 0 && normalizedDy !== 0)
-    ) {
+function getAdjacentFootprintOffsetsFromTube(entity, tubeTileX, tubeTileY) {
+  const footprintOffsets = getEntityFootprintOffsetsForFacing(entity);
+  const adjacentOffsets = new Set();
+
+  for (const offset of footprintOffsets) {
+    const tileX = entity.tileX + offset.x;
+    const tileY = entity.tileY + offset.y;
+    const dx = tileX - tubeTileX;
+    const dy = tileY - tubeTileY;
+    if (Math.abs(dx) + Math.abs(dy) === 1) {
+      adjacentOffsets.add(`${dx},${dy}`);
+    }
+  }
+
+  return adjacentOffsets;
+}
+
+function getTubePortConnections(entities, tube) {
+  const connections = [];
+  const seen = new Set();
+  const tubeFootprintKeys = new Set(
+    getEntityFootprintOffsetsForFacing(tube).map(
+      (offset) => `${tube.tileX + offset.x},${tube.tileY + offset.y}`
+    )
+  );
+
+  for (const entity of entities) {
+    if (entity.id === tube.id || entity.type === ENTITY_TYPES.TUBE) {
       continue;
     }
-    if (offsetKeys.has(`${normalizedDx},${normalizedDy}`)) {
-      connections.push({ kind: match.port.kind, entityId: match.entity.id });
+    const ports = getEntityConnectionPorts(entity);
+    for (const port of ports) {
+      const key = `${port.worldX},${port.worldY}`;
+      if (!tubeFootprintKeys.has(key)) {
+        continue;
+      }
+      const seenKey = `${entity.id}:${port.kind}`;
+      if (seen.has(seenKey)) {
+        continue;
+      }
+      seen.add(seenKey);
+      connections.push({ kind: port.kind, entityId: entity.id });
     }
   }
 
@@ -612,24 +687,38 @@ function getTubePortConnections(entities, tube) {
 }
 
 function getTubeEntityOffsetConnections(entities, tube) {
-  const portMatches = getPortsAtTile(entities, tube.tileX, tube.tileY);
-  const offsets = new Set();
+  const tubeFootprintKeys = new Set(
+    getEntityFootprintOffsetsForFacing(tube).map(
+      (offset) => `${tube.tileX + offset.x},${tube.tileY + offset.y}`
+    )
+  );
+  const occupiedEntityPortKeys = new Set();
+  const occupiedEntityPortEntries = [];
 
-  for (const match of portMatches) {
-    const dx = match.entity.tileX - tube.tileX;
-    const dy = match.entity.tileY - tube.tileY;
-    const normalizedDx = Math.sign(dx);
-    const normalizedDy = Math.sign(dy);
-    if (
-      (normalizedDx === 0 && normalizedDy === 0) ||
-      (normalizedDx !== 0 && normalizedDy !== 0)
-    ) {
+  for (const entity of entities) {
+    if (entity.id === tube.id || entity.type === ENTITY_TYPES.TUBE) {
       continue;
     }
-    offsets.add(`${normalizedDx},${normalizedDy}`);
+    const ports = getEntityConnectionPorts(entity);
+    for (const port of ports) {
+      const key = `${port.worldX},${port.worldY}`;
+      if (!tubeFootprintKeys.has(key)) {
+        continue;
+      }
+      occupiedEntityPortKeys.add(key);
+      occupiedEntityPortEntries.push({
+        key,
+        entityId: entity.id,
+        portName: port.name || null,
+        portKind: port.kind || null
+      });
+    }
   }
 
-  return offsets;
+  return {
+    occupiedEntityPortKeys,
+    occupiedEntityPortEntries
+  };
 }
 
 function getEntityConnectionPorts(entity) {
@@ -724,16 +813,15 @@ function createEntity(type, tileX, tileY, options = {}) {
 function refreshEntityConnectionStates(entities) {
   const attachedIds = new Set();
   const tubeById = new Map();
-  const tubeByTile = new Map();
   const tubes = [];
   const tubeConnections = new Map();
   const adjacency = new Map();
+  const tubeIdsByFootprintKey = new Map();
 
   for (const entity of entities) {
     if (entity.type === ENTITY_TYPES.TUBE) {
       tubes.push(entity);
       tubeById.set(entity.id, entity);
-      tubeByTile.set(`${entity.tileX},${entity.tileY}`, entity);
       adjacency.set(entity.id, new Set());
     }
   }
@@ -744,28 +832,48 @@ function refreshEntityConnectionStates(entities) {
       x: tube.tileX + offset.x,
       y: tube.tileY + offset.y
     }));
-    const entityOffsetConnections = getTubeEntityOffsetConnections(entities, tube);
+    const footprintTiles = getEntityFootprintOffsetsForFacing(tube).map((offset) => ({
+      x: tube.tileX + offset.x,
+      y: tube.tileY + offset.y
+    }));
+    const {
+      occupiedEntityPortKeys,
+      occupiedEntityPortEntries
+    } = getTubeEntityOffsetConnections(entities, tube);
     const connectionKeys = new Set(
       connectionTiles.map((tile) => `${tile.x},${tile.y}`)
+    );
+    const footprintKeys = new Set(
+      footprintTiles.map((tile) => `${tile.x},${tile.y}`)
     );
     tubeConnections.set(tube.id, {
       offsets,
       connectionTiles,
       connectionKeys,
-      entityOffsetConnections
+      footprintKeys,
+      occupiedEntityPortKeys,
+      occupiedEntityPortEntries
     });
+    for (const key of footprintKeys) {
+      if (!tubeIdsByFootprintKey.has(key)) {
+        tubeIdsByFootprintKey.set(key, new Set());
+      }
+      tubeIdsByFootprintKey.get(key).add(tube.id);
+    }
   }
 
   for (const tube of tubes) {
     const connections = tubeConnections.get(tube.id);
     for (const tile of connections.connectionTiles) {
-      const neighbor = tubeByTile.get(`${tile.x},${tile.y}`);
-      if (!neighbor) continue;
-
-      const neighborConnections = tubeConnections.get(neighbor.id);
-      if (neighborConnections.connectionKeys.has(`${tube.tileX},${tube.tileY}`)) {
-        adjacency.get(tube.id).add(neighbor.id);
-        adjacency.get(neighbor.id).add(tube.id);
+      const key = `${tile.x},${tile.y}`;
+      const occupyingTubes = tubeIdsByFootprintKey.get(key);
+      if (!occupyingTubes) continue;
+      for (const neighborId of occupyingTubes) {
+        if (neighborId === tube.id) {
+          continue;
+        }
+        adjacency.get(tube.id).add(neighborId);
+        adjacency.get(neighborId).add(tube.id);
       }
     }
   }
@@ -867,26 +975,56 @@ function refreshEntityConnectionStates(entities) {
 
     for (const member of component) {
       const connections = tubeConnections.get(member.id);
-      const entityOffsets = connections.entityOffsetConnections;
-      let hasOpenPort = false;
+      const occupiedEntityPortKeys = connections.occupiedEntityPortKeys;
+      const occupiedEntityPortEntries = connections.occupiedEntityPortEntries || [];
+      let connectedSideCount = 0;
 
       for (const tile of connections.connectionTiles) {
         const key = `${tile.x},${tile.y}`;
-        const neighbor = tubeByTile.get(key);
-        const hasNeighbor = neighbor && adjacency.get(member.id).has(neighbor.id);
-        const dx = tile.x - member.tileX;
-        const dy = tile.y - member.tileY;
-        const hasEntityPort = entityOffsets.has(`${dx},${dy}`);
+        const occupyingTubes = tubeIdsByFootprintKey.get(key);
+        let hasNeighbor = false;
+        if (occupyingTubes) {
+          for (const neighborId of occupyingTubes) {
+            if (neighborId !== member.id) {
+              hasNeighbor = true;
+              break;
+            }
+          }
+        }
+        const hasEntityPort = occupiedEntityPortKeys.has(key);
 
-        if (!hasNeighbor && !hasEntityPort) {
-          hasOpenPort = true;
-          break;
+        if (hasNeighbor || hasEntityPort) {
+          connectedSideCount += 1;
         }
       }
 
+      // Covers rules where the tube body occupies an entity port tile that is
+      // not one of this tube's explicit connection tiles (e.g., miner output).
+      let offEndpointPortConnectionCount = 0;
+      const seenOffEndpointPorts = new Set();
+      for (const entry of occupiedEntityPortEntries) {
+        if (!entry || !entry.key) {
+          continue;
+        }
+        if (connections.connectionKeys.has(entry.key)) {
+          continue;
+        }
+        const signature = `${entry.entityId}:${entry.portName || entry.portKind || "port"}:${entry.key}`;
+        if (seenOffEndpointPorts.has(signature)) {
+          continue;
+        }
+        seenOffEndpointPorts.add(signature);
+        offEndpointPortConnectionCount += 1;
+      }
+      if (offEndpointPortConnectionCount > 0) {
+        connectedSideCount += offEndpointPortConnectionCount;
+      }
+
+      const hasOpenPort = connectedSideCount < 2;
       member.state.fromEntityId = fromEntityId;
       member.state.toEntityId = toEntityId;
       member.state.isConnected = connected;
+      member.state.hasOpenPort = hasOpenPort;
       const tubeRate = hasOpenPort ? 0 : baseRate;
       member.state.inputRate = tubeRate;
       member.state.outputRate = tubeRate;
