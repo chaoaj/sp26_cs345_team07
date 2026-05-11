@@ -1271,7 +1271,11 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourc
   // Snapshot coords: (38,29), (37,29), (39,29).
   const forcedCopperBlocks = [
     { x: 37, y: 29 }, // covers (37,29) and (38,29)
-    { x: 39, y: 29 }  // covers (39,29)
+    { x: 39, y: 29 }, // covers (39,29)
+    // Two larger copper patches around (62,61) to guarantee:
+    // (62,61), (61,61), and (62,60) are copper tiles.
+    { x: 61, y: 60 },
+    { x: 63, y: 60 }
   ];
   for (const block of forcedCopperBlocks) {
     placeResourceNodeBlock2x2(block.x, block.y, "copper");
@@ -4448,6 +4452,7 @@ function drawBuildingPlacementHologram(
 
   push();
   translate(cx, cy);
+  const previewAlpha = 225;
   const useMinerOffHologram =
     entityType === ENTITY_TYPES.MINER &&
     minerSpriteSheetImg &&
@@ -4461,9 +4466,6 @@ function drawBuildingPlacementHologram(
   const useMergerHologram =
     entityType === ENTITY_TYPES.MERGER &&
     getMergerSpriteForFacing(previewFacing, { preferSideForEast: true });
-  const useSmelterHologram =
-    entityType === ENTITY_TYPES.SMELTER &&
-    getSmelterSpriteForFacing(previewFacing);
   const useConstructorHologram =
     entityType === ENTITY_TYPES.CONSTRUCTOR &&
     getConstructorSpriteForFacing(previewFacing);
