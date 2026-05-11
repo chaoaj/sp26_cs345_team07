@@ -22,7 +22,7 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
+let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg, rocketPlatformImg;
 let ironDepositImg, copperDepositImg, heliumDepositImg;
 
 let bgTiles = [];
@@ -34,7 +34,7 @@ let currentFrame = 0;
 let facingLeft = false;
 const animationFPS = 10;
 const ROCKET_HALF_WIDTH_TILES = 1;   // 3 tiles wide
-const ROCKET_HALF_HEIGHT_TILES = 2;  // 5 tiles tall
+const ROCKET_HALF_HEIGHT_TILES = 1;  // 3 tiles tall
 
 const spriteDimensions = {
   front: {
@@ -110,7 +110,7 @@ let sidebarScrollOffset = 0;
 let sidebarMaxVisibleItems = 12;
 
 const RESTRICTED_SHUTTLE_COL = 25;
-const RESTRICTED_SHUTTLE_ROW = 6;
+const RESTRICTED_SHUTTLE_ROW = 4;
 
 // Manual per-facing pixel offsets for corner tube sprites.
 // Adjust x/y here as needed; defaults are intentionally zero.
@@ -373,6 +373,7 @@ function preload() {
   mergerFrontImg = loadImage('resources/splitter/merger/mergerFront.png');
   mergerBackImg = loadImage('resources/splitter/merger/mergerBack.png');
   mergerSideImg = loadImage('resources/splitter/merger/mergerSide.png');
+  rocketPlatformImg = loadImage('resources/rocket/rocketPlatform(unbuilt).png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -480,6 +481,27 @@ function getRocketFootprintTiles(centerTileX, centerTileY) {
     }
   }
   return tiles;
+}
+
+function resetRuntimeGameStateForNewRun() {
+  drawGame.state = null;
+  selectedHotbarSlot = 0;
+  isSidebarOpen = false;
+  sidebarX = -sidebarWidth;
+  sidebarScrollOffset = 0;
+
+  ironOre = 0;
+  ironBar = 0;
+  ironPlate = 0;
+  copperOre = 0;
+  copperBar = 0;
+  copperPlate = 0;
+  copperWire = 0;
+  helium = 0;
+  rocketFuel = 0;
+  modularComponent = 0;
+  shipAlloy = 0;
+  electronics = 0;
 }
 
 function drawEndGame() {
@@ -663,10 +685,26 @@ function drawGame() {
       rocketMaxCenterX
     );
     const rocketTileY = constrain(
-      mapRows - 1 - ROCKET_HALF_HEIGHT_TILES - 2,
+      mapRows - 1 - ROCKET_HALF_HEIGHT_TILES - 3,
       rocketMinCenterY,
       rocketMaxCenterY
     );
+
+    if (restrictedMode) {
+      // Guaranteed copper node in the open area to the right of the crashed rocket.
+      const rocketRightCopperX = constrain(
+        rocketTileX + ROCKET_HALF_WIDTH_TILES + 3,
+        0,
+        mapCols - 2
+      );
+      const rocketRightCopperY = constrain(
+        rocketTileY - 1,
+        0,
+        mapRows - 2
+      );
+      placeResourceNodeBlock2x2(rocketRightCopperX, rocketRightCopperY, "copper");
+    }
+
     const rocketEntity = createEntity(
       ENTITY_TYPES.ROCKET_SITE,
       rocketTileX,
@@ -684,7 +722,7 @@ function drawGame() {
         .map((port) => `${port.worldX},${port.worldY}`)
     );
 
-    // Occupy a 3x5 footprint centered on the rocket tile.
+    // Occupy a 3x3 footprint centered on the rocket tile.
     // Leave input-port tiles placeable so tubes can connect on-port.
     for (const fp of getRocketFootprintTiles(rocketTileX, rocketTileY)) {
       const row = tiles[fp.y];
@@ -1635,43 +1673,31 @@ function updateRocketConstructionProgress(entities, dt) {
 
   const required = rocketState.required || {};
   const delivered = rocketState.delivered || {};
-  const rocketPorts = getEntityConnectionPorts(rocket).filter((port) => port.kind === "input");
-  const portByCoord = new Map();
-  for (const port of rocketPorts) {
-    portByCoord.set(`${port.worldX},${port.worldY}`, port.name);
-  }
-
   const entitiesById = new Map(entities.map((entity) => [entity.id, entity]));
   const increments = {
     [RESOURCE_TYPES.ELECTRONICS]: 0,
     [RESOURCE_TYPES.SHIP_ALLOY]: 0,
     [RESOURCE_TYPES.ROCKET_FUEL]: 0
   };
+  const processedRocketComponentIds = new Set();
 
   for (const tube of entities) {
     if (tube.type !== ENTITY_TYPES.TUBE) continue;
     if (tube.state?.toEntityId !== rocket.id) continue;
     if (!(tube.state?.isConnected)) continue;
 
+    const componentId = tube.state?.componentId ?? tube.id;
+    if (processedRocketComponentIds.has(componentId)) {
+      continue;
+    }
+    processedRocketComponentIds.add(componentId);
+
     const sourceEntity = entitiesById.get(tube.state.fromEntityId);
     const outputType = sourceEntity?.state?.outputType || tube.state.carriedItem || null;
     const outputRate = Number(tube.state.outputRate) || 0;
     if (!outputType || outputRate <= 0) continue;
-
-    const touchedPortNames = new Set();
-    const tubePortTiles = getTubePortTiles(tube);
-    for (const portTile of tubePortTiles) {
-      const portName = portByCoord.get(`${portTile.worldX},${portTile.worldY}`);
-      if (portName) {
-        touchedPortNames.add(portName);
-      }
-    }
-
-    for (const portName of touchedPortNames) {
-      if (portName === outputType && increments[portName] != null) {
-        increments[portName] += outputRate * dt;
-      }
-    }
+    if (increments[outputType] == null) continue;
+    increments[outputType] += outputRate * dt;
   }
 
   for (const [resourceType, amount] of Object.entries(increments)) {
@@ -2209,6 +2235,22 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   } else {
     image(sprite, spriteX, spriteY, targetWidth, targetHeight);
   }
+  noTint();
+  return true;
+}
+
+function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 255) {
+  if (!rocketPlatformImg || rocketPlatformImg.width <= 0 || rocketPlatformImg.height <= 0) {
+    return false;
+  }
+
+  imageMode(CORNER);
+  if (alpha < 255) {
+    tint(255, constrain(alpha, 0, 255));
+  } else {
+    noTint();
+  }
+  image(rocketPlatformImg, round(px), round(py), round(drawWidth), round(drawHeight));
   noTint();
   return true;
 }
@@ -2791,7 +2833,10 @@ function getEntitySouthmostRenderTileY(entity) {
 function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const px = bounds.px;
-  const py = bounds.py;
+  let py = bounds.py;
+  if (entity.type === ENTITY_TYPES.SHUTTLE) {
+    py -= tileSize;
+  }
   const drawWidth = bounds.drawWidth;
   const drawHeight = bounds.drawHeight;
   const rotatePlacedConstructorContext = (drawFn) => {
@@ -2845,12 +2890,16 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       255,
       { preferSideForEast: true, mirrorWest: true }
     );
+  const drewRocketSprite =
+    entity.type === ENTITY_TYPES.ROCKET_SITE &&
+    drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, 255);
   const drewCustomSprite =
     drewMinerSprite ||
     drewSmelterSprite ||
     drewConstructorSprite ||
     drewSplitterSprite ||
-    drewMergerSprite;
+    drewMergerSprite ||
+    drewRocketSprite;
 
   if (!drewCustomSprite) {
     // Regular building fallback rendering when no custom sprite is used.
@@ -4571,17 +4620,7 @@ function getRocketPortHoverLabelAtTile(col, row) {
   if (!matched) {
     return null;
   }
-
-  if (matched.name === RESOURCE_TYPES.ELECTRONICS) {
-    return "Electronics Port";
-  }
-  if (matched.name === RESOURCE_TYPES.SHIP_ALLOY) {
-    return "Ship Alloy Port";
-  }
-  if (matched.name === RESOURCE_TYPES.ROCKET_FUEL) {
-    return "Rocket Fuel Port";
-  }
-  return "Rocket Port";
+  return "Rocket Input Port";
 }
 
 function getMapHoverTooltipLabel(hit) {
@@ -4857,10 +4896,9 @@ function getHoveredRocketTooltipData() {
       match.port?.kind === "input"
   );
   if (rocketPortMatch) {
-    const resourceType = rocketPortMatch.port.name || "";
     return {
       title: "Rocket Port",
-      label: getResourceTypeLabel(resourceType) || String(resourceType)
+      label: "Any: Electronics, Ship Alloy, Rocket Fuel"
     };
   }
 
@@ -5556,6 +5594,7 @@ function keyPressed() {
   requestBackgroundMusicStart();
   if (currentState === "ENDGAME") {
     if (keyCode === ENTER || key === " " || keyCode === ESCAPE) {
+      resetRuntimeGameStateForNewRun();
       currentState = "MENU";
     }
     return;
@@ -5996,7 +6035,76 @@ function getIncomingTubeInputs(entities, targetId) {
     });
   }
 
+  // Allow direct smelter/merger -> constructor intake when ports overlap or touch, even with no tube.
+  const targetEntity = getEntityById(entities, targetId);
+  if (targetEntity && targetEntity.type === ENTITY_TYPES.CONSTRUCTOR) {
+    const targetInputPorts = getEntityConnectionPorts(targetEntity).filter(
+      (port) => port.kind === "input"
+    );
+    const targetInputPortKeys = new Set(
+      targetInputPorts.map((port) => `${port.worldX},${port.worldY}`)
+    );
+
+    for (const entity of entities) {
+      if (
+        entity.id === targetId ||
+        (
+          entity.type !== ENTITY_TYPES.MERGER &&
+          entity.type !== ENTITY_TYPES.SMELTER
+        )
+      ) {
+        continue;
+      }
+
+      const outputType = entity.state?.outputType || null;
+      const outputRate = Number(entity.state?.outputRate) || 0;
+      if (!outputType || outputRate <= 0) {
+        continue;
+      }
+
+      const outputPorts = getEntityConnectionPorts(entity).filter(
+        (port) => port.kind === "output"
+      );
+      for (const port of outputPorts) {
+        if (!matchesDirectConstructorInputPort(port.worldX, port.worldY, targetInputPortKeys)) {
+          continue;
+        }
+        const sourceKeyPrefix =
+          entity.type === ENTITY_TYPES.MERGER ? "m" : "s";
+        const incomingKey = `${sourceKeyPrefix}:${entity.id}:${port.name || "output"}`;
+        if (incomingKeys.has(incomingKey)) {
+          continue;
+        }
+        incomingKeys.add(incomingKey);
+        inputs.push({
+          rate: outputRate,
+          outputType
+        });
+      }
+    }
+  }
+
   return inputs;
+}
+
+function matchesDirectConstructorInputPort(portX, portY, constructorInputPortKeys) {
+  const DIRECT_NEIGHBORS = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 }
+  ];
+  const key = `${portX},${portY}`;
+  if (constructorInputPortKeys.has(key)) return true;
+
+  for (const neighbor of DIRECT_NEIGHBORS) {
+    const neighborKey = `${portX + neighbor.x},${portY + neighbor.y}`;
+    if (constructorInputPortKeys.has(neighborKey)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function updateSmelterInputs(entities) {
@@ -6149,6 +6257,17 @@ function updateSplitterMergerRates(entities) {
   const outgoingCount = new Map();
   const incomingKeys = new Set();
   const outgoingKeys = new Set();
+  const constructorInputPortKeys = new Set();
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.CONSTRUCTOR) continue;
+    const inputPorts = getEntityConnectionPorts(entity).filter(
+      (port) => port.kind === "input"
+    );
+    for (const port of inputPorts) {
+      constructorInputPortKeys.add(`${port.worldX},${port.worldY}`);
+    }
+  }
 
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.TUBE) continue;
@@ -6177,6 +6296,24 @@ function updateSplitterMergerRates(entities) {
       rate: entity.state.outputRate || 0,
       outputType: entity.state.carriedItem || null
     });
+  }
+
+  // Treat direct merger -> constructor overlap/touch as a valid outgoing connection,
+  // so mergers can drive constructors without requiring an intermediate tube.
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.MERGER) continue;
+    const outputPorts = getEntityConnectionPorts(entity).filter(
+      (port) => port.kind === "output"
+    );
+    for (const port of outputPorts) {
+      if (!matchesDirectConstructorInputPort(port.worldX, port.worldY, constructorInputPortKeys)) {
+        continue;
+      }
+      const directOutKey = `m:${entity.id}:${port.name || "output"}:direct`;
+      if (outgoingKeys.has(directOutKey)) continue;
+      outgoingKeys.add(directOutKey);
+      outgoingCount.set(entity.id, (outgoingCount.get(entity.id) || 0) + 1);
+    }
   }
 
   for (const entity of entities) {
