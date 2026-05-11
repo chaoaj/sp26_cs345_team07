@@ -179,8 +179,8 @@ const ENTITY_PORT_DEFS = {
     { name: "output", kind: "output", offset: { x: 1, y: 1 } }
   ],
   [ENTITY_TYPES.CONSTRUCTOR]: [
-    { name: "input", kind: "input", offset: { x: 0, y: -1 } },
-    { name: "input", kind: "input", offset: { x: 0, y: 1 } },
+    { name: "input", kind: "input", offset: { x: 0, y: -2 } },
+    { name: "input", kind: "input", offset: { x: 0, y: 2 } },
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
   ],
   [ENTITY_TYPES.MERGER]: [
@@ -212,6 +212,11 @@ const ENTITY_PORT_DEFS = {
 };
 
 const ENTITY_FOOTPRINT_DEFS = {
+  [ENTITY_TYPES.CONSTRUCTOR]: [
+    { x: 0, y: -1 },
+    { x: 0, y: 0 },
+    { x: 0, y: 1 }
+  ],
   [ENTITY_TYPES.SMELTER]: [
     { x: 0, y: 0 },
     { x: 0, y: 1 }
@@ -820,17 +825,35 @@ function createEntity(type, tileX, tileY, options = {}) {
 
 function refreshEntityConnectionStates(entities) {
   const attachedIds = new Set();
+  const entityById = new Map();
   const tubeById = new Map();
   const tubes = [];
   const tubeConnections = new Map();
   const adjacency = new Map();
   const tubeIdsByFootprintKey = new Map();
+  const nonTubePortsByTile = new Map();
 
   for (const entity of entities) {
+    entityById.set(entity.id, entity);
     if (entity.type === ENTITY_TYPES.TUBE) {
       tubes.push(entity);
       tubeById.set(entity.id, entity);
       adjacency.set(entity.id, new Set());
+      continue;
+    }
+
+    const ports = getEntityConnectionPorts(entity);
+    for (const port of ports) {
+      const key = `${port.worldX},${port.worldY}`;
+      if (!nonTubePortsByTile.has(key)) {
+        nonTubePortsByTile.set(key, []);
+      }
+      nonTubePortsByTile.get(key).push({
+        entityId: entity.id,
+        kind: port.kind,
+        portName: port.name || null,
+        portKind: port.kind || null
+      });
     }
   }
 
@@ -844,15 +867,41 @@ function refreshEntityConnectionStates(entities) {
       x: tube.tileX + offset.x,
       y: tube.tileY + offset.y
     }));
-    const {
-      occupiedEntityPortKeys,
-      occupiedEntityPortEntries
-    } = getTubeEntityOffsetConnections(entities, tube);
-    const connectionKeys = new Set(
-      connectionTiles.map((tile) => `${tile.x},${tile.y}`)
-    );
     const footprintKeys = new Set(
       footprintTiles.map((tile) => `${tile.x},${tile.y}`)
+    );
+    const occupiedEntityPortKeys = new Set();
+    const occupiedEntityPortEntries = [];
+    const portConnections = [];
+    const seenPortConnections = new Set();
+
+    for (const key of footprintKeys) {
+      const tilePorts = nonTubePortsByTile.get(key);
+      if (!tilePorts || tilePorts.length === 0) {
+        continue;
+      }
+      occupiedEntityPortKeys.add(key);
+      for (const portEntry of tilePorts) {
+        occupiedEntityPortEntries.push({
+          key,
+          entityId: portEntry.entityId,
+          portName: portEntry.portName,
+          portKind: portEntry.portKind
+        });
+        const seenKey = `${portEntry.entityId}:${portEntry.kind}`;
+        if (seenPortConnections.has(seenKey)) {
+          continue;
+        }
+        seenPortConnections.add(seenKey);
+        portConnections.push({
+          kind: portEntry.kind,
+          entityId: portEntry.entityId
+        });
+      }
+    }
+
+    const connectionKeys = new Set(
+      connectionTiles.map((tile) => `${tile.x},${tile.y}`)
     );
     tubeConnections.set(tube.id, {
       offsets,
@@ -860,7 +909,8 @@ function refreshEntityConnectionStates(entities) {
       connectionKeys,
       footprintKeys,
       occupiedEntityPortKeys,
-      occupiedEntityPortEntries
+      occupiedEntityPortEntries,
+      portConnections
     });
     for (const key of footprintKeys) {
       if (!tubeIdsByFootprintKey.has(key)) {
@@ -913,7 +963,7 @@ function refreshEntityConnectionStates(entities) {
 
     for (const member of component) {
       member.state.componentId = componentId;
-      const portConnections = getTubePortConnections(entities, member);
+      const portConnections = tubeConnections.get(member.id).portConnections || [];
       for (const connection of portConnections) {
         attachedInComponent.add(connection.entityId);
         if (connection.kind === "output") {
@@ -927,8 +977,8 @@ function refreshEntityConnectionStates(entities) {
     const fromEntityId = outputs.size === 1 ? [...outputs][0] : null;
     const toEntityId = inputs.size === 1 ? [...inputs][0] : null;
     const connected = !!fromEntityId && !!toEntityId;
-    const fromEntity = entities.find((entity) => entity.id === fromEntityId) || null;
-    const toEntity = entities.find((entity) => entity.id === toEntityId) || null;
+    const fromEntity = entityById.get(fromEntityId) || null;
+    const toEntity = entityById.get(toEntityId) || null;
     const sourceRate = fromEntity?.state?.outputRate ?? null;
     const sinkRate = toEntity?.state?.inputRate ?? null;
     const sinkReady = !!toEntity &&
@@ -951,7 +1001,7 @@ function refreshEntityConnectionStates(entities) {
     if (fromEntityId != null) {
       const frontier = [];
       for (const member of component) {
-        const portConnections = getTubePortConnections(entities, member);
+        const portConnections = tubeConnections.get(member.id).portConnections || [];
         const isSourceFacingTube = portConnections.some(
           (connection) =>
             connection.kind === "output" && connection.entityId === fromEntityId
