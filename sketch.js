@@ -22,7 +22,7 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
+let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
 let ironDepositImg, copperDepositImg, heliumDepositImg;
 
 let bgTiles = [];
@@ -364,6 +364,9 @@ function preload() {
   smelterFrontImg = loadImage('resources/smelter/smelterFront.png');
   smelterSideImg = loadImage('resources/smelter/smelterSide.png');
   smelterBackImg = loadImage('resources/smelter/smelterBack.png');
+  constructorFrontImg = loadImage('resources/constructor/constructorFront.png');
+  constructorSideImg = loadImage('resources/constructor/constructorSide.png');
+  constructorBackImg = loadImage('resources/constructor/constructorBack.png');
   splitterFrontImg = loadImage('resources/splitter/merger/splitterFront.png');
   splitterBackImg = loadImage('resources/splitter/merger/splitterBack.png');
   splitterSideImg = loadImage('resources/splitter/merger/splitterSide.png');
@@ -1979,7 +1982,7 @@ function getSmelterManualPixelOffset(facing) {
   };
 }
 
-function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterState, nowSeconds) {
+function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterState, nowSeconds, alpha = 255) {
   const sprite = getSmelterSpriteForFacing(facing);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
     return false;
@@ -2012,7 +2015,11 @@ function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterS
   const srcX = min(frameIndex * frameW, max(0, sprite.width - frameW));
 
   imageMode(CORNER);
-  noTint();
+  if (alpha < 255) {
+    tint(255, constrain(alpha, 0, 255));
+  } else {
+    noTint();
+  }
   const previousSmoothing = drawingContext.imageSmoothingEnabled;
   drawingContext.imageSmoothingEnabled = false;
   if (shouldMirrorWest) {
@@ -2045,6 +2052,58 @@ function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterS
     );
   }
   drawingContext.imageSmoothingEnabled = previousSmoothing;
+  noTint();
+  return true;
+}
+
+function getConstructorSpriteForFacing(facing) {
+  const dir = facing || "E";
+  if (dir === "E") {
+    return constructorSideImg || constructorFrontImg || constructorBackImg || null;
+  }
+  if (dir === "W") {
+    return constructorSideImg || constructorBackImg || constructorFrontImg || null;
+  }
+  if (dir === "N") {
+    return constructorFrontImg || constructorBackImg || constructorSideImg || null;
+  }
+  if (dir === "S") {
+    return constructorBackImg || constructorFrontImg || constructorSideImg || null;
+  }
+  return constructorSideImg || constructorFrontImg || constructorBackImg || null;
+}
+
+function drawPlacedConstructorSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
+  const sprite = getConstructorSpriteForFacing(facing);
+  if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
+    return false;
+  }
+
+  const visualScale = 2;
+  const dir = facing || "E";
+  const targetWidth = round(sprite.width * visualScale);
+  const targetHeight = round(sprite.height * visualScale);
+  const manualX = dir === "E" ? -3 : dir === "W" ? 3 : 0;
+  const spriteX = round(px + (drawWidth - targetWidth) / 2 + manualX);
+  const spriteY = round(py + drawHeight - targetHeight);
+  const shouldMirrorWest = !!options.mirrorWest && dir === "W";
+
+  imageMode(CORNER);
+  if (alpha < 255) {
+    tint(255, constrain(alpha, 0, 255));
+  } else {
+    noTint();
+  }
+  if (shouldMirrorWest) {
+    push();
+    translate(spriteX + targetWidth / 2, 0);
+    scale(-1, 1);
+    image(sprite, -targetWidth / 2, spriteY, targetWidth, targetHeight);
+    pop();
+  } else {
+    image(sprite, spriteX, spriteY, targetWidth, targetHeight);
+  }
+  noTint();
   return true;
 }
 
@@ -2749,6 +2808,17 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       entity.state,
       nowSeconds
     );
+  const drewConstructorSprite =
+    entity.type === ENTITY_TYPES.CONSTRUCTOR &&
+    drawPlacedConstructorSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      entity.state?.facing || "E",
+      255,
+      { mirrorWest: true }
+    );
   const drewSplitterSprite =
     entity.type === ENTITY_TYPES.SPLITTER &&
     drawPlacedSplitterSprite(
@@ -2771,7 +2841,12 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       255,
       { preferSideForEast: true, mirrorWest: true }
     );
-  const drewCustomSprite = drewMinerSprite || drewSmelterSprite || drewSplitterSprite || drewMergerSprite;
+  const drewCustomSprite =
+    drewMinerSprite ||
+    drewSmelterSprite ||
+    drewConstructorSprite ||
+    drewSplitterSprite ||
+    drewMergerSprite;
 
   if (!drewCustomSprite) {
     // Regular building fallback rendering when no custom sprite is used.
@@ -4202,11 +4277,24 @@ function drawBuildingPlacementHologram(
   const useMergerHologram =
     entityType === ENTITY_TYPES.MERGER &&
     getMergerSpriteForFacing(previewFacing, { preferSideForEast: true });
+  const useSmelterHologram =
+    entityType === ENTITY_TYPES.SMELTER &&
+    getSmelterSpriteForFacing(previewFacing);
+  const useConstructorHologram =
+    entityType === ENTITY_TYPES.CONSTRUCTOR &&
+    getConstructorSpriteForFacing(previewFacing);
   const useTubeHologram =
     entityType === ENTITY_TYPES.TUBE &&
     (pipeSideOffImg || pipeFrontOffImg || pipeCurve1OffImg || pipeCurve2OffImg);
 
-  if (!useMinerOffHologram && !useSplitterHologram && !useMergerHologram && !useTubeHologram) {
+  if (
+    !useMinerOffHologram &&
+    !useSmelterHologram &&
+    !useSplitterHologram &&
+    !useMergerHologram &&
+    !useConstructorHologram &&
+    !useTubeHologram
+  ) {
     stroke(colorRgb[0] * 0.45, colorRgb[1] * 0.45, colorRgb[2] * 0.45, 200);
     strokeWeight(2);
     fill(colorRgb[0], colorRgb[1], colorRgb[2], 100);
@@ -4244,6 +4332,17 @@ function drawBuildingPlacementHologram(
       frameH
     );
     noTint();
+  } else if (useSmelterHologram) {
+    drawPlacedSmelterSprite(
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      previewFacing,
+      { isOn: false, isActive: false },
+      millis() / 1000,
+      225
+    );
   } else if (useSplitterHologram) {
     drawPlacedSplitterSprite(
       footprintLeft,
@@ -4263,6 +4362,16 @@ function drawBuildingPlacementHologram(
       previewFacing,
       225,
       { preferSideForEast: true, mirrorWest: true }
+    );
+  } else if (useConstructorHologram) {
+    drawPlacedConstructorSprite(
+      footprintLeft,
+      footprintTop,
+      footprintWidth,
+      footprintHeight,
+      previewFacing,
+      225,
+      { mirrorWest: true }
     );
   } else if (useTubeHologram) {
     drawTubePlacementHologramSprite(
@@ -4985,6 +5094,12 @@ function drawHotbar() {
         smelterFrontImg &&
         smelterFrontImg.width > 0
       );
+      const useConstructorFrontIcon = (
+        i === 2 &&
+        item.entityType === ENTITY_TYPES.CONSTRUCTOR &&
+        constructorFrontImg &&
+        constructorFrontImg.width > 0
+      );
       const useSplitterFrontIcon = (
         i === 4 &&
         item.entityType === ENTITY_TYPES.SPLITTER &&
@@ -5045,6 +5160,12 @@ function drawHotbar() {
           frameW,
           frameH
         );
+        imageMode(CORNER);
+      } else if (useConstructorFrontIcon) {
+        imageMode(CENTER);
+        const iconWidth = iconSize + 8;
+        const iconHeight = iconWidth * (constructorFrontImg.height / constructorFrontImg.width);
+        image(constructorFrontImg, cx, cy + 1, iconWidth, iconHeight);
         imageMode(CORNER);
       } else if (useSplitterFrontIcon) {
         imageMode(CENTER);
