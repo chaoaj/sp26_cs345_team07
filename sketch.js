@@ -4412,9 +4412,6 @@ function drawBuildingPlacementHologram(
   const useMergerHologram =
     entityType === ENTITY_TYPES.MERGER &&
     getMergerSpriteForFacing(previewFacing, { preferSideForEast: true });
-  const useSmelterHologram =
-    entityType === ENTITY_TYPES.SMELTER &&
-    getSmelterSpriteForFacing(previewFacing);
   const useConstructorHologram =
     entityType === ENTITY_TYPES.CONSTRUCTOR &&
     getConstructorSpriteForFacing(previewFacing);
