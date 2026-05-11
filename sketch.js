@@ -4491,6 +4491,8 @@ function drawBuildingPlacementHologram(
     entityType === ENTITY_TYPES.TUBE &&
     (pipeSideOffImg || pipeFrontOffImg || pipeCurve1OffImg || pipeCurve2OffImg);
 
+  const previewAlpha = 150;
+  
   if (
     !useMinerOffHologram &&
     !useSmelterHologram &&
