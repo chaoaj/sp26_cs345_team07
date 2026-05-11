@@ -25,7 +25,7 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg, rocketPlatformImg;
+let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg, rocketPlatformImg, rocketPlatformBuiltImg;
 let ironDepositImg, copperDepositImg, heliumDepositImg;
 
 let bgTiles = [];
@@ -389,6 +389,7 @@ function preload() {
   mergerBackImg = loadImage('resources/splitter/merger/mergerBack.png');
   mergerSideImg = loadImage('resources/splitter/merger/mergerSide.png');
   rocketPlatformImg = loadImage('resources/rocket/rocketPlatform(unbuilt).png');
+  rocketPlatformBuiltImg = loadImage('resources/rocket/rocketPlatform(built).png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -859,7 +860,9 @@ function drawGame() {
         buildCostBlinkUntil: 0,
         buildCostMessageUntil: 0,
         buildCostEntityType: null,
-        buildCostMessageText: ""
+        buildCostMessageText: "",
+        rocketCompletionModalUntil: 0,
+        rocketCompletionModalText: ""
       },
       placementFacing: "E",
       placementTubeShape: TUBE_SHAPES.STRAIGHT,
@@ -907,6 +910,12 @@ function drawGame() {
   }
   if (feedback.buildCostMessageText == null) {
     feedback.buildCostMessageText = "";
+  }
+  if (feedback.rocketCompletionModalUntil == null) {
+    feedback.rocketCompletionModalUntil = 0;
+  }
+  if (feedback.rocketCompletionModalText == null) {
+    feedback.rocketCompletionModalText = "";
   }
 
   if (drawGame.state.player.facing === undefined) {
@@ -960,7 +969,16 @@ function drawGame() {
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
   updateRestrictedModeShuttleIntake(entities, dt);
-  if (updateRocketConstructionProgress(entities, dt)) {
+  const rocketProgress = updateRocketConstructionProgress(entities, dt);
+  if (rocketProgress.justCompleted) {
+    feedback.rocketCompletionModalUntil = millis() + 12000;
+    feedback.rocketCompletionModalText = "Rocket ship complete. Walk to it to launch.";
+  }
+  if (
+    rocketProgress.completed &&
+    rocketProgress.rocket &&
+    isPlayerNearRocketForLaunch(player, rocketProgress.rocket, config)
+  ) {
     currentState = "ENDGAME";
     creditsScrollY = height;
     return;
@@ -1112,6 +1130,7 @@ push();
   drawBuildCostFeedbackMessage();
   drawActiveTubeFlowTooltip();
   drawRocketHoverTooltip();
+  drawRocketCompletionModal();
   updatePlayerAnimation();
 }
 
@@ -1594,6 +1613,55 @@ function drawBuildCostFeedbackMessage() {
   pop();
 }
 
+function drawRocketCompletionModal() {
+  if (!drawGame.state || !drawGame.state.feedback) {
+    return;
+  }
+
+  const feedback = drawGame.state.feedback;
+  const remaining = feedback.rocketCompletionModalUntil - millis();
+  if (remaining <= 0) {
+    return;
+  }
+
+  const message = feedback.rocketCompletionModalText || "Rocket ship complete. Walk to it to launch.";
+
+  push();
+  fill(10, 16, 28, 110);
+  noStroke();
+  rect(0, 0, width, height);
+
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(20);
+  const title = "Rocket Ready";
+  const titleW = textWidth(title);
+  textSize(14);
+  const bodyW = textWidth(message);
+  const padX = 18;
+  const boxW = max(280, max(titleW, bodyW) + padX * 2);
+  const boxH = 96;
+  const boxX = (width - boxW) / 2;
+  const boxY = height * 0.18;
+
+  fill(245, 250, 255, 245);
+  stroke(70, 90, 130, 220);
+  strokeWeight(2);
+  rect(boxX, boxY, boxW, boxH, 10);
+
+  noStroke();
+  fill(24, 34, 56);
+  textStyle(BOLD);
+  textSize(20);
+  text(title, boxX + boxW / 2, boxY + 30);
+
+  fill(35, 45, 68);
+  textStyle(NORMAL);
+  textSize(14);
+  text(message, boxX + boxW / 2, boxY + 62);
+  pop();
+}
+
 function updateRestrictedModeShuttleIntake(entities, dt) {
   const shuttle = getRestrictedModeShuttleEntity();
   if (!shuttle || !Number.isFinite(dt) || dt <= 0) {
@@ -1756,17 +1824,33 @@ function updateFactoryProduction(entities, dt) {
   }
 }
 
+function isPlayerNearRocketForLaunch(player, rocketEntity, config) {
+  if (!player || !rocketEntity || !config) {
+    return false;
+  }
+  const tileSize = Number(config.tileSize) || 32;
+  const mapOriginX = Number(config.mapOriginX) || 0;
+  const mapOriginY = Number(config.mapOriginY) || 0;
+  const rocketCenterX = mapOriginX + (rocketEntity.tileX + 0.5) * tileSize;
+  const rocketCenterY = mapOriginY + (rocketEntity.tileY + 0.5) * tileSize;
+  const dx = player.x - rocketCenterX;
+  const dy = player.y - rocketCenterY;
+  const launchRadius = tileSize * 2.25;
+  return dx * dx + dy * dy <= launchRadius * launchRadius;
+}
+
 function updateRocketConstructionProgress(entities, dt) {
   const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
   if (!rocket || !rocket.state) {
-    return false;
+    return { completed: false, justCompleted: false, rocket: null };
   }
 
   const rocketState = rocket.state;
   if (rocketState.completed) {
-    return true;
+    return { completed: true, justCompleted: false, rocket };
   }
 
+  const wasCompleted = !!rocketState.completed;
   const required = rocketState.required || {};
   const delivered = rocketState.delivered || {};
   const entitiesById = new Map(entities.map((entity) => [entity.id, entity]));
@@ -1815,7 +1899,11 @@ function updateRocketConstructionProgress(entities, dt) {
   rocketState.isActive = !complete && deliveredTotal > 0;
   rocketState.isOn = complete;
 
-  return complete;
+  return {
+    completed: complete,
+    justCompleted: complete && !wasCompleted,
+    rocket
+  };
 }
 
 function drawPlayerSprite(player, tileSize) {
@@ -2341,8 +2429,11 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   return true;
 }
 
-function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 255) {
-  if (!rocketPlatformImg || rocketPlatformImg.width <= 0 || rocketPlatformImg.height <= 0) {
+function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 255, completed = false) {
+  const sprite = completed
+    ? (rocketPlatformBuiltImg || rocketPlatformImg)
+    : (rocketPlatformImg || rocketPlatformBuiltImg);
+  if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
     return false;
   }
 
@@ -2352,7 +2443,7 @@ function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 2
   } else {
     noTint();
   }
-  image(rocketPlatformImg, round(px), round(py), round(drawWidth), round(drawHeight));
+  image(sprite, round(px), round(py), round(drawWidth), round(drawHeight));
   noTint();
   return true;
 }
@@ -2932,12 +3023,50 @@ function getEntitySouthmostRenderTileY(entity) {
   return entity.tileY + maxOffsetY;
 }
 
+function getRocketPulseOverlayForEntity(entity, nowSeconds) {
+  if (
+    !entity ||
+    (entity.type !== ENTITY_TYPES.ROCKET_SITE && entity.type !== ENTITY_TYPES.SHUTTLE)
+  ) {
+    return null;
+  }
+
+  let rocketState = null;
+  if (entity.type === ENTITY_TYPES.ROCKET_SITE) {
+    rocketState = entity.state || null;
+  } else {
+    const entities = drawGame.state?.entities || [];
+    const rocketEntity = entities.find((entry) => entry.type === ENTITY_TYPES.ROCKET_SITE) || null;
+    rocketState = rocketEntity?.state || null;
+  }
+
+  if (!rocketState) {
+    return null;
+  }
+
+  const completed = !!rocketState.completed;
+  const buildProgress = Number(rocketState.buildProgress) || 0;
+  const loading = !completed && buildProgress > 0;
+  if (!loading && !completed) {
+    return null;
+  }
+
+  const pulse = 0.5 + 0.5 * Math.sin(nowSeconds * 3.2);
+  if (completed) {
+    return { r: 176, g: 184, b: 194, a: 58 + pulse * 72 };
+  }
+  return { r: 84, g: 244, b: 124, a: 62 + pulse * 78 };
+}
+
 function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const px = bounds.px;
   let py = bounds.py;
   if (entity.type === ENTITY_TYPES.SHUTTLE) {
     py -= tileSize;
+  }
+  if (entity.type === ENTITY_TYPES.ROCKET_SITE) {
+    py -= 5;
   }
   const drawWidth = bounds.drawWidth;
   const drawHeight = bounds.drawHeight;
@@ -2994,7 +3123,14 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
     );
   const drewRocketSprite =
     entity.type === ENTITY_TYPES.ROCKET_SITE &&
-    drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, 255);
+    drawPlacedRocketPlatformSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      255,
+      !!entity.state?.completed
+    );
   const drewCustomSprite =
     drewMinerSprite ||
     drewSmelterSprite ||
@@ -3037,6 +3173,20 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       fill(20);
       noStroke();
       text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+    });
+  }
+
+  const rocketPulseOverlay = getRocketPulseOverlayForEntity(entity, nowSeconds);
+  if (rocketPulseOverlay) {
+    rotatePlacedConstructorContext(() => {
+      noStroke();
+      fill(
+        rocketPulseOverlay.r,
+        rocketPulseOverlay.g,
+        rocketPulseOverlay.b,
+        rocketPulseOverlay.a
+      );
+      rect(px + 2, py + 2, max(1, drawWidth - 4), max(1, drawHeight - 4), 8);
     });
   }
 }
