@@ -1,6 +1,6 @@
 // sketch.js
 let currentState = "MENU";
-let startButton, settingsButton, backButtonGame, testEndGameButton, backButtonSettings, escapeButton;
+let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 6;
@@ -15,6 +15,8 @@ let sideBarFrameImg, sideBarTabOpen, sideBarTabClosed;
 
 let creditsButtonSettings, backButtonCredits;
 let creditsScrollY = 600;
+
+let shuttleSpriteSheetImg;
 
 let helpButton, helpButtonSettings;
 let showHelpMenu = false;
@@ -1073,6 +1075,15 @@ function setup() {
   centerCanvas();
   textAlign(CENTER, CENTER);
 
+  if (typeof ENTITY_PORT_DEFS !== "undefined" && typeof ENTITY_TYPES !== "undefined") {
+    ENTITY_PORT_DEFS[ENTITY_TYPES.SHUTTLE] = [
+      { kind: "input", offset: { x: 0, y: -1 } }, // Top
+      { kind: "input", offset: { x: 0, y: 1 } },  // Bottom
+      { kind: "input", offset: { x: -1, y: 0 } }, // Left
+      { kind: "input", offset: { x: 1, y: 0 } }   // Right
+    ];
+  }
+
   stars = [];
   for (let i = 0; i < 400; i++) {
     stars.push({
@@ -1083,7 +1094,7 @@ function setup() {
     });
   }
 
-  helpButton = new Button(width - 200, 10, 100, 40, "Keybinds", () => {
+  helpButton = new Button(width - 275, 10, 100, 40, "Keybinds", () => {
     showHelpMenu = !showHelpMenu;
   });
   startButton = new Button (90, 350, 150, 55, "Start", () => {
@@ -1096,14 +1107,9 @@ function setup() {
     window.close();
   });
 
-  backButtonGame = new Button(30, 20, 100, 40, "<-- Back", () => {
+  backButtonGame = new Button(10, 10, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
-  testEndGameButton = new Button(140, 20, 120, 40, "Test End", () => {
-    currentState = "CREDITS";
-    creditsScrollY = height;
-  });
-  
   // Positioned side-by-side at the bottom of the settings panel
   backButtonSettings = new Button(180, 430, 110, 40, "<- Return", () => {
     currentState = "MENU";
@@ -1145,6 +1151,7 @@ function preload() {
   pipeSideOffImg = loadImage('resources/pipes/pipeSideOff.png');
   pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
   pipeSideOnMiniImg = pipeSideOnImg;
+  shuttleSpriteSheetImg = loadImage('resources/shuttle/shuttle.png');
   minerSpriteSheetImg = loadImage('resources/miner/miner.png');
   smelterFrontImg = loadImage('resources/smelter/smelterFront.png');
   smelterSideImg = loadImage('resources/smelter/smelterSide.png');
@@ -1457,6 +1464,19 @@ function drawGame() {
     for (let y = 0; y < mapRows; y++) {
       const row = [];
       for (let x = 0; x < mapCols; x++) {
+        const rand = Math.random();
+        let chosenBgIndex = 0; 
+        
+        if (rand < 0.65) {
+          chosenBgIndex = 2; // 65% chance for the plain base tile (tile1.png)
+        } else if (rand < 0.76) {
+          chosenBgIndex = 1; // ~11.6% chance for tile2
+        } else if (rand < 0.88) {
+          chosenBgIndex = 0; // ~11.6% chance for tile3
+        } else {
+          chosenBgIndex = 3; // ~11.6% chance for tile4
+        }
+
         row.push({
           type: "empty",
           resource: null,
@@ -1468,7 +1488,7 @@ function drawGame() {
           entity: null,
           entityId: null,
           building: null,
-          bgIndex: Math.floor(Math.random() * 4)
+          bgIndex: chosenBgIndex
         });
       }
       tiles.push(row);
@@ -1908,7 +1928,9 @@ function drawGame() {
 
   drawSelectedBuildingHighlight(map, tileSize);
 
-  drawEntities(entities, tileSize);
+  drawEntities(entities, tileSize, map);
+
+  drawPlayerSprite(player, config.tileSize);
 
   const item = selectedHotbarSlot >= 0 ? getSelectedHotbarItem() : null;
   let hologramTooltipItem = null;
@@ -1955,7 +1977,6 @@ function drawGame() {
   drawMiniMap(map, player, config, feedback, entities);
   drawOptimizationHud(drawGame.state);
   backButtonGame.draw();
-  testEndGameButton.draw();
   drawHotbar();
   drawReactivePlayerCompanion();
   drawSideBar();
@@ -2081,12 +2102,14 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourc
   }
 
   // Reserve shuttle footprint so random scatter stays clear of it.
-  for (let y = RESTRICTED_SHUTTLE_ROW - 1; y <= RESTRICTED_SHUTTLE_ROW + 1; y++) {
-    for (let x = RESTRICTED_SHUTTLE_COL - 1; x <= RESTRICTED_SHUTTLE_COL + 1; x++) {
-      if (isInside(x, y)) {
-        reserve(x, y);
-      }
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      clearResourceNode(tiles[y][x]);
     }
+  }
+
+  if (isInside(RESTRICTED_SHUTTLE_COL, RESTRICTED_SHUTTLE_ROW)) {
+    reserve(RESTRICTED_SHUTTLE_COL, RESTRICTED_SHUTTLE_ROW);
   }
 
   const placeDepositPatch = (centerX, centerY, radiusX, radiusY, type) => {
@@ -2750,6 +2773,11 @@ function addProducedResource(resourceType, count) {
  */
 function getSafeFootprintOffsets(entityType, facing = "E", options = null) {
   const fallback = [{ x: 0, y: 0 }];
+  
+  if (entityType === ENTITY_TYPES.SHUTTLE) {
+    return fallback;
+  }
+
   if (typeof getEntityFootprintOffsets !== "function") {
     return fallback;
   }
@@ -2999,7 +3027,10 @@ function drawPlayerSprite(player, tileSize) {
   const sx = frameIndex * frameWidth;
 
   push();
-  translate(width / 2, height / 2);
+  
+  // THIS IS THE FIX: Draw at the player's actual world coordinates!
+  translate(player.x, player.y);
+  
   if (currentDirection === "side" && facingLeft) {
     scale(-1, 1);
   }
@@ -3234,17 +3265,41 @@ function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
   return wave < 0.34;
 }
 
-/**
- * Draw placed miner sprite.
- * @param {*} px - X pixel position.
- * @param {*} py - Y pixel position.
- * @param {*} drawWidth - Input value used by this operation.
- * @param {*} drawHeight - Input value used by this operation.
- * @param {*} tileSize - Tile size in pixels.
- * @param {*} minerState - Input value used by this operation.
- * @param {*} nowSeconds - Current time in seconds.
- * @returns {boolean} Whether the check or operation succeeds.
- */
+function drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, shuttleState, nowSeconds) {
+  if (!shuttleSpriteSheetImg || shuttleSpriteSheetImg.width <= 0) {
+    return false;
+  }
+
+  const frameCount = 10;
+  const frameW = shuttleSpriteSheetImg.width / frameCount;
+  const frameH = shuttleSpriteSheetImg.height;
+  const animationFps = 10;
+  const frameIndex = floor(nowSeconds * animationFps) % frameCount;
+  
+  const targetHeight = max(drawHeight + 12, tileSize * 2.0); // Now 2x taller than a tile
+  const targetWidth = targetHeight * (frameW / frameH);
+  
+  const visualAlignmentOffset = 2.5; // Shift to the right by ~2.5 pixels for better centering
+  const spriteX = px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset;
+  
+  const spriteY = py + drawHeight - targetHeight; 
+  
+  imageMode(CORNER);
+  noTint();
+  image(
+    shuttleSpriteSheetImg,
+    spriteX,
+    spriteY,
+    targetWidth,
+    targetHeight,
+    frameIndex * frameW,
+    0,
+    frameW,
+    frameH
+  );
+  return true;
+}
+
 function drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, minerState, nowSeconds) {
   if (!minerSpriteSheetImg || minerSpriteSheetImg.width <= 0) {
     return false;
@@ -4342,10 +4397,7 @@ function getRocketPulseOverlayForEntity(entity, nowSeconds) {
 function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const px = bounds.px;
-  let py = bounds.py;
-  if (entity.type === ENTITY_TYPES.ROCKET_SITE) {
-    py -= 5;
-  }
+  const py = bounds.py;
   const drawWidth = bounds.drawWidth;
   const drawHeight = bounds.drawHeight;
   const rotatePlacedConstructorContext = (drawFn) => {
@@ -4399,23 +4451,18 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       255,
       { preferSideForEast: true, mirrorWest: true }
     );
-  const drewRocketSprite =
-    entity.type === ENTITY_TYPES.ROCKET_SITE &&
-    drawPlacedRocketPlatformSprite(
-      px,
-      py,
-      drawWidth,
-      drawHeight,
-      255,
-      !!entity.state?.completed
-    );
+    
+  const drewShuttleSprite = 
+    entity.type === ENTITY_TYPES.SHUTTLE &&
+    drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
+
   const drewCustomSprite =
     drewMinerSprite ||
     drewSmelterSprite ||
     drewConstructorSprite ||
     drewSplitterSprite ||
     drewMergerSprite ||
-    drewRocketSprite;
+    drewShuttleSprite; 
 
   if (!drewCustomSprite) {
     // Regular building fallback rendering when no custom sprite is used.
@@ -4517,16 +4564,18 @@ function drawEntities(entities, tileSize, map) {
     if (a.sortX !== b.sortX) return a.sortX - b.sortX;
     return a.sortId - b.sortId;
   });
+
+  for (const entity of entities) {
+    drawEntityPorts(entity, tileSize);
+  }
+
+  // Draw the buildings and tubes on top of the ground layer
   for (const item of renderQueue) {
     if (item.kind === "tube") {
       drawTubeDescriptorLayer(item.descriptor, "body");
     } else {
       drawNonTubeEntity(item.entity, tileSize, nowSeconds);
     }
-  }
-
-  for (const entity of entities) {
-    drawEntityPorts(entity, tileSize);
   }
 }
 
@@ -4798,7 +4847,7 @@ function getEntityShortLabel(type) {
 function drawMiniMap(map, player, config, feedback, entities) {
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
 
-  const miniMaxSize = 140;
+  const miniMaxSize = 165; 
   const miniTile = max(1, floor(miniMaxSize / mapCols));
   const miniWidth = mapCols * miniTile;
   const miniHeight = mapRows * miniTile;
@@ -4817,19 +4866,21 @@ function drawMiniMap(map, player, config, feedback, entities) {
   );
   image(minimapLayer, miniX, miniY);
 
-  // Overlay dynamic placed items / buildings (including the pre-placed rocket footprint).
+  // Overlay dynamic placed items / buildings using the more accurate color function
   noStroke();
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
-      if (!tile || !tile.building || !tile.building.color) continue;
-      const c = tile.building.color;
-      fill(c[0], c[1], c[2]);
-      rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
+      // Check if there is ANY entity or building here
+      if (tile && (tile.building || tile.entityId != null)) {
+        const c = getMiniMapTileColor(tile);
+        fill(c[0], c[1], c[2]);
+        rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
+      }
     }
   }
 
-  // Keep rocket readable on minimap even when some port tiles are occupied by tubes.
+  // Keep rocket readable on minimap
   if (entities && entities.length) {
     for (const entity of entities) {
       if (entity.type !== ENTITY_TYPES.ROCKET_SITE) continue;
@@ -4846,44 +4897,31 @@ function drawMiniMap(map, player, config, feedback, entities) {
     }
   }
 
-  // Full shuttle footprint (only center tile has tile.building; entity occupies all footprint tiles).
-  if (entities && entities.length) {
-    for (const entity of entities) {
-      if (entity.type !== ENTITY_TYPES.SHUTTLE) continue;
-      fill(138, 112, 22);
-      const facing = entity.state?.facing || "E";
-      const footprint = getSafeFootprintTilesAt(
-        ENTITY_TYPES.SHUTTLE,
-        entity.tileX,
-        entity.tileY,
-        facing
-      );
-      for (const fp of footprint) {
-        rect(
-          miniX + fp.x * miniTile,
-          miniY + fp.y * miniTile,
-          miniTile,
-          miniTile
-        );
-      }
-    }
-  }
+  // NEW: Draw a Camera Viewport Box so you know exactly where you are looking
+  const mapWidthTotal = mapCols * tileSize;
+  const mapHeightTotal = mapRows * tileSize;
+  const cameraX = constrain(player.x - width / 2, mapOriginX, mapOriginX + mapWidthTotal - width);
+  const cameraY = constrain(player.y - height / 2, mapOriginY, mapOriginY + mapHeightTotal - height);
 
+  const viewX = miniX + ((cameraX - mapOriginX) / mapWidthTotal) * miniWidth;
+  const viewY = miniY + ((cameraY - mapOriginY) / mapHeightTotal) * miniHeight;
+  const viewW = (width / mapWidthTotal) * miniWidth;
+  const viewH = (height / mapHeightTotal) * miniHeight;
+
+  noFill();
+  stroke(255, 255, 255, 180);
+  strokeWeight(1.5);
+  rect(viewX, viewY, viewW, viewH);
+
+  // Draw Player Dot
   noStroke();
-  
   const miniPlayerX = miniX + ((player.x - mapOriginX) / tileSize) * miniTile;
   const miniPlayerY = miniY + ((player.y - mapOriginY) / tileSize) * miniTile;
 
-  noStroke();
   fill(255, 0, 0);
   rect(miniPlayerX - 2, miniPlayerY - 2, 4, 4);
 
   drawModificationRangeIndicator(config, feedback);
-
-  noStroke();
-  fill(255, 0, 0);
-  
-  drawPlayerSprite(player, config.tileSize);
 }
 
 /**
@@ -6729,7 +6767,7 @@ function isPointerOverMinimap() {
     return false;
   }
   const { mapCols, mapRows } = drawGame.state.config;
-  const miniMaxSize = 140;
+  const miniMaxSize = 165; // INCREASED to match drawMiniMap
   const miniTile = max(1, floor(miniMaxSize / mapCols));
   const miniWidth = mapCols * miniTile;
   const miniHeight = mapRows * miniTile;
@@ -7568,10 +7606,6 @@ if (currentState != "GAME") return;
 
   if (backButtonGame && backButtonGame.isHovered()) {
     backButtonGame.checkClick();
-    return;
-  }
-  if (testEndGameButton && testEndGameButton.isHovered()) {
-    testEndGameButton.checkClick();
     return;
   }
 
