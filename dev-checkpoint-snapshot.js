@@ -620,7 +620,7 @@ length
 Array(0)
 tubes
 : 
-Array(873)
+Array(877)
 [0 … 99]
 0
 : 
@@ -3029,7 +3029,7 @@ Array(873)
 799
 : 
 {id: 991, at: '70,66', facing: 'E', shape: 'straight', from: 189, …}
-[800 … 872]
+[800 … 876]
 800
 : 
 {id: 992, at: '70,67', facing: 'E', shape: 'straight', from: 189, …}
@@ -3249,9 +3249,21 @@ Array(873)
 872
 : 
 {id: 1064, at: '25,4', facing: 'E', shape: 'straight', from: 161, …}
+873
+: 
+{id: 1065, at: '24,6', facing: 'N', shape: 'straight', from: 162, …}
+874
+: 
+{id: 1066, at: '26,6', facing: 'S', shape: 'straight', from: 160, …}
+875
+: 
+{id: 1067, at: '25,7', facing: 'W', shape: 'straight', from: 165, …}
+876
+: 
+{id: 1068, at: '25,5', facing: 'E', shape: 'straight', from: 161, …}
 length
 : 
-873`
+877`
 
   function parseNullableNumber(rawValue) {
     if (rawValue == null) return null;
