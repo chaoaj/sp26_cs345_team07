@@ -27,6 +27,7 @@ let modularComponent = 0, shipAlloy = 0, electronics = 0;
 let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
+let reactivePlayerIdleSheetImg, reactivePlayerPlaceImg;
 
 let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg, rocketPlatformImg, rocketPlatformBuiltImg;
 let ironDepositImg, copperDepositImg, heliumDepositImg;
@@ -43,6 +44,13 @@ let currentAnimation = "idle";
 let currentFrame = 0;
 let facingLeft = false;
 const animationFPS = 10;
+const REACTIVE_PLAYER_IDLE_FRAME_WIDTH = 63;
+const REACTIVE_PLAYER_IDLE_FRAME_HEIGHT = 70;
+const REACTIVE_PLAYER_IDLE_FRAMES = 60;
+const REACTIVE_PLAYER_IDLE_FPS = 12;
+const REACTIVE_PLAYER_PLACE_DURATION_MS = 500;
+let reactivePlayerPlacePoseUntilMs = 0;
+
 const ROCKET_HALF_WIDTH_TILES = 1;   // 3 tiles wide
 const ROCKET_HALF_HEIGHT_TILES = 1;  // 3 tiles tall
 
@@ -490,6 +498,8 @@ function preload() {
   playerSpriteSheetFrontMove = loadImage('resources/player/pFrontMove.png');
   playerSpriteSheetSideIdle = loadImage('resources/player/pSideIdle.png');
   playerSpriteSheetSideMove = loadImage('resources/player/pSideMove.png');
+  reactivePlayerIdleSheetImg = loadImage('resources/reactivePlayer/reactivePlayerIdle.png');
+  reactivePlayerPlaceImg = loadImage('resources/reactivePlayer/ReactivePlayerPlace.png');
   hotbarOutlineImg = loadImage('resources/UI/hotbarFrame.png');
   copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
   ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
@@ -708,6 +718,7 @@ function resetRuntimeGameStateForNewRun() {
   modularComponent = 0;
   shipAlloy = 0;
   electronics = 0;
+  reactivePlayerPlacePoseUntilMs = 0;
 }
 
 /**
@@ -1255,6 +1266,7 @@ function drawGame() {
   backButtonGame.draw();
   testEndGameButton.draw();
   drawHotbar();
+  drawReactivePlayerCompanion();
   drawSideBar();
   if (drawGame.state.isRestrictedMode) {
     drawHotbarCostTooltip();
@@ -6469,6 +6481,100 @@ function drawHotbar() {
 }
 
 /**
+ * Activate the reactive-player place pose for a short duration.
+ * @param {*} durationMs - Place-pose duration in milliseconds.
+ * @returns {void} No return value.
+ */
+function triggerReactivePlayerPlacePose(durationMs = REACTIVE_PLAYER_PLACE_DURATION_MS) {
+  const duration = Math.max(0, Number(durationMs) || 0);
+  reactivePlayerPlacePoseUntilMs = millis() + duration;
+}
+
+/**
+ * Draw the reactive-player companion near the hotbar.
+ * @returns {void} No return value.
+ */
+function drawReactivePlayerCompanion() {
+  const hasIdleSheet =
+    reactivePlayerIdleSheetImg &&
+    reactivePlayerIdleSheetImg.width > 0 &&
+    reactivePlayerIdleSheetImg.height > 0;
+  const hasPlaceFrame =
+    reactivePlayerPlaceImg &&
+    reactivePlayerPlaceImg.width > 0 &&
+    reactivePlayerPlaceImg.height > 0;
+  if (!hasIdleSheet && !hasPlaceFrame) {
+    return;
+  }
+
+  const idleFrameWidth = REACTIVE_PLAYER_IDLE_FRAME_WIDTH;
+  const idleFrameHeight = REACTIVE_PLAYER_IDLE_FRAME_HEIGHT;
+  const reactiveScale = 1.4;
+  const drawWidth = round(idleFrameWidth * reactiveScale);
+  const drawHeight = round(idleFrameHeight * reactiveScale);
+
+  const { totalWidth, startX } = getHotbarLayout();
+  const hotbarRight = startX + totalWidth;
+  const desiredX = hotbarRight + 22;
+  const x = constrain(desiredX, 0, width - drawWidth);
+  const yTop = max(0, height - drawHeight);
+
+  const nowMs = millis();
+  const showPlaceFrame = hasPlaceFrame && nowMs < reactivePlayerPlacePoseUntilMs;
+
+  push();
+  imageMode(CORNER);
+  noTint();
+
+  if (showPlaceFrame) {
+    // Place frame is slightly shorter than idle; scale and bottom-align to keep stance stable.
+    const placeWidth = reactivePlayerPlaceImg.width;
+    const placeHeight = reactivePlayerPlaceImg.height;
+    const placeDrawWidth = round(placeWidth * reactiveScale);
+    const placeDrawHeight = round(placeHeight * reactiveScale);
+    const placeX = round(x + (drawWidth - placeDrawWidth) / 2);
+    const placeY = round(height - placeDrawHeight);
+    image(
+      reactivePlayerPlaceImg,
+      placeX,
+      placeY,
+      placeDrawWidth,
+      placeDrawHeight
+    );
+    pop();
+    return;
+  }
+
+  if (!hasIdleSheet) {
+    pop();
+    return;
+  }
+
+  const availableFrameCount = Math.max(
+    1,
+    floor(reactivePlayerIdleSheetImg.width / idleFrameWidth)
+  );
+  const frameCount = Math.max(
+    1,
+    Math.min(REACTIVE_PLAYER_IDLE_FRAMES, availableFrameCount)
+  );
+  const frameIndex = floor((nowMs / 1000) * REACTIVE_PLAYER_IDLE_FPS) % frameCount;
+
+  image(
+    reactivePlayerIdleSheetImg,
+    round(x),
+    round(yTop),
+    drawWidth,
+    drawHeight,
+    frameIndex * idleFrameWidth,
+    0,
+    idleFrameWidth,
+    idleFrameHeight
+  );
+  pop();
+}
+
+/**
  * Handle click interactions for menus, overlays, and in-game placement.
  * @returns {void} No return value.
  */
@@ -6636,6 +6742,7 @@ function placeSelectedEntityAtMouse() {
   // Stamp entity occupancy across the full footprint, then update the anchor tile metadata used by UI.
   entities.push(newEntity);
   if (placeSound) placeSound.play();
+  triggerReactivePlayerPlacePose(REACTIVE_PLAYER_PLACE_DURATION_MS);
 
   for (const entry of footprintTiles) {
     const occupiedTile = map.tiles[entry.y][entry.x];
