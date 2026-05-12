@@ -200,11 +200,11 @@ const ENTITY_PORT_DEFS = {
     { name: "inputDown", kind: "input", offset: { x: 0, y: 2 } }
   ],
   [ENTITY_TYPES.ROCKET_SITE]: [
-    // 3x5 rocket footprint (centered on entity tile):
+    // 3x3 rocket footprint (centered on entity tile):
     // ports sit one tile outside the ship on left, right, and bottom.
     { name: RESOURCE_TYPES.ELECTRONICS, kind: "input", offset: { x: -2, y: 0 } },
     { name: RESOURCE_TYPES.SHIP_ALLOY, kind: "input", offset: { x: 2, y: 0 } },
-    { name: RESOURCE_TYPES.ROCKET_FUEL, kind: "input", offset: { x: 0, y: 3 } }
+    { name: RESOURCE_TYPES.ROCKET_FUEL, kind: "input", offset: { x: 0, y: 2 } }
   ],
   [ENTITY_TYPES.EXTRACTOR]: [
     { name: "output", kind: "output", offset: { x: 1, y: 0 } }
@@ -236,13 +236,11 @@ const ENTITY_FOOTPRINT_DEFS = {
     { x: -1, y: 0 },  { x: 0, y: 0 },  { x: 1, y: 0 },
     { x: -1, y: 1 },  { x: 0, y: 1 },  { x: 1, y: 1 }
   ],
-  // Vertically long rocket footprint (3 columns x 5 rows), centered on entity tile.
+  // Rocket platform footprint (3 columns x 3 rows), centered on entity tile.
   [ENTITY_TYPES.ROCKET_SITE]: [
-    { x: -1, y: -2 }, { x: 0, y: -2 }, { x: 1, y: -2 },
     { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
     { x: -1, y: 0 },  { x: 0, y: 0 },  { x: 1, y: 0 },
-    { x: -1, y: 1 },  { x: 0, y: 1 },  { x: 1, y: 1 },
-    { x: -1, y: 2 },  { x: 0, y: 2 },  { x: 1, y: 2 }
+    { x: -1, y: 1 },  { x: 0, y: 1 },  { x: 1, y: 1 }
   ]
 };
 
@@ -315,7 +313,7 @@ class MinerState extends EntityState {
   updateOutputRate() {
     if (this.isOn && this.isActive && this.outputType) {
       if (this.outputType === RESOURCE_TYPES.HELIUM3) {
-        this.outputRate = 0.2; // 1 Helium-3 every 5 seconds
+        this.outputRate = 2; // 1 Helium-3 every 5 seconds
       } else {
         this.outputRate = 2;   // 2 Ores per second for Iron and Copper
       }

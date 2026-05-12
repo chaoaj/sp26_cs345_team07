@@ -28,8 +28,12 @@ let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 
-let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg;
+let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg, rocketPlatformImg, rocketPlatformBuiltImg;
 let ironDepositImg, copperDepositImg, heliumDepositImg;
+
+let placeSound, hoverSound, clickSound, movementSound;
+
+let isMoving = false;
 
 let bgTiles = [];
 let stars = [];
@@ -40,7 +44,7 @@ let currentFrame = 0;
 let facingLeft = false;
 const animationFPS = 10;
 const ROCKET_HALF_WIDTH_TILES = 1;   // 3 tiles wide
-const ROCKET_HALF_HEIGHT_TILES = 2;  // 5 tiles tall
+const ROCKET_HALF_HEIGHT_TILES = 1;  // 3 tiles tall
 
 const spriteDimensions = {
   front: {
@@ -399,6 +403,8 @@ function preload() {
   mergerFrontImg = loadImage('resources/splitter/merger/mergerFront.png');
   mergerBackImg = loadImage('resources/splitter/merger/mergerBack.png');
   mergerSideImg = loadImage('resources/splitter/merger/mergerSide.png');
+  rocketPlatformImg = loadImage('resources/rocket/rocketPlatform(unbuilt).png');
+  rocketPlatformBuiltImg = loadImage('resources/rocket/rocketPlatform(built).png');
 
   titlePage = loadImage('resources/Title.jpg');
   settingsPage = loadImage('resources/Settings.jpg');
@@ -428,6 +434,10 @@ function preload() {
   copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
   ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
   heliumDepositImg = loadImage('resources/resourceNodes/helium3Deposit.png');
+  placeSound = loadSound('resources/sounds/Place.wav');
+  hoverSound = loadSound('resources/sounds/hover_button.wav');
+  clickSound = loadSound('resources/sounds/Click_button.wav');
+  movementSound = loadSound('resources/sounds/Movement.wav');
 }
 
 function centerCanvas() {
@@ -587,6 +597,27 @@ function getRocketFootprintTiles(centerTileX, centerTileY) {
     }
   }
   return tiles;
+}
+
+function resetRuntimeGameStateForNewRun() {
+  drawGame.state = null;
+  selectedHotbarSlot = 0;
+  isSidebarOpen = false;
+  sidebarX = -sidebarWidth;
+  sidebarScrollOffset = 0;
+
+  ironOre = 0;
+  ironBar = 0;
+  ironPlate = 0;
+  copperOre = 0;
+  copperBar = 0;
+  copperPlate = 0;
+  copperWire = 0;
+  helium = 0;
+  rocketFuel = 0;
+  modularComponent = 0;
+  shipAlloy = 0;
+  electronics = 0;
 }
 
 function drawEndGame() {
@@ -770,10 +801,26 @@ function drawGame() {
       rocketMaxCenterX
     );
     const rocketTileY = constrain(
-      mapRows - 1 - ROCKET_HALF_HEIGHT_TILES - 2,
+      mapRows - 1 - ROCKET_HALF_HEIGHT_TILES - 3,
       rocketMinCenterY,
       rocketMaxCenterY
     );
+
+    if (restrictedMode) {
+      // Guaranteed copper node in the open area to the right of the crashed rocket.
+      const rocketRightCopperX = constrain(
+        rocketTileX + ROCKET_HALF_WIDTH_TILES + 3,
+        0,
+        mapCols - 2
+      );
+      const rocketRightCopperY = constrain(
+        rocketTileY - 1,
+        0,
+        mapRows - 2
+      );
+      placeResourceNodeBlock2x2(rocketRightCopperX, rocketRightCopperY, "copper");
+    }
+
     const rocketEntity = createEntity(
       ENTITY_TYPES.ROCKET_SITE,
       rocketTileX,
@@ -791,7 +838,7 @@ function drawGame() {
         .map((port) => `${port.worldX},${port.worldY}`)
     );
 
-    // Occupy a 3x5 footprint centered on the rocket tile.
+    // Occupy a 3x3 footprint centered on the rocket tile.
     // Leave input-port tiles placeable so tubes can connect on-port.
     for (const fp of getRocketFootprintTiles(rocketTileX, rocketTileY)) {
       const row = tiles[fp.y];
@@ -837,7 +884,9 @@ function drawGame() {
         buildCostBlinkUntil: 0,
         buildCostMessageUntil: 0,
         buildCostEntityType: null,
-        buildCostMessageText: ""
+        buildCostMessageText: "",
+        rocketCompletionModalUntil: 0,
+        rocketCompletionModalText: ""
       },
       placementFacing: "E",
       placementTubeShape: TUBE_SHAPES.STRAIGHT,
@@ -856,9 +905,7 @@ function drawGame() {
     drawGame.state.isRestrictedMode = restrictedMode;
     drawGame.state.shuttleEntityId = null;
 
-    if (restrictedMode) {
-      spawnRestrictedModeShuttle(drawGame.state);
-    }
+    spawnRestrictedModeShuttle(drawGame.state);
     updateConnections(entities);
   }
 
@@ -886,6 +933,12 @@ function drawGame() {
   if (feedback.buildCostMessageText == null) {
     feedback.buildCostMessageText = "";
   }
+  if (feedback.rocketCompletionModalUntil == null) {
+    feedback.rocketCompletionModalUntil = 0;
+  }
+  if (feedback.rocketCompletionModalText == null) {
+    feedback.rocketCompletionModalText = "";
+  }
 
   if (drawGame.state.player.facing === undefined) {
     drawGame.state.player.facing = "N";
@@ -902,10 +955,17 @@ function drawGame() {
   const isMoving = (moveX !== 0 || moveY !== 0);
 
   if (isMoving) {
+    if (movementSound && !movementSound.isPlaying()) {
+      movementSound.loop();
+    }
     const len = Math.hypot(moveX, moveY);
     const speed = player.speed * dt;
     player.x += (moveX / len) * speed;
     player.y += (moveY / len) * speed;
+  } else {
+    if (movementSound && movementSound.isPlaying()) {
+      movementSound.stop();
+    }
   }
 
   const prevDirection = currentDirection;
@@ -938,8 +998,17 @@ function drawGame() {
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
   updateRestrictedModeShuttleIntake(entities, dt);
-  if (updateRocketConstructionProgress(entities, dt)) {
-    currentState = "ENDGAME";
+  const rocketProgress = updateRocketConstructionProgress(entities, dt);
+  if (rocketProgress.justCompleted) {
+    feedback.rocketCompletionModalUntil = millis() + 12000;
+    feedback.rocketCompletionModalText = "Rocket ship complete. Walk to it to launch.";
+  }
+  if (
+    rocketProgress.completed &&
+    rocketProgress.rocket &&
+    isPlayerNearRocketForLaunch(player, rocketProgress.rocket, config)
+  ) {
+    currentState = "CREDITS";
     creditsScrollY = height;
     return;
   }
@@ -1090,6 +1159,7 @@ push();
   drawBuildCostFeedbackMessage();
   drawActiveTubeFlowTooltip();
   drawRocketHoverTooltip();
+  drawRocketCompletionModal();
   updatePlayerAnimation();
   if (helpButton) helpButton.draw();
   if (showHelpMenu) drawHelpMenu();
@@ -1311,7 +1381,11 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourc
   // Snapshot coords: (38,29), (37,29), (39,29).
   const forcedCopperBlocks = [
     { x: 37, y: 29 }, // covers (37,29) and (38,29)
-    { x: 39, y: 29 }  // covers (39,29)
+    { x: 39, y: 29 }, // covers (39,29)
+    // Two larger copper patches around (62,61) to guarantee:
+    // (62,61), (61,61), and (62,60) are copper tiles.
+    { x: 61, y: 60 },
+    { x: 63, y: 60 }
   ];
   for (const block of forcedCopperBlocks) {
     placeResourceNodeBlock2x2(block.x, block.y, "copper");
@@ -1630,6 +1704,55 @@ function drawBuildCostFeedbackMessage() {
   pop();
 }
 
+function drawRocketCompletionModal() {
+  if (!drawGame.state || !drawGame.state.feedback) {
+    return;
+  }
+
+  const feedback = drawGame.state.feedback;
+  const remaining = feedback.rocketCompletionModalUntil - millis();
+  if (remaining <= 0) {
+    return;
+  }
+
+  const message = feedback.rocketCompletionModalText || "Rocket ship complete. Walk to it to launch.";
+
+  push();
+  fill(10, 16, 28, 110);
+  noStroke();
+  rect(0, 0, width, height);
+
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(20);
+  const title = "Rocket Ready";
+  const titleW = textWidth(title);
+  textSize(14);
+  const bodyW = textWidth(message);
+  const padX = 18;
+  const boxW = max(280, max(titleW, bodyW) + padX * 2);
+  const boxH = 96;
+  const boxX = (width - boxW) / 2;
+  const boxY = height * 0.18;
+
+  fill(245, 250, 255, 245);
+  stroke(70, 90, 130, 220);
+  strokeWeight(2);
+  rect(boxX, boxY, boxW, boxH, 10);
+
+  noStroke();
+  fill(24, 34, 56);
+  textStyle(BOLD);
+  textSize(20);
+  text(title, boxX + boxW / 2, boxY + 30);
+
+  fill(35, 45, 68);
+  textStyle(NORMAL);
+  textSize(14);
+  text(message, boxX + boxW / 2, boxY + 62);
+  pop();
+}
+
 function updateRestrictedModeShuttleIntake(entities, dt) {
   const shuttle = getRestrictedModeShuttleEntity();
   if (!shuttle || !Number.isFinite(dt) || dt <= 0) {
@@ -1792,56 +1915,60 @@ function updateFactoryProduction(entities, dt) {
   }
 }
 
+function isPlayerNearRocketForLaunch(player, rocketEntity, config) {
+  if (!player || !rocketEntity || !config) {
+    return false;
+  }
+  const tileSize = Number(config.tileSize) || 32;
+  const mapOriginX = Number(config.mapOriginX) || 0;
+  const mapOriginY = Number(config.mapOriginY) || 0;
+  const rocketCenterX = mapOriginX + (rocketEntity.tileX + 0.5) * tileSize;
+  const rocketCenterY = mapOriginY + (rocketEntity.tileY + 0.5) * tileSize;
+  const dx = player.x - rocketCenterX;
+  const dy = player.y - rocketCenterY;
+  const launchRadius = tileSize * 2.25;
+  return dx * dx + dy * dy <= launchRadius * launchRadius;
+}
+
 function updateRocketConstructionProgress(entities, dt) {
   const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
   if (!rocket || !rocket.state) {
-    return false;
+    return { completed: false, justCompleted: false, rocket: null };
   }
 
   const rocketState = rocket.state;
   if (rocketState.completed) {
-    return true;
+    return { completed: true, justCompleted: false, rocket };
   }
 
+  const wasCompleted = !!rocketState.completed;
   const required = rocketState.required || {};
   const delivered = rocketState.delivered || {};
-  const rocketPorts = getEntityConnectionPorts(rocket).filter((port) => port.kind === "input");
-  const portByCoord = new Map();
-  for (const port of rocketPorts) {
-    portByCoord.set(`${port.worldX},${port.worldY}`, port.name);
-  }
-
   const entitiesById = new Map(entities.map((entity) => [entity.id, entity]));
   const increments = {
     [RESOURCE_TYPES.ELECTRONICS]: 0,
     [RESOURCE_TYPES.SHIP_ALLOY]: 0,
     [RESOURCE_TYPES.ROCKET_FUEL]: 0
   };
+  const processedRocketComponentIds = new Set();
 
   for (const tube of entities) {
     if (tube.type !== ENTITY_TYPES.TUBE) continue;
     if (tube.state?.toEntityId !== rocket.id) continue;
     if (!(tube.state?.isConnected)) continue;
 
+    const componentId = tube.state?.componentId ?? tube.id;
+    if (processedRocketComponentIds.has(componentId)) {
+      continue;
+    }
+    processedRocketComponentIds.add(componentId);
+
     const sourceEntity = entitiesById.get(tube.state.fromEntityId);
     const outputType = sourceEntity?.state?.outputType || tube.state.carriedItem || null;
     const outputRate = Number(tube.state.outputRate) || 0;
     if (!outputType || outputRate <= 0) continue;
-
-    const touchedPortNames = new Set();
-    const tubePortTiles = getTubePortTiles(tube);
-    for (const portTile of tubePortTiles) {
-      const portName = portByCoord.get(`${portTile.worldX},${portTile.worldY}`);
-      if (portName) {
-        touchedPortNames.add(portName);
-      }
-    }
-
-    for (const portName of touchedPortNames) {
-      if (portName === outputType && increments[portName] != null) {
-        increments[portName] += outputRate * dt;
-      }
-    }
+    if (increments[outputType] == null) continue;
+    increments[outputType] += outputRate * dt;
   }
 
   for (const [resourceType, amount] of Object.entries(increments)) {
@@ -1863,7 +1990,11 @@ function updateRocketConstructionProgress(entities, dt) {
   rocketState.isActive = !complete && deliveredTotal > 0;
   rocketState.isOn = complete;
 
-  return complete;
+  return {
+    completed: complete,
+    justCompleted: complete && !wasCompleted,
+    rocket
+  };
 }
 
 function drawPlayerSprite(player, tileSize) {
@@ -1923,7 +2054,7 @@ function updatePlayerAnimation() {
   if (now - drawGame.state.animationTimer >= frameDuration) {
     currentFrame = (currentFrame + 1) % dims.frames;
     drawGame.state.animationTimer = now;
-  }
+  }   
 }
 
 function getTubeRenderPathData(entity, tileSize) {
@@ -2385,6 +2516,35 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   } else {
     image(sprite, spriteX, spriteY, targetWidth, targetHeight);
   }
+  noTint();
+  return true;
+}
+
+function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 255, completed = false) {
+  const sprite = completed
+    ? (rocketPlatformBuiltImg || rocketPlatformImg)
+    : (rocketPlatformImg || rocketPlatformBuiltImg);
+  if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
+    return false;
+  }
+
+  const targetWidth = round(drawWidth);
+  let targetHeight = round(drawHeight);
+  if (completed) {
+    // Keep the completed rocket's original aspect ratio so it can extend above
+    // the 3x3 footprint instead of being vertically squashed into it.
+    targetHeight = round((sprite.height / sprite.width) * targetWidth);
+  }
+  const spriteX = round(px + (drawWidth - targetWidth) / 2);
+  const spriteY = round(py + drawHeight - targetHeight);
+
+  imageMode(CORNER);
+  if (alpha < 255) {
+    tint(255, constrain(alpha, 0, 255));
+  } else {
+    noTint();
+  }
+  image(sprite, spriteX, spriteY, targetWidth, targetHeight);
   noTint();
   return true;
 }
@@ -2964,10 +3124,41 @@ function getEntitySouthmostRenderTileY(entity) {
   return entity.tileY + maxOffsetY;
 }
 
+function getRocketPulseOverlayForEntity(entity, nowSeconds) {
+  if (
+    !entity ||
+    entity.type !== ENTITY_TYPES.ROCKET_SITE
+  ) {
+    return null;
+  }
+
+  const rocketState = entity.state || null;
+
+  if (!rocketState) {
+    return null;
+  }
+
+  const completed = !!rocketState.completed;
+  const buildProgress = Number(rocketState.buildProgress) || 0;
+  const loading = !completed && buildProgress > 0;
+  if (!loading && !completed) {
+    return null;
+  }
+
+  const pulse = 0.5 + 0.5 * Math.sin(nowSeconds * 3.2);
+  if (completed) {
+    return { r: 176, g: 184, b: 194, a: 58 + pulse * 72 };
+  }
+  return { r: 84, g: 244, b: 124, a: 62 + pulse * 78 };
+}
+
 function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const px = bounds.px;
-  const py = bounds.py;
+  let py = bounds.py;
+  if (entity.type === ENTITY_TYPES.ROCKET_SITE) {
+    py -= 5;
+  }
   const drawWidth = bounds.drawWidth;
   const drawHeight = bounds.drawHeight;
   const rotatePlacedConstructorContext = (drawFn) => {
@@ -3021,12 +3212,23 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       255,
       { preferSideForEast: true, mirrorWest: true }
     );
+  const drewRocketSprite =
+    entity.type === ENTITY_TYPES.ROCKET_SITE &&
+    drawPlacedRocketPlatformSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      255,
+      !!entity.state?.completed
+    );
   const drewCustomSprite =
     drewMinerSprite ||
     drewSmelterSprite ||
     drewConstructorSprite ||
     drewSplitterSprite ||
-    drewMergerSprite;
+    drewMergerSprite ||
+    drewRocketSprite;
 
   if (!drewCustomSprite) {
     // Regular building fallback rendering when no custom sprite is used.
@@ -3062,6 +3264,20 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       fill(20);
       noStroke();
       text(getEntityShortLabel(entity.type), px + drawWidth / 2, py + drawHeight / 2);
+    });
+  }
+
+  const rocketPulseOverlay = getRocketPulseOverlayForEntity(entity, nowSeconds);
+  if (rocketPulseOverlay) {
+    rotatePlacedConstructorContext(() => {
+      noStroke();
+      fill(
+        rocketPulseOverlay.r,
+        rocketPulseOverlay.g,
+        rocketPulseOverlay.b,
+        rocketPulseOverlay.a
+      );
+      rect(px + 2, py + 2, max(1, drawWidth - 4), max(1, drawHeight - 4), 8);
     });
   }
 }
@@ -3381,6 +3597,29 @@ function drawMiniMap(map, player, config, feedback, entities) {
     }
   }
 
+  // Full shuttle footprint (only center tile has tile.building; entity occupies all footprint tiles).
+  if (entities && entities.length) {
+    for (const entity of entities) {
+      if (entity.type !== ENTITY_TYPES.SHUTTLE) continue;
+      fill(138, 112, 22);
+      const facing = entity.state?.facing || "E";
+      const footprint = getSafeFootprintTilesAt(
+        ENTITY_TYPES.SHUTTLE,
+        entity.tileX,
+        entity.tileY,
+        facing
+      );
+      for (const fp of footprint) {
+        rect(
+          miniX + fp.x * miniTile,
+          miniY + fp.y * miniTile,
+          miniTile,
+          miniTile
+        );
+      }
+    }
+  }
+
   noStroke();
   
   const miniPlayerX = miniX + ((player.x - mapOriginX) / tileSize) * miniTile;
@@ -3499,7 +3738,7 @@ function getOrBuildMinimapLayer(state, mapCols, mapRows, miniTile) {
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
-      const tileColor = getTileBaseColor(tile);
+      const tileColor = getMinimapBaseTerrainColor(tile);
       layer.fill(tileColor[0], tileColor[1], tileColor[2]);
       layer.rect(x * miniTile, y * miniTile, miniTile, miniTile);
     }
@@ -4753,6 +4992,18 @@ function getTileBaseColor(tile) {
   }
 }
 
+// World rendering uses grass bg tiles for every cell; "dirt" type is not drawn as brown terrain.
+// Minimap base must match what the player sees, not the internal dirt marker.
+function getMinimapBaseTerrainColor(tile) {
+  if (!tile) {
+    return [240, 240, 245];
+  }
+  if (tile.type === "dirt") {
+    return [240, 240, 245];
+  }
+  return getTileBaseColor(tile);
+}
+
 function getPlacedBuildingDisplayName(tile) {
   if (!tile || !tile.building) {
     return null;
@@ -4783,17 +5034,7 @@ function getRocketPortHoverLabelAtTile(col, row) {
   if (!matched) {
     return null;
   }
-
-  if (matched.name === RESOURCE_TYPES.ELECTRONICS) {
-    return "Electronics Port";
-  }
-  if (matched.name === RESOURCE_TYPES.SHIP_ALLOY) {
-    return "Ship Alloy Port";
-  }
-  if (matched.name === RESOURCE_TYPES.ROCKET_FUEL) {
-    return "Rocket Fuel Port";
-  }
-  return "Rocket Port";
+  return "Rocket Input Port";
 }
 
 function getMapHoverTooltipLabel(hit) {
@@ -4886,6 +5127,10 @@ function drawResourceHoverTooltip() {
     return;
   }
   if (isMouseOverResourceTooltipBlockers()) {
+    return;
+  }
+
+  if (getHoveredRocketTooltipData()) {
     return;
   }
 
@@ -5069,10 +5314,9 @@ function getHoveredRocketTooltipData() {
       match.port?.kind === "input"
   );
   if (rocketPortMatch) {
-    const resourceType = rocketPortMatch.port.name || "";
     return {
       title: "Rocket Port",
-      label: getResourceTypeLabel(resourceType) || String(resourceType)
+      label: "Any: Electronics, Ship Alloy, Rocket Fuel"
     };
   }
 
@@ -5093,7 +5337,7 @@ function getHoveredRocketTooltipData() {
 
   return {
     title: "Rocket Ship",
-    label: "Rocket Ship"
+    label: ""
   };
 }
 
@@ -5111,14 +5355,19 @@ function drawRocketHoverTooltip() {
   const titleW = textWidth(tooltip.title);
   const titleH = textAscent() + textDescent();
 
-  textStyle(NORMAL);
-  textSize(11);
-  const labelW = textWidth(tooltip.label);
-  const labelH = textAscent() + textDescent();
+  const showLabel = tooltip.label && String(tooltip.label).trim() !== "";
+  let labelW = 0;
+  let labelH = 0;
+  if (showLabel) {
+    textStyle(NORMAL);
+    textSize(11);
+    labelW = textWidth(tooltip.label);
+    labelH = textAscent() + textDescent();
+  }
 
   const pad = 8;
   const boxW = max(titleW, labelW) + pad * 2;
-  const boxH = pad * 2 + titleH + 4 + labelH;
+  const boxH = pad * 2 + titleH + (showLabel ? 4 + labelH : 0);
 
   let bx = mouseX + 14;
   let by = mouseY + 14;
@@ -5142,9 +5391,11 @@ function drawRocketHoverTooltip() {
   textSize(12);
   text(tooltip.title, bx + pad, by + pad);
 
-  textStyle(NORMAL);
-  textSize(11);
-  text(tooltip.label, bx + pad, by + pad + titleH + 4);
+  if (showLabel) {
+    textStyle(NORMAL);
+    textSize(11);
+    text(tooltip.label, bx + pad, by + pad + titleH + 4);
+  }
   pop();
   return true;
 }
@@ -5168,7 +5419,7 @@ function getMiniMapTileColor(tile) {
   if (tile.resource === RESOURCE_TYPES.HELIUM3) {
     return [0, 180, 220];
   }
-  return getTileBaseColor(tile);
+  return getMinimapBaseTerrainColor(tile);
 }
 
 function getTileAtScreenPosition(screenX, screenY) {
@@ -5577,6 +5828,7 @@ function placeSelectedEntityAtMouse() {
   newEntity.state.facing = placementFacing;
 
   entities.push(newEntity);
+  if (placeSound) placeSound.play();
 
   for (const entry of footprintTiles) {
     const occupiedTile = map.tiles[entry.y][entry.x];
@@ -5788,6 +6040,7 @@ function keyPressed() {
   requestBackgroundMusicStart();
   if (currentState === "CREDITS" || currentState === "ENDGAME") {
     if (keyCode === ENTER || key === " " || keyCode === ESCAPE) {
+      resetRuntimeGameStateForNewRun();
       currentState = "MENU";
     }
     return;
@@ -6232,7 +6485,76 @@ function getIncomingTubeInputs(entities, targetId) {
     });
   }
 
+  // Allow direct smelter/merger -> constructor intake when ports overlap or touch, even with no tube.
+  const targetEntity = getEntityById(entities, targetId);
+  if (targetEntity && targetEntity.type === ENTITY_TYPES.CONSTRUCTOR) {
+    const targetInputPorts = getEntityConnectionPorts(targetEntity).filter(
+      (port) => port.kind === "input"
+    );
+    const targetInputPortKeys = new Set(
+      targetInputPorts.map((port) => `${port.worldX},${port.worldY}`)
+    );
+
+    for (const entity of entities) {
+      if (
+        entity.id === targetId ||
+        (
+          entity.type !== ENTITY_TYPES.MERGER &&
+          entity.type !== ENTITY_TYPES.SMELTER
+        )
+      ) {
+        continue;
+      }
+
+      const outputType = entity.state?.outputType || null;
+      const outputRate = Number(entity.state?.outputRate) || 0;
+      if (!outputType || outputRate <= 0) {
+        continue;
+      }
+
+      const outputPorts = getEntityConnectionPorts(entity).filter(
+        (port) => port.kind === "output"
+      );
+      for (const port of outputPorts) {
+        if (!matchesDirectConstructorInputPort(port.worldX, port.worldY, targetInputPortKeys)) {
+          continue;
+        }
+        const sourceKeyPrefix =
+          entity.type === ENTITY_TYPES.MERGER ? "m" : "s";
+        const incomingKey = `${sourceKeyPrefix}:${entity.id}:${port.name || "output"}`;
+        if (incomingKeys.has(incomingKey)) {
+          continue;
+        }
+        incomingKeys.add(incomingKey);
+        inputs.push({
+          rate: outputRate,
+          outputType
+        });
+      }
+    }
+  }
+
   return inputs;
+}
+
+function matchesDirectConstructorInputPort(portX, portY, constructorInputPortKeys) {
+  const DIRECT_NEIGHBORS = [
+    { x: 1, y: 0 },
+    { x: -1, y: 0 },
+    { x: 0, y: 1 },
+    { x: 0, y: -1 }
+  ];
+  const key = `${portX},${portY}`;
+  if (constructorInputPortKeys.has(key)) return true;
+
+  for (const neighbor of DIRECT_NEIGHBORS) {
+    const neighborKey = `${portX + neighbor.x},${portY + neighbor.y}`;
+    if (constructorInputPortKeys.has(neighborKey)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function updateSmelterInputs(entities) {
@@ -6385,6 +6707,17 @@ function updateSplitterMergerRates(entities) {
   const outgoingCount = new Map();
   const incomingKeys = new Set();
   const outgoingKeys = new Set();
+  const constructorInputPortKeys = new Set();
+
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.CONSTRUCTOR) continue;
+    const inputPorts = getEntityConnectionPorts(entity).filter(
+      (port) => port.kind === "input"
+    );
+    for (const port of inputPorts) {
+      constructorInputPortKeys.add(`${port.worldX},${port.worldY}`);
+    }
+  }
 
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.TUBE) continue;
@@ -6413,6 +6746,24 @@ function updateSplitterMergerRates(entities) {
       rate: entity.state.outputRate || 0,
       outputType: entity.state.carriedItem || null
     });
+  }
+
+  // Treat direct merger -> constructor overlap/touch as a valid outgoing connection,
+  // so mergers can drive constructors without requiring an intermediate tube.
+  for (const entity of entities) {
+    if (entity.type !== ENTITY_TYPES.MERGER) continue;
+    const outputPorts = getEntityConnectionPorts(entity).filter(
+      (port) => port.kind === "output"
+    );
+    for (const port of outputPorts) {
+      if (!matchesDirectConstructorInputPort(port.worldX, port.worldY, constructorInputPortKeys)) {
+        continue;
+      }
+      const directOutKey = `m:${entity.id}:${port.name || "output"}:direct`;
+      if (outgoingKeys.has(directOutKey)) continue;
+      outgoingKeys.add(directOutKey);
+      outgoingCount.set(entity.id, (outgoingCount.get(entity.id) || 0) + 1);
+    }
   }
 
   for (const entity of entities) {
@@ -6486,6 +6837,23 @@ class Button {
       strokeWeight(1);
     }
 
+    const isNowHovered = this.isHovered();
+    if (isNowHovered && !this.wasHovered && hoverSound) {
+      hoverSound.play();
+    }
+    this.wasHovered = isNowHovered; // Update the state for the next frame
+
+    if (isNowHovered) {
+      fill(170, 170, 175);
+      stroke(80, 80, 85);
+      strokeWeight(2);
+      cursor('pointer');
+    } else {
+      fill(200, 200, 215);
+      stroke(100);
+      strokeWeight(1);
+    }
+
     rect(this.x, this.y, this.w, this.h, 4);
 
     fill(30, 30, 30);
@@ -6500,6 +6868,7 @@ class Button {
 
   checkClick() {
     if (this.isHovered()) {
+      if (clickSound) clickSound.play();
       this.onClick();
     }
   }
