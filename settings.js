@@ -79,7 +79,6 @@ function drawSettingsUI() {
     // Binary mode toggle aligned with game mode section
     const modeToggleX = centerX - 24;
     const modeToggleY = modeRowY + 24;
-    modeToggleTrack.show();
     modeToggleTrack.position(canvasPos.x + modeToggleX, canvasPos.y + modeToggleY);
     updateModeToggleVisual();
 
@@ -93,12 +92,11 @@ function drawSettingsUI() {
     text("Restricted", modeToggleX + 48 + 74, modeToggleY + 12);
     pop();
 
-    // MUSIC slider moved slightly up
+    // UPDATED: Shift the music slider down further to create space, changed -105 to -85.
     const sliderWidth = panelW - 80;
     const sliderX = panelX + (panelW - sliderWidth) / 2;
-    const sliderY = panelY + panelH - 105;
+    const sliderY = panelY + panelH - 100; 
 
-    musicSlider.show();
     musicSlider.style('width', sliderWidth + 'px');
     musicSlider.position(canvasPos.x + sliderX, canvasPos.y + sliderY);
 
@@ -106,8 +104,17 @@ function drawSettingsUI() {
     noStroke();
     textAlign(CENTER, CENTER);
     textSize(18);
-    text("Music Volume", centerX, sliderY - 20);
+    text("Music Volume", centerX, sliderY - 20); // Title is now shifted down too
     text(`${(musicVolume * 100).toFixed(0)}%`, centerX, sliderY + 26);
+
+    // Dynamic Hiding logic for help menu overlay
+    if (typeof showHelpMenu !== "undefined" && showHelpMenu) {
+      modeToggleTrack.hide();
+      musicSlider.hide();
+    } else {
+      modeToggleTrack.show();
+      musicSlider.show();
+    }
   }
 }
 

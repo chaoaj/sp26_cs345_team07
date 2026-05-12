@@ -16,7 +16,7 @@ let sideBarFrameImg, sideBarTabOpen, sideBarTabClosed;
 let creditsButtonSettings, backButtonCredits;
 let creditsScrollY = 600;
 
-let helpButton;
+let helpButton, helpButtonSettings;
 let showHelpMenu = false;
 
 let ironOre = 0, ironBar = 0, ironPlate = 0;
@@ -328,7 +328,7 @@ function setup() {
     });
   }
 
-  helpButton = new Button(width - 160, 10, 40, 40, "?", () => {
+  helpButton = new Button(width - 200, 10, 100, 40, "Keybinds", () => {
     showHelpMenu = !showHelpMenu;
   });
   startButton = new Button (90, 350, 150, 55, "Start", () => {
@@ -357,7 +357,12 @@ function setup() {
     currentState = "CREDITS";
     creditsScrollY = height;
   });
-  
+  helpButtonSettings = new Button(250, 310, 100, 40, "Keybinds", () => {
+    showHelpMenu = !showHelpMenu;
+  });
+  helpMenuCloseButton = new Button(260, 405, 80, 30, "Close", () => {
+    showHelpMenu = false;
+  });
   backButtonCredits = new Button(30, 20, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
@@ -1157,8 +1162,8 @@ function drawHelpMenu() {
   fill(40, 40, 50, 240);
   stroke(80, 80, 100);
   strokeWeight(2);
-  let boxW = 340;
-  let boxH = 320;
+  let boxW = 380; 
+  let boxH = 290; 
   rect(width / 2 - boxW / 2, height / 2 - boxH / 2, boxW, boxH, 8);
 
   // Menu Title
@@ -1173,7 +1178,7 @@ function drawHelpMenu() {
   textSize(14);
   textStyle(NORMAL);
   textAlign(LEFT, TOP);
-  let startX = width / 2 - 130;
+  let startX = width / 2 - 125;
   let startY = height / 2 - boxH / 2 + 70;
   let lh = 26;
 
@@ -1184,25 +1189,26 @@ function drawHelpMenu() {
   text("R", startX, startY + lh * 3);
   text("C", startX, startY + lh * 4);
   text("X", startX, startY + lh * 5);
-  text("O", startX, startY + lh * 6);
-  text("I", startX, startY + lh * 7);
+  //text("O", startX, startY + lh * 6);
+  text("Ctrl+Shift+P", startX, startY + lh * 6); 
 
   fill(255);
-  startX += 90;
+  startX += 100; 
   text("-  Move Player", startX, startY);
   text("-  Select Hotbar Item", startX, startY + lh);
   text("-  Place Selected Item", startX, startY + lh * 2);
-  text("-  Rotate Item / Building", startX, startY + lh * 3);
-  text("-  Toggle Tube Shape (Corner/Straight)", startX, startY + lh * 4);
-  text("-  Delete Building Under Mouse", startX, startY + lh * 5);
-  text("-  Turn Building On / Off", startX, startY + lh * 6);
-  text("-  Inspect Building (Dev Console)", startX, startY + lh * 7);
+  text("-  Rotate Building", startX, startY + lh * 3);
+  text("-  Toggle Corner/Straight Tube", startX, startY + lh * 4);
+  text("-  Delete Building", startX, startY + lh * 5);
+  //text("-  Turn Building On / Off", startX, startY + lh * 6);
+  text("-  Shortcut (Dev)", startX, startY + lh * 6); 
 
-  // Footer instruction
+  if (helpMenuCloseButton) helpMenuCloseButton.draw();
+
+  // Footer instruction - simplified since we now have a dedicated close button
   textAlign(CENTER, BOTTOM);
   textSize(12);
   fill(150, 160, 180);
-  text("Click the '?' button again to close", width / 2, height / 2 + boxH / 2 - 15);
   pop();
 }
 
@@ -3722,6 +3728,9 @@ function drawSettings() {
   if (backButtonSettings) backButtonSettings.draw();
   if (creditsButtonSettings) creditsButtonSettings.draw();
   if (typeof drawSettingsUI === "function") drawSettingsUI();
+
+  if (helpButtonSettings) helpButtonSettings.draw();
+  if (showHelpMenu) drawHelpMenu();
 }
 
 function sideBarText(resource) {
@@ -3997,7 +4006,7 @@ function drawSideBar() {
   let mapW = mapCols * tileSize;
   let mapH = mapRows * tileSize;
 
-  let target = isSidebarOpen ? mapX : mapX - sidebarWidth;
+  let target = isSidebarOpen ? mapX : mapX - sidebarWidth - 7;
   sidebarX = lerp(sidebarX, target, 0.15);
 
   image(sideBarFrameImg, sidebarX, mapY - 15, sidebarWidth + 7, 510);
@@ -4062,7 +4071,8 @@ function drawSideBar() {
   // Draw the Interactive Tab
   let tabW = 25;
   let tabH = 60;
-  let tabX = sidebarX + sidebarWidth;
+  // FIXED: Clamp the tab to mapX so it hits a "wall" and stays visible when the frame completely hides
+  let tabX = Math.max(mapX, sidebarX + sidebarWidth); 
   let tabY = 425 / 2 - tabH / 2 + mapY;
   let isTabHovered = mouseX > tabX && mouseX < tabX + tabW &&
                      mouseY > tabY && mouseY < tabY + tabH;
@@ -4694,6 +4704,8 @@ function drawBuildingPlacementHologram(
   const useTubeHologram =
     entityType === ENTITY_TYPES.TUBE &&
     (pipeSideOffImg || pipeFrontOffImg || pipeCurve1OffImg || pipeCurve2OffImg);
+
+  const previewAlpha = 150;
 
   if (
     !useMinerOffHologram &&
@@ -5604,6 +5616,25 @@ function drawHotbar() {
 
 function mousePressed() {
   requestBackgroundMusicStart();
+
+  // Check for help button click first based on current state
+  if (currentState === "GAME" && helpButton && helpButton.isHovered()) {
+    helpButton.checkClick();
+    return;
+  }
+  if (currentState === "SETTINGS" && helpButtonSettings && helpButtonSettings.isHovered()) {
+    helpButtonSettings.checkClick();
+    return;
+  }
+  if (showHelpMenu && helpMenuCloseButton && helpMenuCloseButton.isHovered()) {
+    helpMenuCloseButton.checkClick();
+    return;
+  }
+  // Block all other clicks if the help menu is open
+  if (showHelpMenu) {
+    return;
+  }
+
   if (currentState == "MENU") {
     if (startButton) startButton.checkClick();
     if (settingsButton) settingsButton.checkClick();
@@ -5620,17 +5651,12 @@ function mousePressed() {
 
   if (currentState != "GAME") return;
 
-  if (helpButton && helpButton.isHovered()) {
-    helpButton.checkClick();
-    return;
-  }
-  if (showHelpMenu) {
-    return;
-  }
+if (currentState != "GAME") return;
 
   let tabW = 25;
   let tabH = 60;
-  let tabX = sidebarX + sidebarWidth;
+  let mapX = drawGame.state ? drawGame.state.config.margin : 0;
+  let tabX = Math.max(mapX, sidebarX + sidebarWidth);
   let mapY = drawGame.state ? drawGame.state.config.topMargin : 80;
   let tabY = 425 / 2 - tabH / 2 + mapY;
   
