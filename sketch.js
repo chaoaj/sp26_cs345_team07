@@ -31,6 +31,10 @@ let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
 let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg, rocketPlatformImg, rocketPlatformBuiltImg;
 let ironDepositImg, copperDepositImg, heliumDepositImg;
 
+let placeSound, hoverSound, clickSound, movementSound;
+
+let isMoving = false;
+
 let bgTiles = [];
 let stars = [];
 
@@ -430,6 +434,10 @@ function preload() {
   copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
   ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
   heliumDepositImg = loadImage('resources/resourceNodes/helium3Deposit.png');
+  placeSound = loadSound('resources/sounds/Place.wav');
+  hoverSound = loadSound('resources/sounds/hover_button.wav');
+  clickSound = loadSound('resources/sounds/Click_button.wav');
+  movementSound = loadSound('resources/sounds/Movement.wav');
 }
 
 function centerCanvas() {
@@ -949,10 +957,17 @@ function drawGame() {
   const isMoving = (moveX !== 0 || moveY !== 0);
 
   if (isMoving) {
+    if (movementSound && !movementSound.isPlaying()) {
+      movementSound.loop();
+    }
     const len = Math.hypot(moveX, moveY);
     const speed = player.speed * dt;
     player.x += (moveX / len) * speed;
     player.y += (moveY / len) * speed;
+  } else {
+    if (movementSound && movementSound.isPlaying()) {
+      movementSound.stop();
+    }
   }
 
   const prevDirection = currentDirection;
@@ -2041,7 +2056,7 @@ function updatePlayerAnimation() {
   if (now - drawGame.state.animationTimer >= frameDuration) {
     currentFrame = (currentFrame + 1) % dims.frames;
     drawGame.state.animationTimer = now;
-  }
+  }   
 }
 
 function getTubeRenderPathData(entity, tileSize) {
@@ -5770,6 +5785,7 @@ function placeSelectedEntityAtMouse() {
   newEntity.state.facing = placementFacing;
 
   entities.push(newEntity);
+  if (placeSound) placeSound.play();
 
   for (const entry of footprintTiles) {
     const occupiedTile = map.tiles[entry.y][entry.x];
@@ -6778,6 +6794,23 @@ class Button {
       strokeWeight(1);
     }
 
+    const isNowHovered = this.isHovered();
+    if (isNowHovered && !this.wasHovered && hoverSound) {
+      hoverSound.play();
+    }
+    this.wasHovered = isNowHovered; // Update the state for the next frame
+
+    if (isNowHovered) {
+      fill(170, 170, 175);
+      stroke(80, 80, 85);
+      strokeWeight(2);
+      cursor('pointer');
+    } else {
+      fill(200, 200, 215);
+      stroke(100);
+      strokeWeight(1);
+    }
+
     rect(this.x, this.y, this.w, this.h, 4);
 
     fill(30, 30, 30);
@@ -6792,6 +6825,7 @@ class Button {
 
   checkClick() {
     if (this.isHovered()) {
+      if (clickSound) clickSound.play();
       this.onClick();
     }
   }
