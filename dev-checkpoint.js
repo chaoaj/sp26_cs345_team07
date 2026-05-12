@@ -452,6 +452,67 @@
     throw new Error(`Unable to infer resource type for node at (${x}, ${y})`);
   }
 
+  function tileTypeForResource(resourceType) {
+    if (resourceType === RESOURCE_TYPES.COPPER_ORE) return "copper";
+    if (resourceType === RESOURCE_TYPES.HELIUM3) return "helium3";
+    return "iron";
+  }
+
+  function setNodeTileIfAvailable(state, x, y, tileType, resourceType, originX, originY, nodeId) {
+    if (!isInsideMap(state, x, y)) {
+      return false;
+    }
+    const tile = tileAt(state, x, y);
+    if (!tile || tile.entityId != null) {
+      return false;
+    }
+    tile.type = tileType;
+    tile.resource = resourceType;
+    tile.resourceNodeId = nodeId;
+    tile.resourceNodeOriginX = originX;
+    tile.resourceNodeOriginY = originY;
+    return true;
+  }
+
+  function ensureMineableNodeForSnapshotMiner(state, x, y, resourceType) {
+    const tile = tileAt(state, x, y);
+    if (!tile) {
+      return;
+    }
+    if (typeof isMineableTile === "function" && isMineableTile(tile.type)) {
+      return;
+    }
+
+    const resolvedResource = resourceType || RESOURCE_TYPES.IRON_ORE;
+    const tileType = tileTypeForResource(resolvedResource);
+    const nodeId = `snapshot-node:${tileType}:${x},${y}`;
+
+    // Prefer a normal 2x2 node footprint rooted at the miner tile.
+    const placed2x2 =
+      setNodeTileIfAvailable(state, x, y, tileType, resolvedResource, x, y, nodeId) &&
+      setNodeTileIfAvailable(state, x + 1, y, tileType, resolvedResource, x, y, nodeId) &&
+      setNodeTileIfAvailable(state, x, y + 1, tileType, resolvedResource, x, y, nodeId) &&
+      setNodeTileIfAvailable(state, x + 1, y + 1, tileType, resolvedResource, x, y, nodeId);
+
+    if (placed2x2) {
+      return;
+    }
+
+    // Fallback: at least make the miner's tile mineable/visible.
+    setNodeTileIfAvailable(state, x, y, tileType, resolvedResource, x, y, nodeId);
+  }
+
+  function invalidateStaticMapRenderCache(state) {
+    if (!state || !state.renderCache) {
+      return;
+    }
+    state.renderCache.worldLayer = null;
+    state.renderCache.minimapLayer = null;
+    state.renderCache.minimapTileSize = null;
+    state.renderCache.minimapCols = null;
+    state.renderCache.minimapRows = null;
+  }
+
   function configureDebugMinerOutput(entity, outputType, outputRate) {
     if (!entity || entity.type !== ENTITY_TYPES.MINER || !entity.state) {
       throw new Error("configureDebugMinerOutput expects a miner entity.");
@@ -802,6 +863,31 @@
     const preserveIds = getRestrictedCheckpointPreserveIds(state, shuttle);
     clearNonShuttleEntities(state, shuttle.id, preserveIds);
     restoreShuttleFootprintOnMap(state, shuttle);
+
+    // Ensure snapshot miners always sit on visible mineable tiles.
+    const forcedCopperSnapshotMinerIds = new Set([987, 999, 1002]);
+    const minerEntries = getSnapshotArray(snapshot, "miners");
+    for (const minerEntry of minerEntries) {
+      const at = parseAtCoordinate(minerEntry && minerEntry.at);
+      if (!at) continue;
+
+      let inferredResource = null;
+      try {
+        inferredResource = inferNodeResourceOrThrow(state, at.x, at.y);
+      } catch (_ignore) {
+        inferredResource = null;
+      }
+
+      const preferredResource = forcedCopperSnapshotMinerIds.has(Number(minerEntry && minerEntry.id))
+        ? RESOURCE_TYPES.COPPER_ORE
+        : (
+          (minerEntry && minerEntry.outputType) ||
+          inferredResource ||
+          RESOURCE_TYPES.IRON_ORE
+        );
+      ensureMineableNodeForSnapshotMiner(state, at.x, at.y, preferredResource);
+    }
+    invalidateStaticMapRenderCache(state);
 
     const tubeEntries = getSnapshotArray(snapshot, "tubes");
     const tubeCoordSet = collectTubeSet(tubeEntries);
