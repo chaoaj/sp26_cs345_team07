@@ -183,6 +183,21 @@ let backgroundMusicScheduleToken = 0;
 let backgroundMusicLastVolume = null;
 let backgroundMusicWarnedMissing = false;
 
+const OPTIMIZATION_WINDOW_SECONDS = 30;
+const OPTIMIZATION_FLOW_WINDOW_SECONDS = 6;
+const OPTIMIZATION_BUILD_GRACE_MS = 2500;
+const OPTIMIZATION_WEIGHT_THROUGHPUT = 0.4;
+const OPTIMIZATION_WEIGHT_UTILIZATION = 0.2;
+const OPTIMIZATION_WEIGHT_FLOW = 0.2;
+const OPTIMIZATION_WEIGHT_RECIPE = 0.1;
+const OPTIMIZATION_WEIGHT_COST = 0.1;
+const OPTIMIZATION_COST_TARGET_RATE_PER_ENTITY = 0.35;
+const OPTIMIZATION_COST_PREBUILD_FLOOR = 0.08;
+const OPTIMIZATION_PANEL_WIDTH = 220;
+const OPTIMIZATION_PANEL_COLLAPSED_H = 48;
+const OPTIMIZATION_PANEL_EXPANDED_H = 262;
+const OPTIMIZATION_MAX_WEAKPOINT_LINES = 5;
+
 /**
  * Random Int In Range.
  * @param {*} minInclusive - Input value used by this operation.
@@ -374,6 +389,678 @@ function requestBackgroundMusicStart() {
   // otherwise browsers may block playback if it runs in a timeout.
   clearBackgroundMusicTimer();
   playBackgroundMusicTrack(0);
+}
+
+/**
+ * Clamp a numeric value into [0, 1].
+ * @param {*} value - Value to clamp.
+ * @returns {number} Clamped value between 0 and 1.
+ */
+function clampZeroToOne(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  if (numeric <= 0) return 0;
+  if (numeric >= 1) return 1;
+  return numeric;
+}
+
+/**
+ * Build the initial optimization-metric state object.
+ * @returns {object} Fresh optimization state with rolling-window accumulators.
+ */
+function createOptimizationState() {
+  return {
+    windowSeconds: OPTIMIZATION_WINDOW_SECONDS,
+    sampleDurationTotal: 0,
+    sampleQueue: [],
+    weightedSums: {
+      throughput: 0,
+      utilization: 0,
+      flow: 0,
+      recipe: 0,
+      cost: 0
+    },
+    graceUntilMs: 0,
+    isInGraceWindow: false,
+    isPanelExpanded: false,
+    liveScore: 100,
+    displayScore: 100,
+    grade: "A+",
+    breakdown: {
+      throughput: 1,
+      utilization: 1,
+      flow: 1,
+      recipe: 1,
+      cost: 1
+    },
+    latest: null,
+    bottlenecks: []
+  };
+}
+
+/**
+ * Ensure optimization state exists on the active run state.
+ * @param {*} runtimeState - Active drawGame.state object.
+ * @returns {object|null} Optimization state or null when runtime state is unavailable.
+ */
+function ensureOptimizationState(runtimeState) {
+  if (!runtimeState) {
+    return null;
+  }
+  if (!runtimeState.optimization) {
+    runtimeState.optimization = createOptimizationState();
+  }
+  return runtimeState.optimization;
+}
+
+/**
+ * Convert a score (0-100) into a grade label.
+ * @param {*} score - Numeric score.
+ * @returns {string} Grade text label.
+ */
+function getOptimizationGradeLabel(score) {
+  const s = Number(score) || 0;
+  if (s >= 95) return "S";
+  if (s >= 90) return "A";
+  if (s >= 80) return "B";
+  if (s >= 70) return "C";
+  if (s >= 60) return "D";
+  if (s >= 50) return "F";
+  return "F-";
+}
+
+/**
+ * Get a display color for a score tier.
+ * @param {*} score - Numeric score.
+ * @returns {number[]} RGB tuple for score tier coloring.
+ */
+function getOptimizationScoreColor(score) {
+  const s = Number(score) || 0;
+  if (s < 50) return [214, 84, 78];
+  if (s < 75) return [236, 185, 67];
+  return [95, 212, 120];
+}
+
+/**
+ * Estimate installed factory output capacity for a producer entity.
+ * @param {*} entity - Target entity instance.
+ * @returns {number} Estimated nominal output rate for this entity.
+ */
+function getFactoryNominalOutputRate(entity) {
+  const type = entity?.type;
+  const state = entity?.state;
+  if (!type || !state) {
+    return 0;
+  }
+
+  if (type === ENTITY_TYPES.MINER) {
+    if (!state.outputType) return 0;
+    // Miner implementation currently uses 2/sec for ore and helium in state logic.
+    return 2;
+  }
+
+  if (type === ENTITY_TYPES.SMELTER) {
+    const hasRecipeContext = !!state.inputType || !!state.outputType || !!state.currentRecipe;
+    return hasRecipeContext ? 1 : 0;
+  }
+
+  if (type === ENTITY_TYPES.CONSTRUCTOR) {
+    if (state.outputType && Number(state.outputCount) > 0) {
+      return Math.max(0, Number(state.outputCount) || 0);
+    }
+    const hasInputContext =
+      Array.isArray(state.inputSlots) &&
+      state.inputSlots.some((slot) => !!slot?.type);
+    return hasInputContext ? 1 : 0;
+  }
+
+  if (type === ENTITY_TYPES.EXTRACTOR) {
+    if (!state.outputType) return 0;
+    const rate = Number(state.outputRate);
+    return Number.isFinite(rate) && rate > 0 ? rate : 1;
+  }
+
+  return 0;
+}
+
+/**
+ * Add a sample to the rolling optimization window and trim overflow.
+ * @param {*} optimizationState - Optimization state object.
+ * @param {*} sample - Subscore sample object.
+ * @param {*} dt - Sample duration in seconds.
+ * @returns {void} No return value.
+ */
+function pushOptimizationRollingSample(optimizationState, sample, dt) {
+  if (!optimizationState || !sample) {
+    return;
+  }
+  const duration = Number(dt);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return;
+  }
+
+  const normalizedSample = {
+    dt: duration,
+    throughput: clampZeroToOne(sample.throughput),
+    utilization: clampZeroToOne(sample.utilization),
+    flow: clampZeroToOne(sample.flow),
+    recipe: clampZeroToOne(sample.recipe),
+    cost: clampZeroToOne(sample.cost)
+  };
+
+  optimizationState.sampleQueue.push(normalizedSample);
+  optimizationState.sampleDurationTotal += normalizedSample.dt;
+  optimizationState.weightedSums.throughput += normalizedSample.throughput * normalizedSample.dt;
+  optimizationState.weightedSums.utilization += normalizedSample.utilization * normalizedSample.dt;
+  optimizationState.weightedSums.flow += normalizedSample.flow * normalizedSample.dt;
+  optimizationState.weightedSums.recipe += normalizedSample.recipe * normalizedSample.dt;
+  optimizationState.weightedSums.cost += normalizedSample.cost * normalizedSample.dt;
+
+  const maxDuration = Math.max(1, Number(optimizationState.windowSeconds) || OPTIMIZATION_WINDOW_SECONDS);
+  while (optimizationState.sampleDurationTotal - maxDuration > 1e-6 && optimizationState.sampleQueue.length > 0) {
+    const overflow = optimizationState.sampleDurationTotal - maxDuration;
+    const head = optimizationState.sampleQueue[0];
+    if (!head) {
+      break;
+    }
+
+    const consume = Math.min(head.dt, overflow);
+    optimizationState.sampleDurationTotal -= consume;
+    optimizationState.weightedSums.throughput -= head.throughput * consume;
+    optimizationState.weightedSums.utilization -= head.utilization * consume;
+    optimizationState.weightedSums.flow -= head.flow * consume;
+    optimizationState.weightedSums.recipe -= head.recipe * consume;
+    optimizationState.weightedSums.cost -= head.cost * consume;
+    head.dt -= consume;
+
+    if (head.dt <= 1e-6) {
+      optimizationState.sampleQueue.shift();
+    }
+  }
+
+  optimizationState.weightedSums.throughput = Math.max(0, optimizationState.weightedSums.throughput);
+  optimizationState.weightedSums.utilization = Math.max(0, optimizationState.weightedSums.utilization);
+  optimizationState.weightedSums.flow = Math.max(0, optimizationState.weightedSums.flow);
+  optimizationState.weightedSums.recipe = Math.max(0, optimizationState.weightedSums.recipe);
+  optimizationState.weightedSums.cost = Math.max(0, optimizationState.weightedSums.cost);
+}
+
+/**
+ * Compute rolling-average subscores from the optimization sample window.
+ * @param {*} optimizationState - Optimization state object.
+ * @param {*} fallbackSample - Instant subscores used when the rolling window is empty.
+ * @returns {object} Rolling-average subscores in [0, 1].
+ */
+function getOptimizationRollingBreakdown(optimizationState, fallbackSample) {
+  const fallback = fallbackSample || {};
+  const totalDuration = Number(optimizationState?.sampleDurationTotal) || 0;
+  if (totalDuration <= 1e-6) {
+    return {
+      throughput: clampZeroToOne(fallback.throughput),
+      utilization: clampZeroToOne(fallback.utilization),
+      flow: clampZeroToOne(fallback.flow),
+      recipe: clampZeroToOne(fallback.recipe),
+      cost: clampZeroToOne(fallback.cost)
+    };
+  }
+
+  return {
+    throughput: clampZeroToOne(optimizationState.weightedSums.throughput / totalDuration),
+    utilization: clampZeroToOne(optimizationState.weightedSums.utilization / totalDuration),
+    flow: getRecentOptimizationMetricAverage(
+      optimizationState,
+      "flow",
+      OPTIMIZATION_FLOW_WINDOW_SECONDS,
+      fallback.flow
+    ),
+    recipe: clampZeroToOne(optimizationState.weightedSums.recipe / totalDuration),
+    cost: clampZeroToOne(optimizationState.weightedSums.cost / totalDuration)
+  };
+}
+
+/**
+ * Compute a trailing-window average for a specific optimization metric.
+ * @param {*} optimizationState - Optimization state object.
+ * @param {*} metricKey - Sample field name (for example: "flow").
+ * @param {*} windowSeconds - Trailing window duration in seconds.
+ * @param {*} fallbackValue - Value used when no recent samples exist.
+ * @returns {number} Clamped trailing average in [0, 1].
+ */
+function getRecentOptimizationMetricAverage(
+  optimizationState,
+  metricKey,
+  windowSeconds,
+  fallbackValue
+) {
+  const queue = Array.isArray(optimizationState?.sampleQueue)
+    ? optimizationState.sampleQueue
+    : [];
+  const targetWindow = Math.max(0, Number(windowSeconds) || 0);
+  if (queue.length === 0 || targetWindow <= 1e-6) {
+    return clampZeroToOne(fallbackValue);
+  }
+
+  let remaining = targetWindow;
+  let weightedTotal = 0;
+  let usedDuration = 0;
+
+  for (let i = queue.length - 1; i >= 0 && remaining > 1e-6; i--) {
+    const sample = queue[i];
+    const sampleDt = Math.max(0, Number(sample?.dt) || 0);
+    if (sampleDt <= 1e-6) {
+      continue;
+    }
+    const useDt = Math.min(sampleDt, remaining);
+    const metricValue = clampZeroToOne(sample?.[metricKey]);
+    weightedTotal += metricValue * useDt;
+    usedDuration += useDt;
+    remaining -= useDt;
+  }
+
+  if (usedDuration <= 1e-6) {
+    return clampZeroToOne(fallbackValue);
+  }
+  return clampZeroToOne(weightedTotal / usedDuration);
+}
+
+/**
+ * Compute instantaneous optimization subscores and bottleneck diagnostics.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} rocketProgress - Rocket progress summary from this frame.
+ * @returns {object} Instant metric snapshot.
+ */
+function computeInstantOptimizationSnapshot(entities, rocketProgress) {
+  const list = Array.isArray(entities) ? entities : [];
+  let tubeCount = 0;
+  let flowingTubeCount = 0;
+  let blockedTubeCount = 0;
+  let openPortTubeCount = 0;
+  let machineCount = 0;
+  let activeMachineCount = 0;
+  let relevantRecipeMachineCount = 0;
+  let validRecipeMachineCount = 0;
+  let placeableEntityCount = 0;
+  let factoryProducerCount = 0;
+  let throughputPotentialRate = 0;
+  let throughputActualRate = 0;
+
+  for (const entity of list) {
+    const type = entity?.type;
+    const state = entity?.state || null;
+    if (!type || !state) {
+      continue;
+    }
+
+    const isSpecialFixedEntity =
+      type === ENTITY_TYPES.ROCKET_SITE || type === ENTITY_TYPES.SHUTTLE;
+    if (!isSpecialFixedEntity) {
+      placeableEntityCount += 1;
+    }
+
+    if (type === ENTITY_TYPES.TUBE) {
+      tubeCount += 1;
+      if (state.flowState === "flowing") {
+        flowingTubeCount += 1;
+      } else if (state.flowState === "blocked") {
+        blockedTubeCount += 1;
+      }
+      if (state.hasOpenPort) {
+        openPortTubeCount += 1;
+      }
+      continue;
+    }
+
+    if (isSpecialFixedEntity) {
+      continue;
+    }
+
+    machineCount += 1;
+    if (state.isActive) {
+      activeMachineCount += 1;
+    }
+
+    // Total capacity is based on raw miner harvesting only.
+    const nominalFactoryRate = getFactoryNominalOutputRate(entity);
+    if (nominalFactoryRate > 0) {
+      factoryProducerCount += 1;
+      if (type === ENTITY_TYPES.MINER) {
+        throughputPotentialRate += nominalFactoryRate;
+      }
+    }
+
+    if (type !== ENTITY_TYPES.SMELTER && type !== ENTITY_TYPES.CONSTRUCTOR) {
+      continue;
+    }
+
+    const hasInputSignal = type === ENTITY_TYPES.SMELTER
+      ? (Number(state.inputRate) > 0 || !!state.inputType)
+      : (
+          Number(state.inputRate) > 0 ||
+          (Array.isArray(state.inputSlots) &&
+            state.inputSlots.some((slot) => !!slot?.type))
+        );
+
+    if (!hasInputSignal) {
+      continue;
+    }
+
+    relevantRecipeMachineCount += 1;
+    const validRecipe =
+      !!state.isActive &&
+      !!state.outputType &&
+      Number(state.outputRate) > 0;
+    if (validRecipe) {
+      validRecipeMachineCount += 1;
+    }
+  }
+
+  throughputPotentialRate = Math.max(0, throughputPotentialRate);
+  const rocketRequiredTypes = new Set();
+  const rocketRequired = rocketProgress?.rocket?.state?.required;
+  if (rocketRequired && typeof rocketRequired === "object") {
+    for (const resourceType of Object.keys(rocketRequired)) {
+      if (resourceType) {
+        rocketRequiredTypes.add(resourceType);
+      }
+    }
+  }
+
+  const entitiesById = new Map(list.map((entity) => [entity.id, entity]));
+  const tubeSourcesByTarget = getTubeSourcesByTarget(list);
+  const sinkSourceIds = new Set();
+  const countedSinkComponents = new Set();
+
+  for (const entity of list) {
+    if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
+      continue;
+    }
+    const tubeState = entity.state || null;
+    if (!tubeState?.isConnected) {
+      continue;
+    }
+    const sourceId = tubeState.fromEntityId;
+    const targetId = tubeState.toEntityId;
+    if (!sourceId || !targetId) {
+      continue;
+    }
+    const outputType = tubeState.carriedItem || null;
+    const flowRate = Math.max(0, Number(tubeState.outputRate) || 0);
+    if (!outputType || flowRate <= 0) {
+      continue;
+    }
+    const targetEntity = entitiesById.get(targetId);
+    const targetType = targetEntity?.type || null;
+    if (
+      targetType !== ENTITY_TYPES.SHUTTLE &&
+      targetType !== ENTITY_TYPES.ROCKET_SITE
+    ) {
+      continue;
+    }
+
+    // Rocket-required outputs only count when delivered to the rocket.
+    if (
+      targetType === ENTITY_TYPES.SHUTTLE &&
+      rocketRequiredTypes.has(outputType)
+    ) {
+      continue;
+    }
+    // Rocket intake only counts required output types.
+    if (
+      targetType === ENTITY_TYPES.ROCKET_SITE &&
+      rocketRequiredTypes.size > 0 &&
+      !rocketRequiredTypes.has(outputType)
+    ) {
+      continue;
+    }
+
+    const componentKey = tubeState.componentId != null
+      ? `c:${tubeState.componentId}`
+      : `t:${entity.id}`;
+    if (countedSinkComponents.has(componentKey)) {
+      continue;
+    }
+    countedSinkComponents.add(componentKey);
+    sinkSourceIds.add(sourceId);
+  }
+
+  const contributingMinerIds = new Set();
+  const visitedEntities = new Set();
+  const upstreamQueue = Array.from(sinkSourceIds);
+  while (upstreamQueue.length > 0) {
+    const entityId = upstreamQueue.pop();
+    if (!entityId || visitedEntities.has(entityId)) {
+      continue;
+    }
+    visitedEntities.add(entityId);
+
+    const sourceEntity = entitiesById.get(entityId);
+    if (!sourceEntity) {
+      continue;
+    }
+    if (sourceEntity.type === ENTITY_TYPES.MINER) {
+      contributingMinerIds.add(sourceEntity.id);
+      continue;
+    }
+
+    const upstreamSources = tubeSourcesByTarget.get(entityId);
+    if (!upstreamSources) {
+      continue;
+    }
+    for (const upstreamId of upstreamSources) {
+      if (!visitedEntities.has(upstreamId)) {
+        upstreamQueue.push(upstreamId);
+      }
+    }
+  }
+
+  let sinkThroughputRate = 0;
+  for (const minerId of contributingMinerIds) {
+    const miner = entitiesById.get(minerId);
+    if (!miner || miner.type !== ENTITY_TYPES.MINER) {
+      continue;
+    }
+    const minerState = miner.state || null;
+    if (!minerState?.isActive || !minerState.outputType) {
+      continue;
+    }
+    sinkThroughputRate += Math.max(0, Number(minerState.outputRate) || 0);
+  }
+
+  throughputActualRate = Math.max(0, sinkThroughputRate);
+  if (throughputPotentialRate > 0) {
+    throughputActualRate = Math.min(throughputActualRate, throughputPotentialRate);
+  }
+  const rocketCompleted = !!rocketProgress?.completed;
+
+  let throughputScore = 1;
+  if (throughputPotentialRate > 0) {
+    throughputScore = clampZeroToOne(throughputActualRate / throughputPotentialRate);
+  } else if (factoryProducerCount > 0 || placeableEntityCount > 0) {
+    throughputScore = 0;
+  }
+
+  const utilizationScore = machineCount > 0
+    ? clampZeroToOne(activeMachineCount / machineCount)
+    : 1;
+
+  let flowScore = 1;
+  if (tubeCount > 0) {
+    const flowRatio = flowingTubeCount / tubeCount;
+    const blockedPenalty = blockedTubeCount / tubeCount;
+    const openPenalty = openPortTubeCount / (tubeCount * 2);
+    flowScore = clampZeroToOne(flowRatio - blockedPenalty * 0.35 - openPenalty * 0.5);
+  }
+
+  const recipeScore = relevantRecipeMachineCount > 0
+    ? clampZeroToOne(validRecipeMachineCount / relevantRecipeMachineCount)
+    : 1;
+
+  const expectedRate = Math.max(
+    0.1,
+    placeableEntityCount * OPTIMIZATION_COST_TARGET_RATE_PER_ENTITY
+  );
+  const costBaseScore = placeableEntityCount > 0
+    ? clampZeroToOne(throughputActualRate / expectedRate)
+    : 1;
+  const costScore = (!rocketCompleted && placeableEntityCount > 0)
+    ? Math.max(OPTIMIZATION_COST_PREBUILD_FLOOR, costBaseScore)
+    : costBaseScore;
+
+  const idleMachineCount = Math.max(0, machineCount - activeMachineCount);
+  const invalidRecipeMachineCount = Math.max(
+    0,
+    relevantRecipeMachineCount - validRecipeMachineCount
+  );
+
+  const bottlenecks = [];
+  if (factoryProducerCount === 0 && placeableEntityCount > 0) {
+    bottlenecks.push({
+      severity: 1,
+      text: "No factory producers are configured."
+    });
+  }
+  if (factoryProducerCount > 0 && throughputActualRate <= 0.001) {
+    bottlenecks.push({
+      severity: 0.95,
+      text: "Factory output is near zero."
+    });
+  }
+  if (blockedTubeCount > 0 && tubeCount > 0) {
+    bottlenecks.push({
+      severity: blockedTubeCount / tubeCount,
+      text: `${blockedTubeCount} blocked tube${blockedTubeCount === 1 ? "" : "s"}.`
+    });
+  }
+  if (openPortTubeCount > 0 && tubeCount > 0) {
+    bottlenecks.push({
+      severity: openPortTubeCount / tubeCount,
+      text: `${openPortTubeCount} tube${openPortTubeCount === 1 ? "" : "s"} with open ports.`
+    });
+  }
+  if (idleMachineCount > 0 && machineCount > 0) {
+    bottlenecks.push({
+      severity: idleMachineCount / machineCount,
+      text: `${idleMachineCount} idle machine${idleMachineCount === 1 ? "" : "s"}.`
+    });
+  }
+  if (invalidRecipeMachineCount > 0 && relevantRecipeMachineCount > 0) {
+    bottlenecks.push({
+      severity: invalidRecipeMachineCount / relevantRecipeMachineCount,
+      text: `${invalidRecipeMachineCount} machine${invalidRecipeMachineCount === 1 ? "" : "s"} with invalid recipe ratios.`
+    });
+  }
+  bottlenecks.sort((a, b) => (b.severity || 0) - (a.severity || 0));
+
+  return {
+    throughputScore,
+    utilizationScore,
+    flowScore,
+    recipeScore,
+    costScore,
+    rocketCompleted,
+    throughputActualRate,
+    throughputPotentialRate,
+    counts: {
+      placeableEntityCount,
+      machineCount,
+      activeMachineCount,
+      factoryProducerCount,
+      tubeCount,
+      flowingTubeCount,
+      blockedTubeCount,
+      openPortTubeCount,
+      relevantRecipeMachineCount,
+      validRecipeMachineCount
+    },
+    bottlenecks: bottlenecks.slice(0, 3)
+  };
+}
+
+/**
+ * Activate the score grace window after build/edit operations.
+ * @param {*} durationMs - Grace duration in milliseconds.
+ * @returns {void} No return value.
+ */
+function triggerOptimizationBuildGraceWindow(durationMs = OPTIMIZATION_BUILD_GRACE_MS) {
+  if (!drawGame.state) {
+    return;
+  }
+  const optimization = ensureOptimizationState(drawGame.state);
+  if (!optimization) {
+    return;
+  }
+  const duration = Math.max(0, Number(durationMs) || 0);
+  optimization.graceUntilMs = Math.max(
+    Number(optimization.graceUntilMs) || 0,
+    millis() + duration
+  );
+}
+
+/**
+ * Update rolling optimization metrics and maintain display state.
+ * @param {*} runtimeState - Active drawGame.state object.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} dt - Frame delta time in seconds.
+ * @param {*} rocketProgress - Rocket progress summary from this frame.
+ * @returns {void} No return value.
+ */
+function updateOptimizationMetrics(runtimeState, entities, dt, rocketProgress) {
+  const optimization = ensureOptimizationState(runtimeState);
+  if (!optimization) {
+    return;
+  }
+
+  const instant = computeInstantOptimizationSnapshot(entities, rocketProgress);
+  optimization.latest = instant;
+
+  pushOptimizationRollingSample(
+    optimization,
+    {
+      throughput: instant.throughputScore,
+      utilization: instant.utilizationScore,
+      flow: instant.flowScore,
+      recipe: instant.recipeScore,
+      cost: instant.costScore
+    },
+    dt
+  );
+
+  const rolling = getOptimizationRollingBreakdown(optimization, {
+    throughput: instant.throughputScore,
+    utilization: instant.utilizationScore,
+    flow: instant.flowScore,
+    recipe: instant.recipeScore,
+    cost: instant.costScore
+  });
+
+  const weightedScore =
+    rolling.throughput * OPTIMIZATION_WEIGHT_THROUGHPUT +
+    rolling.utilization * OPTIMIZATION_WEIGHT_UTILIZATION +
+    rolling.flow * OPTIMIZATION_WEIGHT_FLOW +
+    rolling.recipe * OPTIMIZATION_WEIGHT_RECIPE +
+    rolling.cost * OPTIMIZATION_WEIGHT_COST;
+  const liveScore = clampZeroToOne(weightedScore) * 100;
+
+  optimization.liveScore = liveScore;
+  const previousDisplay = Number(optimization.displayScore);
+  if (!Number.isFinite(previousDisplay)) {
+    optimization.displayScore = liveScore;
+  }
+
+  const now = millis();
+  optimization.isInGraceWindow = now < (Number(optimization.graceUntilMs) || 0);
+  if (optimization.isInGraceWindow) {
+    // During edits, keep the score from dropping abruptly while still allowing improvements.
+    optimization.displayScore = Math.max(Number(optimization.displayScore) || liveScore, liveScore);
+  } else {
+    optimization.displayScore = liveScore;
+  }
+
+  optimization.breakdown = rolling;
+  optimization.grade = getOptimizationGradeLabel(optimization.displayScore);
+  optimization.bottlenecks = instant.bottlenecks || [];
 }
 
 // FIXED: Moved Credits button initialization to the Settings menu layout and restored Quit button position
@@ -1011,6 +1698,7 @@ function drawGame() {
         minimapCols: null,
         minimapRows: null
       },
+      optimization: createOptimizationState(),
       animationTimer: 0,
       restrictedBuildRestrictionsDisabled: false
     };
@@ -1052,6 +1740,7 @@ function drawGame() {
   if (feedback.rocketCompletionModalText == null) {
     feedback.rocketCompletionModalText = "";
   }
+  ensureOptimizationState(drawGame.state);
 
   if (drawGame.state.player.facing === undefined) {
     drawGame.state.player.facing = "N";
@@ -1114,6 +1803,7 @@ function drawGame() {
   updateFactoryProduction(entities, dt);
   updateRestrictedModeShuttleIntake(entities, dt);
   const rocketProgress = updateRocketConstructionProgress(entities, dt);
+  updateOptimizationMetrics(drawGame.state, entities, dt, rocketProgress);
   if (rocketProgress.justCompleted) {
     feedback.rocketCompletionModalUntil = millis() + 12000;
     feedback.rocketCompletionModalText = "Rocket ship complete. Walk to it to launch.";
@@ -1263,6 +1953,7 @@ function drawGame() {
   pop();
 
   drawMiniMap(map, player, config, feedback, entities);
+  drawOptimizationHud(drawGame.state);
   backButtonGame.draw();
   testEndGameButton.draw();
   drawHotbar();
@@ -2176,17 +2867,29 @@ function isPlayerNearRocketForLaunch(player, rocketEntity, config) {
  * Advance rocket delivery progress from connected input lines and detect completion.
  * @param {*} entities - Collection of active entities in the world.
  * @param {*} dt - Frame delta time in seconds.
- * @returns {void} No return value.
+ * @returns {object} Progress summary with completion and throughput-rate details.
  */
 function updateRocketConstructionProgress(entities, dt) {
   const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
   if (!rocket || !rocket.state) {
-    return { completed: false, justCompleted: false, rocket: null };
+    return {
+      completed: false,
+      justCompleted: false,
+      rocket: null,
+      throughputActualRate: 0,
+      throughputPotentialRate: 0
+    };
   }
 
   const rocketState = rocket.state;
   if (rocketState.completed) {
-    return { completed: true, justCompleted: false, rocket };
+    return {
+      completed: true,
+      justCompleted: false,
+      rocket,
+      throughputActualRate: 0,
+      throughputPotentialRate: 0
+    };
   }
 
   const wasCompleted = !!rocketState.completed;
@@ -2219,10 +2922,15 @@ function updateRocketConstructionProgress(entities, dt) {
     increments[outputType] += outputRate * dt;
   }
 
+  let potentialDeliveredAmount = 0;
+  let actualDeliveredAmount = 0;
   for (const [resourceType, amount] of Object.entries(increments)) {
     if (amount <= 0 || required[resourceType] == null) continue;
+    potentialDeliveredAmount += amount;
     const current = Number(delivered[resourceType]) || 0;
-    delivered[resourceType] = min(required[resourceType], current + amount);
+    const next = min(required[resourceType], current + amount);
+    delivered[resourceType] = next;
+    actualDeliveredAmount += Math.max(0, next - current);
   }
 
   const requiredTotal = Object.values(required).reduce((sum, value) => sum + Number(value || 0), 0);
@@ -2238,10 +2946,22 @@ function updateRocketConstructionProgress(entities, dt) {
   rocketState.isActive = !complete && deliveredTotal > 0;
   rocketState.isOn = complete;
 
+  const safeDt = Number(dt);
+  const throughputActualRate =
+    Number.isFinite(safeDt) && safeDt > 0
+      ? actualDeliveredAmount / safeDt
+      : 0;
+  const throughputPotentialRate =
+    Number.isFinite(safeDt) && safeDt > 0
+      ? potentialDeliveredAmount / safeDt
+      : 0;
+
   return {
     completed: complete,
     justCompleted: complete && !wasCompleted,
-    rocket
+    rocket,
+    throughputActualRate,
+    throughputPotentialRate
   };
 }
 
@@ -4167,6 +4887,179 @@ function drawMiniMap(map, player, config, feedback, entities) {
 }
 
 /**
+ * Draw the optimization HUD with a compact score and hover-expanded breakdown.
+ * @param {*} runtimeState - Active drawGame.state object.
+ * @returns {void} No return value.
+ */
+function drawOptimizationHud(runtimeState) {
+  if (!runtimeState || !runtimeState.config) {
+    return;
+  }
+  const optimization = runtimeState.optimization;
+  if (!optimization) {
+    return;
+  }
+
+  const config = runtimeState.config;
+  const mapCols = Math.max(1, Number(config.mapCols) || 1);
+  const mapRows = Math.max(1, Number(config.mapRows) || 1);
+  const miniMaxSize = 140;
+  const miniTile = max(1, floor(miniMaxSize / mapCols));
+  const miniWidth = mapCols * miniTile;
+  const miniHeight = mapRows * miniTile;
+  const miniX = width - miniWidth - 10;
+  const miniY = 10;
+
+  const panelW = OPTIMIZATION_PANEL_WIDTH;
+  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
+  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
+  const panelX = constrain(miniX + miniWidth - panelW, 8, width - panelW - 8);
+  const panelY = constrain(miniY + miniHeight + 10, 8, height - expandedH - 8);
+
+  const inCollapsedBounds =
+    mouseX >= panelX &&
+    mouseX <= panelX + panelW &&
+    mouseY >= panelY &&
+    mouseY <= panelY + collapsedH;
+  const inExpandedBounds =
+    mouseX >= panelX &&
+    mouseX <= panelX + panelW &&
+    mouseY >= panelY &&
+    mouseY <= panelY + expandedH;
+  if (inCollapsedBounds) {
+    optimization.isPanelExpanded = true;
+  } else if (!inExpandedBounds) {
+    optimization.isPanelExpanded = false;
+  }
+  const expanded = !!optimization.isPanelExpanded;
+
+  const score = Number(optimization.displayScore) || 0;
+  const grade = optimization.grade || getOptimizationGradeLabel(score);
+  const scoreColor = getOptimizationScoreColor(score);
+  const boxH = expanded ? expandedH : collapsedH;
+
+  const formatRate = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "0";
+    if (Math.abs(n - Math.round(n)) < 0.01) return String(Math.round(n));
+    return n.toFixed(2);
+  };
+
+  push();
+  rectMode(CORNER);
+  textAlign(LEFT, TOP);
+
+  fill(16, 20, 28, 225);
+  stroke(scoreColor[0], scoreColor[1], scoreColor[2], 230);
+  strokeWeight(2);
+  rect(panelX, panelY, panelW, boxH, 8);
+
+  noStroke();
+  fill(232, 238, 248);
+  textStyle(BOLD);
+  textSize(12);
+  text("Factory Efficiency", panelX + 10, panelY + 8);
+
+  fill(scoreColor[0], scoreColor[1], scoreColor[2]);
+  textAlign(RIGHT, TOP);
+  text(`${score.toFixed(0)} (${grade})`, panelX + panelW - 10, panelY + 8);
+
+  textAlign(LEFT, TOP);
+  textStyle(NORMAL);
+  textSize(10);
+  fill(188, 198, 214);
+  const throughputActualRate = Number(optimization.latest?.throughputActualRate) || 0;
+  const throughputPotentialRate = Number(optimization.latest?.throughputPotentialRate) || 0;
+  text(
+    `Factory Throughput: ${formatRate(throughputActualRate)}/${formatRate(throughputPotentialRate)} per sec`,
+    panelX + 10,
+    panelY + 24
+  );
+
+  if (optimization.isInGraceWindow) {
+    fill(248, 214, 124);
+    text("Editing grace active", panelX + panelW - 105, panelY + 24);
+  }
+
+  if (!expanded) {
+    fill(154, 166, 186);
+    textAlign(RIGHT, TOP);
+    text("Hover for breakdown", panelX + panelW - 10, panelY + 36);
+    pop();
+    return;
+  }
+
+  const breakdown = optimization.breakdown || {};
+  const bars = [
+    {
+      key: "throughput",
+      label: "Throughput (harvested/stored)",
+      value: Number(breakdown.throughput) || 0
+    },
+    {
+      key: "utilization",
+      label: "Utilization (active/total)",
+      value: Number(breakdown.utilization) || 0
+    },
+    {
+      key: "flow",
+      label: "Flow Health (flow - penalties)",
+      value: Number(breakdown.flow) || 0
+    },
+    {
+      key: "recipe",
+      label: "Recipe Validity (valid/relevant)",
+      value: Number(breakdown.recipe) || 0
+    }
+  ];
+
+  let barY = panelY + 44;
+  const barX = panelX + 10;
+  const barW = panelW - 20;
+  const barH = 10;
+  for (const entry of bars) {
+    const value = clampZeroToOne(entry.value);
+    fill(154, 166, 186);
+    textSize(9);
+    textAlign(LEFT, TOP);
+    text(entry.label, barX, barY - 1);
+    textAlign(RIGHT, TOP);
+    text(`${Math.round(value * 100)}%`, barX + barW, barY - 1);
+
+    fill(45, 54, 70, 235);
+    noStroke();
+    rect(barX, barY + 10, barW, barH, 3);
+    fill(scoreColor[0], scoreColor[1], scoreColor[2], 220);
+    rect(barX, barY + 10, barW * value, barH, 3);
+    barY += 24;
+  }
+
+  fill(220, 228, 240);
+  textAlign(LEFT, TOP);
+  textStyle(BOLD);
+  textSize(10);
+  text("Top Bottlenecks", barX, barY + 2);
+  textStyle(NORMAL);
+  fill(174, 186, 204);
+  const bottlenecks = Array.isArray(optimization.bottlenecks)
+    ? optimization.bottlenecks
+    : [];
+  if (bottlenecks.length === 0) {
+    text("- No major bottlenecks detected.", barX, barY + 16);
+  } else {
+    let lineY = barY + 16;
+    for (const entry of bottlenecks.slice(0, OPTIMIZATION_MAX_WEAKPOINT_LINES)) {
+      const textLine = String(entry?.text || "").trim();
+      if (!textLine) continue;
+      text(`- ${textLine}`, barX, lineY);
+      lineY += 12;
+    }
+  }
+
+  pop();
+}
+
+/**
  * Build and cache the static world terrain layer used by the camera render pass.
  * @param {*} state - Input value used by this operation.
  * @returns {*} Computed value for the requested operation.
@@ -5851,11 +6744,55 @@ function isPointerOverMinimap() {
 }
 
 /**
+ * Determine whether pointer is over the optimization HUD panel.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
+function isPointerOverOptimizationHud() {
+  if (!drawGame.state || !drawGame.state.config) {
+    return false;
+  }
+  const { mapCols, mapRows } = drawGame.state.config;
+  const safeCols = Math.max(1, Number(mapCols) || 1);
+  const safeRows = Math.max(1, Number(mapRows) || 1);
+  const miniMaxSize = 140;
+  const miniTile = max(1, floor(miniMaxSize / safeCols));
+  const miniWidth = safeCols * miniTile;
+  const miniHeight = safeRows * miniTile;
+  const miniX = width - miniWidth - 10;
+  const miniY = 10;
+
+  const panelW = OPTIMIZATION_PANEL_WIDTH;
+  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
+  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
+  const panelX = constrain(miniX + miniWidth - panelW, 8, width - panelW - 8);
+  const panelY = constrain(miniY + miniHeight + 10, 8, height - expandedH - 8);
+
+  const inCollapsedBounds =
+    mouseX >= panelX &&
+    mouseX <= panelX + panelW &&
+    mouseY >= panelY &&
+    mouseY <= panelY + collapsedH;
+  const inExpandedBounds =
+    mouseX >= panelX &&
+    mouseX <= panelX + panelW &&
+    mouseY >= panelY &&
+    mouseY <= panelY + expandedH;
+
+  const panelExpanded = !!drawGame.state?.optimization?.isPanelExpanded;
+  return inCollapsedBounds || (panelExpanded && inExpandedBounds);
+}
+
+/**
  * Determine whether mouse over resource tooltip blockers.
  * @returns {boolean} Whether the check or operation succeeds.
  */
 function isMouseOverResourceTooltipBlockers() {
-  if (backButtonGame.isHovered() || isPointerOverMinimap() || isMouseOverSidebarResourceIcon()) {
+  if (
+    backButtonGame.isHovered() ||
+    isPointerOverMinimap() ||
+    isPointerOverOptimizationHud() ||
+    isMouseOverSidebarResourceIcon()
+  ) {
     return true;
   }
   const slotSize = 42;
@@ -6638,7 +7575,11 @@ if (currentState != "GAME") return;
     return;
   }
 
-  if (isMouseOverHotbarArea() || isPointerOverMinimap()) {
+  if (
+    isMouseOverHotbarArea() ||
+    isPointerOverMinimap() ||
+    isPointerOverOptimizationHud()
+  ) {
     return;
   }
 
@@ -6743,6 +7684,7 @@ function placeSelectedEntityAtMouse() {
   entities.push(newEntity);
   if (placeSound) placeSound.play();
   triggerReactivePlayerPlacePose(REACTIVE_PLAYER_PLACE_DURATION_MS);
+  triggerOptimizationBuildGraceWindow();
 
   for (const entry of footprintTiles) {
     const occupiedTile = map.tiles[entry.y][entry.x];
@@ -6883,6 +7825,7 @@ function tryApplyTubeGeometry(entity, nextFacing, nextShape) {
     tile.colorOverride = null;
   }
 
+  triggerOptimizationBuildGraceWindow();
   return true;
 }
 
@@ -6965,6 +7908,7 @@ function tryApplyNonTubeFacing(entity, nextFacing) {
     tile.colorOverride = null;
   }
 
+  triggerOptimizationBuildGraceWindow();
   return true;
 }
 
@@ -6999,7 +7943,11 @@ function keyPressed() {
         typeof DevCheckpoint !== "undefined" &&
         typeof DevCheckpoint.applyRestrictedLateGameSkip === "function"
       ) {
-        DevCheckpoint.applyRestrictedLateGameSkip();
+        const applied = DevCheckpoint.applyRestrictedLateGameSkip();
+        if (applied && Array.isArray(drawGame.state.entities)) {
+          // One extra pass ensures derived constructor/splitter rates settle immediately.
+          updateConnections(drawGame.state.entities);
+        }
       } else {
         console.error("DevCheckpoint module is unavailable.");
       }
@@ -7105,6 +8053,7 @@ function deleteEntityUnderMouse() {
   const { entities, map } = drawGame.state;
   const targetId = hit.tile.entityId;
   const targetEntity = targetId != null ? getEntityById(entities, targetId) : null;
+  let didModifyLayout = false;
 
   if (targetId == null && !hit.tile.building) {
     return;
@@ -7132,6 +8081,7 @@ function deleteEntityUnderMouse() {
         refundBuildResources(restrictedInventory, targetEntity.type);
       }
       entities.splice(index, 1);
+      didModifyLayout = true;
     }
     
     if (targetEntity) {
@@ -7155,6 +8105,7 @@ function deleteEntityUnderMouse() {
           tile.building = null;
         }
       }
+      didModifyLayout = true;
     } else {
       hit.tile.entityId = null;
       hit.tile.entity = null;
@@ -7163,9 +8114,11 @@ function deleteEntityUnderMouse() {
       if (hit.tile.building && hit.tile.building.entityId === targetId) {
         hit.tile.building = null;
       }
+      didModifyLayout = true;
     }
   } else if (hit.tile.building) {
     hit.tile.building = null;
+    didModifyLayout = true;
   }
 
   if (drawGame.state.selectedBuilding) {
@@ -7178,6 +8131,9 @@ function deleteEntityUnderMouse() {
   }
 
   updateConnections(entities);
+  if (didModifyLayout) {
+    triggerOptimizationBuildGraceWindow();
+  }
 }
 
 /**
