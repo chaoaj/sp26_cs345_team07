@@ -1235,6 +1235,9 @@ function draw() {
   if (currentState == "MENU") {
     drawMenu();
     hideSettingsUI();
+    if (!isMoving && movementSound && movementSound.isPlaying()) {
+      movementSound.stop();
+    }
   } else if (currentState == "GAME") {
     background(0);
     drawGame();
@@ -1789,6 +1792,7 @@ function drawGame() {
     if (movementSound && movementSound.isPlaying()) {
       movementSound.stop();
     }
+    else {}
   }
 
   const prevDirection = currentDirection;
