@@ -16,6 +16,8 @@ let sideBarFrameImg, sideBarTabOpen, sideBarTabClosed;
 let creditsButtonSettings, backButtonCredits;
 let creditsScrollY = 600;
 
+let shuttleSpriteSheetImg;
+
 let helpButton, helpButtonSettings;
 let showHelpMenu = false;
 
@@ -316,11 +318,19 @@ function requestBackgroundMusicStart() {
   playBackgroundMusicTrack(0);
 }
 
-// FIXED: Moved Credits button initialization to the Settings menu layout and restored Quit button position
 function setup() {
   canvas = createCanvas(600, 600);
   centerCanvas();
   textAlign(CENTER, CENTER);
+
+  if (typeof ENTITY_PORT_DEFS !== "undefined" && typeof ENTITY_TYPES !== "undefined") {
+    ENTITY_PORT_DEFS[ENTITY_TYPES.SHUTTLE] = [
+      { kind: "input", offset: { x: 0, y: -1 } }, // Top
+      { kind: "input", offset: { x: 0, y: 1 } },  // Bottom
+      { kind: "input", offset: { x: -1, y: 0 } }, // Left
+      { kind: "input", offset: { x: 1, y: 0 } }   // Right
+    ];
+  }
 
   stars = [];
   for (let i = 0; i < 400; i++) {
@@ -390,6 +400,7 @@ function preload() {
   pipeSideOffImg = loadImage('resources/pipes/pipeSideOff.png');
   pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
   pipeSideOnMiniImg = pipeSideOnImg;
+  shuttleSpriteSheetImg = loadImage('resources/shuttle/shuttle.png');
   minerSpriteSheetImg = loadImage('resources/miner/miner.png');
   smelterFrontImg = loadImage('resources/smelter/smelterFront.png');
   smelterSideImg = loadImage('resources/smelter/smelterSide.png');
@@ -659,6 +670,19 @@ function drawGame() {
     for (let y = 0; y < mapRows; y++) {
       const row = [];
       for (let x = 0; x < mapCols; x++) {
+        const rand = Math.random();
+        let chosenBgIndex = 0; 
+        
+        if (rand < 0.65) {
+          chosenBgIndex = 2; // 65% chance for the plain base tile (tile1.png)
+        } else if (rand < 0.76) {
+          chosenBgIndex = 1; // ~11.6% chance for tile2
+        } else if (rand < 0.88) {
+          chosenBgIndex = 0; // ~11.6% chance for tile3
+        } else {
+          chosenBgIndex = 3; // ~11.6% chance for tile4
+        }
+
         row.push({
           type: "empty",
           resource: null,
@@ -670,7 +694,7 @@ function drawGame() {
           entity: null,
           entityId: null,
           building: null,
-          bgIndex: Math.floor(Math.random() * 4)
+          bgIndex: chosenBgIndex
         });
       }
       tiles.push(row);
@@ -1259,12 +1283,14 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourc
   }
 
   // Reserve shuttle footprint so random scatter stays clear of it.
-  for (let y = RESTRICTED_SHUTTLE_ROW - 1; y <= RESTRICTED_SHUTTLE_ROW + 1; y++) {
-    for (let x = RESTRICTED_SHUTTLE_COL - 1; x <= RESTRICTED_SHUTTLE_COL + 1; x++) {
-      if (isInside(x, y)) {
-        reserve(x, y);
-      }
+  for (let y = 0; y < mapRows; y++) {
+    for (let x = 0; x < mapCols; x++) {
+      clearResourceNode(tiles[y][x]);
     }
+  }
+
+  if (isInside(RESTRICTED_SHUTTLE_COL, RESTRICTED_SHUTTLE_ROW)) {
+    reserve(RESTRICTED_SHUTTLE_COL, RESTRICTED_SHUTTLE_ROW);
   }
 
   const placeDepositPatch = (centerX, centerY, radiusX, radiusY, type) => {
@@ -1839,6 +1865,11 @@ function addProducedResource(resourceType, count) {
 
 function getSafeFootprintOffsets(entityType, facing = "E", options = null) {
   const fallback = [{ x: 0, y: 0 }];
+  
+  if (entityType === ENTITY_TYPES.SHUTTLE) {
+    return fallback;
+  }
+
   if (typeof getEntityFootprintOffsets !== "function") {
     return fallback;
   }
@@ -2225,6 +2256,41 @@ function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
 
   // Short duty cycle gives a clear source-to-sink propagation.
   return wave < 0.34;
+}
+
+function drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, shuttleState, nowSeconds) {
+  if (!shuttleSpriteSheetImg || shuttleSpriteSheetImg.width <= 0) {
+    return false;
+  }
+
+  const frameCount = 10;
+  const frameW = shuttleSpriteSheetImg.width / frameCount;
+  const frameH = shuttleSpriteSheetImg.height;
+  const animationFps = 10;
+  const frameIndex = floor(nowSeconds * animationFps) % frameCount;
+  
+  const targetHeight = max(drawHeight + 12, tileSize * 2.0); // Now 2x taller than a tile
+  const targetWidth = targetHeight * (frameW / frameH);
+  
+  const visualAlignmentOffset = 2.5; // Shift to the right by ~2.5 pixels for better centering
+  const spriteX = px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset;
+  
+  const spriteY = py + drawHeight - targetHeight; 
+  
+  imageMode(CORNER);
+  noTint();
+  image(
+    shuttleSpriteSheetImg,
+    spriteX,
+    spriteY,
+    targetWidth,
+    targetHeight,
+    frameIndex * frameW,
+    0,
+    frameW,
+    frameH
+  );
+  return true;
 }
 
 function drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, minerState, nowSeconds) {
@@ -3155,10 +3221,7 @@ function getRocketPulseOverlayForEntity(entity, nowSeconds) {
 function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const px = bounds.px;
-  let py = bounds.py;
-  if (entity.type === ENTITY_TYPES.ROCKET_SITE) {
-    py -= 5;
-  }
+  const py = bounds.py;
   const drawWidth = bounds.drawWidth;
   const drawHeight = bounds.drawHeight;
   const rotatePlacedConstructorContext = (drawFn) => {
@@ -3212,23 +3275,18 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
       255,
       { preferSideForEast: true, mirrorWest: true }
     );
-  const drewRocketSprite =
-    entity.type === ENTITY_TYPES.ROCKET_SITE &&
-    drawPlacedRocketPlatformSprite(
-      px,
-      py,
-      drawWidth,
-      drawHeight,
-      255,
-      !!entity.state?.completed
-    );
+    
+  const drewShuttleSprite = 
+    entity.type === ENTITY_TYPES.SHUTTLE &&
+    drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
+
   const drewCustomSprite =
     drewMinerSprite ||
     drewSmelterSprite ||
     drewConstructorSprite ||
     drewSplitterSprite ||
     drewMergerSprite ||
-    drewRocketSprite;
+    drewShuttleSprite; 
 
   if (!drewCustomSprite) {
     // Regular building fallback rendering when no custom sprite is used.
