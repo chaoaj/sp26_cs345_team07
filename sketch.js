@@ -1,6 +1,6 @@
 // sketch.js
 let currentState = "MENU";
-let startButton, settingsButton, backButtonGame, testEndGameButton, backButtonSettings, escapeButton;
+let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 6;
@@ -358,11 +358,6 @@ function setup() {
   backButtonGame = new Button(30, 20, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
-  testEndGameButton = new Button(140, 20, 120, 40, "Test End", () => {
-    currentState = "CREDITS";
-    creditsScrollY = height;
-  });
-  
   // Positioned side-by-side at the bottom of the settings panel
   backButtonSettings = new Button(180, 430, 110, 40, "<- Return", () => {
     currentState = "MENU";
@@ -1170,7 +1165,6 @@ push();
 
   drawMiniMap(map, player, config, feedback, entities);
   backButtonGame.draw();
-  testEndGameButton.draw();
   drawHotbar();
   drawSideBar();
   if (drawGame.state.isRestrictedMode) {
@@ -5783,10 +5777,6 @@ if (currentState != "GAME") return;
 
   if (backButtonGame && backButtonGame.isHovered()) {
     backButtonGame.checkClick();
-    return;
-  }
-  if (testEndGameButton && testEndGameButton.isHovered()) {
-    testEndGameButton.checkClick();
     return;
   }
 
