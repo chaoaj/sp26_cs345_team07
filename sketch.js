@@ -3276,10 +3276,10 @@ function drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, shuttl
   const animationFps = 10;
   const frameIndex = floor(nowSeconds * animationFps) % frameCount;
   
-  const targetHeight = max(drawHeight + 12, tileSize * 2.0); // Now 2x taller than a tile
+  const targetHeight = max(drawHeight + 12, tileSize * 3.0); // Now 2x taller than a tile
   const targetWidth = targetHeight * (frameW / frameH);
   
-  const visualAlignmentOffset = 2.5; // Shift to the right by ~2.5 pixels for better centering
+  const visualAlignmentOffset = 6; // Shift to the right by ~2.5 pixels for better centering
   const spriteX = px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset;
   
   const spriteY = py + drawHeight - targetHeight; 
@@ -4952,8 +4952,12 @@ function drawOptimizationHud(runtimeState) {
   const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
   const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
   const panelX = constrain(miniX + miniWidth - panelW, 8, width - panelW - 8);
-  const panelY = constrain(miniY + miniHeight + 10, 8, height - expandedH - 8);
-
+  const hudYOffset = 75;
+  const panelY = constrain(
+    miniY + miniHeight + 10 + hudYOffset,
+    8,
+    height - expandedH - 8
+  );
   const inCollapsedBounds =
     mouseX >= panelX &&
     mouseX <= panelX + panelW &&
