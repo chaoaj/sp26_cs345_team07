@@ -1,6 +1,6 @@
 // sketch.js
 let currentState = "MENU";
-let startButton, settingsButton, backButtonGame, testEndGameButton, backButtonSettings, escapeButton;
+let startButton, settingsButton, backButtonGame, backButtonSettings, escapeButton;
 let titlePage, settingsPage;
 let selectedHotbarSlot = 0;
 const hotbarSlots = 6;
@@ -342,7 +342,7 @@ function setup() {
     });
   }
 
-  helpButton = new Button(width - 200, 10, 100, 40, "Keybinds", () => {
+  helpButton = new Button(width - 275, 10, 100, 40, "Keybinds", () => {
     showHelpMenu = !showHelpMenu;
   });
   startButton = new Button (90, 350, 150, 55, "Start", () => {
@@ -355,14 +355,9 @@ function setup() {
     window.close();
   });
 
-  backButtonGame = new Button(30, 20, 100, 40, "<-- Back", () => {
+  backButtonGame = new Button(10, 10, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
-  testEndGameButton = new Button(140, 20, 120, 40, "Test End", () => {
-    currentState = "CREDITS";
-    creditsScrollY = height;
-  });
-  
   // Positioned side-by-side at the bottom of the settings panel
   backButtonSettings = new Button(180, 430, 110, 40, "<- Return", () => {
     currentState = "MENU";
@@ -1124,7 +1119,9 @@ push();
 
   drawSelectedBuildingHighlight(map, tileSize);
 
-  drawEntities(entities, tileSize);
+  drawEntities(entities, tileSize, map);
+
+  drawPlayerSprite(player, config.tileSize);
 
   const item = selectedHotbarSlot >= 0 ? getSelectedHotbarItem() : null;
   let hologramTooltipItem = null;
@@ -1170,7 +1167,6 @@ push();
 
   drawMiniMap(map, player, config, feedback, entities);
   backButtonGame.draw();
-  testEndGameButton.draw();
   drawHotbar();
   drawSideBar();
   if (drawGame.state.isRestrictedMode) {
@@ -2056,7 +2052,10 @@ function drawPlayerSprite(player, tileSize) {
   const sx = frameIndex * frameWidth;
 
   push();
-  translate(width / 2, height / 2);
+  
+  // THIS IS THE FIX: Draw at the player's actual world coordinates!
+  translate(player.x, player.y);
+  
   if (currentDirection === "side" && facingLeft) {
     scale(-1, 1);
   }
@@ -3379,16 +3378,18 @@ function drawEntities(entities, tileSize, map) {
     if (a.sortX !== b.sortX) return a.sortX - b.sortX;
     return a.sortId - b.sortId;
   });
+
+  for (const entity of entities) {
+    drawEntityPorts(entity, tileSize);
+  }
+
+  // Draw the buildings and tubes on top of the ground layer
   for (const item of renderQueue) {
     if (item.kind === "tube") {
       drawTubeDescriptorLayer(item.descriptor, "body");
     } else {
       drawNonTubeEntity(item.entity, tileSize, nowSeconds);
     }
-  }
-
-  for (const entity of entities) {
-    drawEntityPorts(entity, tileSize);
   }
 }
 
@@ -3607,7 +3608,7 @@ function getEntityShortLabel(type) {
 function drawMiniMap(map, player, config, feedback, entities) {
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
 
-  const miniMaxSize = 140;
+  const miniMaxSize = 165; 
   const miniTile = max(1, floor(miniMaxSize / mapCols));
   const miniWidth = mapCols * miniTile;
   const miniHeight = mapRows * miniTile;
@@ -3626,19 +3627,21 @@ function drawMiniMap(map, player, config, feedback, entities) {
   );
   image(minimapLayer, miniX, miniY);
 
-  // Overlay dynamic placed items / buildings (including the pre-placed rocket footprint).
+  // Overlay dynamic placed items / buildings using the more accurate color function
   noStroke();
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
-      if (!tile || !tile.building || !tile.building.color) continue;
-      const c = tile.building.color;
-      fill(c[0], c[1], c[2]);
-      rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
+      // Check if there is ANY entity or building here
+      if (tile && (tile.building || tile.entityId != null)) {
+        const c = getMiniMapTileColor(tile);
+        fill(c[0], c[1], c[2]);
+        rect(miniX + x * miniTile, miniY + y * miniTile, miniTile, miniTile);
+      }
     }
   }
 
-  // Keep rocket readable on minimap even when some port tiles are occupied by tubes.
+  // Keep rocket readable on minimap
   if (entities && entities.length) {
     for (const entity of entities) {
       if (entity.type !== ENTITY_TYPES.ROCKET_SITE) continue;
@@ -3655,44 +3658,31 @@ function drawMiniMap(map, player, config, feedback, entities) {
     }
   }
 
-  // Full shuttle footprint (only center tile has tile.building; entity occupies all footprint tiles).
-  if (entities && entities.length) {
-    for (const entity of entities) {
-      if (entity.type !== ENTITY_TYPES.SHUTTLE) continue;
-      fill(138, 112, 22);
-      const facing = entity.state?.facing || "E";
-      const footprint = getSafeFootprintTilesAt(
-        ENTITY_TYPES.SHUTTLE,
-        entity.tileX,
-        entity.tileY,
-        facing
-      );
-      for (const fp of footprint) {
-        rect(
-          miniX + fp.x * miniTile,
-          miniY + fp.y * miniTile,
-          miniTile,
-          miniTile
-        );
-      }
-    }
-  }
+  // NEW: Draw a Camera Viewport Box so you know exactly where you are looking
+  const mapWidthTotal = mapCols * tileSize;
+  const mapHeightTotal = mapRows * tileSize;
+  const cameraX = constrain(player.x - width / 2, mapOriginX, mapOriginX + mapWidthTotal - width);
+  const cameraY = constrain(player.y - height / 2, mapOriginY, mapOriginY + mapHeightTotal - height);
 
+  const viewX = miniX + ((cameraX - mapOriginX) / mapWidthTotal) * miniWidth;
+  const viewY = miniY + ((cameraY - mapOriginY) / mapHeightTotal) * miniHeight;
+  const viewW = (width / mapWidthTotal) * miniWidth;
+  const viewH = (height / mapHeightTotal) * miniHeight;
+
+  noFill();
+  stroke(255, 255, 255, 180);
+  strokeWeight(1.5);
+  rect(viewX, viewY, viewW, viewH);
+
+  // Draw Player Dot
   noStroke();
-  
   const miniPlayerX = miniX + ((player.x - mapOriginX) / tileSize) * miniTile;
   const miniPlayerY = miniY + ((player.y - mapOriginY) / tileSize) * miniTile;
 
-  noStroke();
   fill(255, 0, 0);
   rect(miniPlayerX - 2, miniPlayerY - 2, 4, 4);
 
   drawModificationRangeIndicator(config, feedback);
-
-  noStroke();
-  fill(255, 0, 0);
-  
-  drawPlayerSprite(player, config.tileSize);
 }
 
 function getOrBuildWorldLayer(state) {
@@ -5141,12 +5131,13 @@ function isResourceNodeTile(tile) {
   );
 }
 
+// FIXED: Updated the hit-detection math to match the new 190 max size!
 function isPointerOverMinimap() {
   if (!drawGame.state) {
     return false;
   }
   const { mapCols, mapRows } = drawGame.state.config;
-  const miniMaxSize = 140;
+  const miniMaxSize = 165; // INCREASED to match drawMiniMap
   const miniTile = max(1, floor(miniMaxSize / mapCols));
   const miniWidth = mapCols * miniTile;
   const miniHeight = mapRows * miniTile;
@@ -5783,10 +5774,6 @@ if (currentState != "GAME") return;
 
   if (backButtonGame && backButtonGame.isHovered()) {
     backButtonGame.checkClick();
-    return;
-  }
-  if (testEndGameButton && testEndGameButton.isHovered()) {
-    testEndGameButton.checkClick();
     return;
   }
 
