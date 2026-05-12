@@ -113,7 +113,7 @@ let sidebarScrollOffset = 0;
 let sidebarMaxVisibleItems = 12;
 
 const RESTRICTED_SHUTTLE_COL = 25;
-const RESTRICTED_SHUTTLE_ROW = 4;
+const RESTRICTED_SHUTTLE_ROW = 6;
 
 // Manual per-facing pixel offsets for corner tube sprites.
 // Adjust x/y here as needed; defaults are intentionally zero.
@@ -2437,13 +2437,23 @@ function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 2
     return false;
   }
 
+  const targetWidth = round(drawWidth);
+  let targetHeight = round(drawHeight);
+  if (completed) {
+    // Keep the completed rocket's original aspect ratio so it can extend above
+    // the 3x3 footprint instead of being vertically squashed into it.
+    targetHeight = round((sprite.height / sprite.width) * targetWidth);
+  }
+  const spriteX = round(px + (drawWidth - targetWidth) / 2);
+  const spriteY = round(py + drawHeight - targetHeight);
+
   imageMode(CORNER);
   if (alpha < 255) {
     tint(255, constrain(alpha, 0, 255));
   } else {
     noTint();
   }
-  image(sprite, round(px), round(py), round(drawWidth), round(drawHeight));
+  image(sprite, spriteX, spriteY, targetWidth, targetHeight);
   noTint();
   return true;
 }
@@ -3026,19 +3036,12 @@ function getEntitySouthmostRenderTileY(entity) {
 function getRocketPulseOverlayForEntity(entity, nowSeconds) {
   if (
     !entity ||
-    (entity.type !== ENTITY_TYPES.ROCKET_SITE && entity.type !== ENTITY_TYPES.SHUTTLE)
+    entity.type !== ENTITY_TYPES.ROCKET_SITE
   ) {
     return null;
   }
 
-  let rocketState = null;
-  if (entity.type === ENTITY_TYPES.ROCKET_SITE) {
-    rocketState = entity.state || null;
-  } else {
-    const entities = drawGame.state?.entities || [];
-    const rocketEntity = entities.find((entry) => entry.type === ENTITY_TYPES.ROCKET_SITE) || null;
-    rocketState = rocketEntity?.state || null;
-  }
+  const rocketState = entity.state || null;
 
   if (!rocketState) {
     return null;
@@ -3062,9 +3065,6 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const px = bounds.px;
   let py = bounds.py;
-  if (entity.type === ENTITY_TYPES.SHUTTLE) {
-    py -= tileSize;
-  }
   if (entity.type === ENTITY_TYPES.ROCKET_SITE) {
     py -= 5;
   }
