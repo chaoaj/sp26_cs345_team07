@@ -1008,7 +1008,7 @@ function drawGame() {
     rocketProgress.rocket &&
     isPlayerNearRocketForLaunch(player, rocketProgress.rocket, config)
   ) {
-    currentState = "ENDGAME";
+    currentState = "CREDITS";
     creditsScrollY = height;
     return;
   }
