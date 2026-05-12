@@ -61,6 +61,11 @@ const spriteDimensions = {
   }
 };
 
+/**
+ * Get entity fill rgb.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntityFillRgb(entityType) {
   if (entityType === ENTITY_TYPES.MINER) return [90, 170, 90];
   if (entityType === ENTITY_TYPES.SMELTER) return [200, 120, 80];
@@ -170,6 +175,12 @@ let backgroundMusicScheduleToken = 0;
 let backgroundMusicLastVolume = null;
 let backgroundMusicWarnedMissing = false;
 
+/**
+ * Random Int In Range.
+ * @param {*} minInclusive - Input value used by this operation.
+ * @param {*} maxInclusive - Input value used by this operation.
+ * @returns {*} Computed result value.
+ */
 function randomIntInRange(minInclusive, maxInclusive) {
   const min = Number(minInclusive) || 0;
   const max = Number(maxInclusive) || min;
@@ -178,12 +189,20 @@ function randomIntInRange(minInclusive, maxInclusive) {
   return Math.floor(min + Math.random() * (delta + 1));
 }
 
+/**
+ * Get music slider volume.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMusicSliderVolume() {
   const raw = Number(typeof musicVolume === "number" ? musicVolume : 0.5);
   if (!Number.isFinite(raw)) return 0.5;
   return Math.max(0, Math.min(1, raw));
 }
 
+/**
+ * Apply background music volume.
+ * @returns {void} No return value.
+ */
 function applyBackgroundMusicVolume() {
   const volume = getMusicSliderVolume();
   if (backgroundMusicLastVolume === volume) {
@@ -197,6 +216,10 @@ function applyBackgroundMusicVolume() {
   }
 }
 
+/**
+ * Bootstrap Background Music.
+ * @returns {object} Computed object result.
+ */
 function bootstrapBackgroundMusic() {
   if (backgroundMusicBootstrapped) {
     return;
@@ -223,6 +246,11 @@ function bootstrapBackgroundMusic() {
   });
 }
 
+/**
+ * Resolve track post delay ms.
+ * @param {*} track - Background music track descriptor.
+ * @returns {*} Computed value for the requested operation.
+ */
 function resolveTrackPostDelayMs(track) {
   if (!track) return 0;
   if (typeof track.postDelayMs === "function") {
@@ -233,6 +261,10 @@ function resolveTrackPostDelayMs(track) {
   return Number.isFinite(fixed) ? Math.max(0, Math.floor(fixed)) : 0;
 }
 
+/**
+ * Clear background music timer.
+ * @returns {void} No return value.
+ */
 function clearBackgroundMusicTimer() {
   if (backgroundMusicTimerId != null) {
     clearTimeout(backgroundMusicTimerId);
@@ -240,6 +272,12 @@ function clearBackgroundMusicTimer() {
   }
 }
 
+/**
+ * Schedule background music track.
+ * @param {*} index - Zero-based index value.
+ * @param {*} delayMs - Delay duration in milliseconds.
+ * @returns {void} No return value.
+ */
 function scheduleBackgroundMusicTrack(index, delayMs) {
   clearBackgroundMusicTimer();
   const safeDelay = Math.max(0, Number(delayMs) || 0);
@@ -252,6 +290,11 @@ function scheduleBackgroundMusicTrack(index, delayMs) {
   }, safeDelay);
 }
 
+/**
+ * On Background Music Track Ended.
+ * @param {*} endedIndex - Index of the track that finished playing.
+ * @returns {void} No return value.
+ */
 function onBackgroundMusicTrackEnded(endedIndex) {
   if (!backgroundMusicStarted || endedIndex !== backgroundMusicCurrentIndex) {
     return;
@@ -262,6 +305,11 @@ function onBackgroundMusicTrackEnded(endedIndex) {
   scheduleBackgroundMusicTrack(nextIndex, waitMs);
 }
 
+/**
+ * Play background music track.
+ * @param {*} index - Zero-based index value.
+ * @returns {void} No return value.
+ */
 function playBackgroundMusicTrack(index) {
   if (!backgroundMusicPlayers.length) {
     return;
@@ -301,6 +349,10 @@ function playBackgroundMusicTrack(index) {
   }
 }
 
+/**
+ * Request background music start.
+ * @returns {void} No return value.
+ */
 function requestBackgroundMusicStart() {
   bootstrapBackgroundMusic();
   if (backgroundMusicStarted || backgroundMusicPlayers.length === 0) {
@@ -317,6 +369,10 @@ function requestBackgroundMusicStart() {
 }
 
 // FIXED: Moved Credits button initialization to the Settings menu layout and restored Quit button position
+/**
+ * Initialize global UI, audio, and menu button state for the sketch runtime.
+ * @returns {void} No return value.
+ */
 function setup() {
   canvas = createCanvas(600, 600);
   centerCanvas();
@@ -375,6 +431,10 @@ function setup() {
   bootstrapBackgroundMusic();
 }
 
+/**
+ * Load image and audio assets required by menus, entities, and UI overlays.
+ * @returns {void} No return value.
+ */
 function preload() {
   bgTiles[0] = loadImage('resources/tiles/tile1.png');
   bgTiles[1] = loadImage('resources/tiles/tile2.png');
@@ -440,6 +500,10 @@ function preload() {
   movementSound = loadSound('resources/sounds/Movement.wav');
 }
 
+/**
+ * Center canvas.
+ * @returns {void} No return value.
+ */
 function centerCanvas() {
   if (!canvas) {
     return;
@@ -449,10 +513,18 @@ function centerCanvas() {
   canvas.position(x, y);
 }
 
+/**
+ * Window Resized.
+ * @returns {void} No return value.
+ */
 function windowResized() {
   centerCanvas();
 }
 
+/**
+ * Render the current top-level game state and route to the active screen renderer.
+ * @returns {void} No return value.
+ */
 function draw() {
   applyBackgroundMusicVolume();
   cursor('default');
@@ -472,6 +544,10 @@ function draw() {
 }
 
 // FIXED: Removed the Credits button from the main menu rendering
+/**
+ * Draw menu.
+ * @returns {void} No return value.
+ */
 function drawMenu() {
   if (titlePage) {
     image(titlePage, 0, 0, width, height);
@@ -503,6 +579,10 @@ function drawMenu() {
   pop();
 }
 
+/**
+ * Draw credits.
+ * @returns {void} No return value.
+ */
 function drawCredits() {
   background(10, 10, 15);
   
@@ -585,6 +665,12 @@ function drawCredits() {
   if (backButtonCredits) backButtonCredits.draw();
 }
 
+/**
+ * Get rocket footprint tiles.
+ * @param {*} centerTileX - Input value used by this operation.
+ * @param {*} centerTileY - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getRocketFootprintTiles(centerTileX, centerTileY) {
   const tiles = [];
   for (let dy = -ROCKET_HALF_HEIGHT_TILES; dy <= ROCKET_HALF_HEIGHT_TILES; dy++) {
@@ -599,6 +685,10 @@ function getRocketFootprintTiles(centerTileX, centerTileY) {
   return tiles;
 }
 
+/**
+ * Reset Runtime Game State For New Run.
+ * @returns {void} No return value.
+ */
 function resetRuntimeGameStateForNewRun() {
   drawGame.state = null;
   selectedHotbarSlot = 0;
@@ -620,6 +710,10 @@ function resetRuntimeGameStateForNewRun() {
   electronics = 0;
 }
 
+/**
+ * Draw end game.
+ * @returns {void} No return value.
+ */
 function drawEndGame() {
   background(20, 28, 44);
 
@@ -638,11 +732,16 @@ function drawEndGame() {
   pop();
 }
 
+/**
+ * Run one gameplay frame including simulation updates, camera, world rendering, and UI.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawGame() {
   const restrictedMode = (typeof isRestrictedModeEnabled === "function")
     ? isRestrictedModeEnabled()
     : false;
 
+  // Rebuild the cached run state whenever the mode flag changes between frames.
   if (
     drawGame.state &&
     drawGame.state.isRestrictedMode !== restrictedMode
@@ -650,6 +749,7 @@ function drawGame() {
     drawGame.state = null;
   }
 
+  // One-time world bootstrap for the active run.
   if (!drawGame.state) {
     const tileSize = 32;
     const mapCols = 75;
@@ -765,6 +865,7 @@ function drawGame() {
       }
     };
 
+    // Apply mode-specific resource seeding after helper placement utilities are prepared.
     if (restrictedMode) {
       applyRestrictedModeResourceLayout(
         tiles,
@@ -821,6 +922,7 @@ function drawGame() {
       placeResourceNodeBlock2x2(rocketRightCopperX, rocketRightCopperY, "copper");
     }
 
+    // Spawn and stamp the fixed rocket platform while preserving its input-port tiles for tube placement.
     const rocketEntity = createEntity(
       ENTITY_TYPES.ROCKET_SITE,
       rocketTileX,
@@ -944,6 +1046,7 @@ function drawGame() {
     drawGame.state.player.facing = "N";
   }
 
+  // Resolve movement intent from input, then update motion and animation state.
   let moveX = 0;
   let moveY = 0;
   if (keyIsDown(65)) moveX -= 1;
@@ -994,7 +1097,8 @@ function drawGame() {
   player.x = constrain(player.x, mapOriginX + halfPlayer, mapOriginX + mapWidth - halfPlayer);
   player.y = constrain(player.y, mapOriginY + halfPlayer, mapOriginY + mapHeight - halfPlayer);
 
-  // --- Miner harvesting tick ---
+  // Advance simulation systems in dependency order before rendering.
+  // Mining/factory rates update first, then shuttle intake and rocket completion checks.
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
   updateRestrictedModeShuttleIntake(entities, dt);
@@ -1013,6 +1117,7 @@ function drawGame() {
     return;
   }
 
+  // Build camera and visibility bounds used by terrain, overlays, and hover interactions.
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
   const visibleMinCol = max(0, floor((cameraX - mapOriginX) / tileSize) - 1);
@@ -1026,7 +1131,8 @@ function drawGame() {
     floor((cameraY + height - mapOriginY) / tileSize) + 1
   );
 
-push();
+  // Draw parallax starfield in screen space before entering world-space camera transforms.
+  push();
   noStroke();
   let wrapW = width + 200;
   let wrapH = height + 200;
@@ -1053,6 +1159,7 @@ push();
   push();
   stroke(200);
   strokeWeight(1);
+  // Aggregate all exposed port tiles into a fast lookup so the visible-window highlight pass is cheap.
   const portOverlay = new Map();
   const rocketPortOverlay = new Set();
   const markPort = (x, y, kind) => {
@@ -1165,6 +1272,10 @@ push();
   if (showHelpMenu) drawHelpMenu();
 }
 
+/**
+ * Draw help menu.
+ * @returns {void} No return value.
+ */
 function drawHelpMenu() {
   push();
   fill(25, 25, 30, 220);
@@ -1225,6 +1336,14 @@ function drawHelpMenu() {
   pop();
 }
 
+/**
+ * Generate the restricted-mode resource distribution and reserved zones.
+ * @param {*} tiles - Input value used by this operation.
+ * @param {*} mapCols - Total number of map columns.
+ * @param {*} mapRows - Total number of map rows.
+ * @param {*} placeResourceNodeBlock2x2 - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourceNodeBlock2x2) {
   if (!Array.isArray(tiles) || typeof placeResourceNodeBlock2x2 !== "function") {
     return;
@@ -1392,6 +1511,11 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourc
   }
 }
 
+/**
+ * Spawn the restricted-mode shuttle and stamp its footprint onto the map.
+ * @param {*} state - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function spawnRestrictedModeShuttle(state) {
   if (!state || !state.map || !state.entities) {
     return;
@@ -1459,6 +1583,10 @@ function updateMinerHarvesting(entities, dt) {
   }
 }
 
+/**
+ * Get restricted mode shuttle entity.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getRestrictedModeShuttleEntity() {
   if (!drawGame.state || !drawGame.state.isRestrictedMode) {
     return null;
@@ -1476,6 +1604,10 @@ function getRestrictedModeShuttleEntity() {
   return shuttle && shuttle.type === ENTITY_TYPES.SHUTTLE ? shuttle : null;
 }
 
+/**
+ * Get restricted mode shuttle inventory.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getRestrictedModeShuttleInventory() {
   const shuttle = getRestrictedModeShuttleEntity();
   const inventory = shuttle?.state?.inventory;
@@ -1486,6 +1618,11 @@ function getRestrictedModeShuttleInventory() {
   return inventory;
 }
 
+/**
+ * Get build cost for entity.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getBuildCostForEntity(entityType) {
   if (typeof ENTITY_BUILD_COSTS === "undefined" || !entityType) {
     return null;
@@ -1493,6 +1630,11 @@ function getBuildCostForEntity(entityType) {
   return ENTITY_BUILD_COSTS[entityType] || null;
 }
 
+/**
+ * Get resource type label.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getResourceTypeLabel(resourceType) {
   switch (resourceType) {
     case RESOURCE_TYPES.IRON_ORE:
@@ -1524,6 +1666,11 @@ function getResourceTypeLabel(resourceType) {
   }
 }
 
+/**
+ * Get resource icon for type.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getResourceIconForType(resourceType) {
   switch (resourceType) {
     case RESOURCE_TYPES.IRON_ORE:
@@ -1555,6 +1702,11 @@ function getResourceIconForType(resourceType) {
   }
 }
 
+/**
+ * Get global resource count.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getGlobalResourceCount(resourceType) {
   switch (resourceType) {
     case RESOURCE_TYPES.IRON_ORE:
@@ -1586,6 +1738,12 @@ function getGlobalResourceCount(resourceType) {
   }
 }
 
+/**
+ * Get missing build resources.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} inventory - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMissingBuildResources(entityType, inventory) {
   const cost = getBuildCostForEntity(entityType);
   if (!cost) {
@@ -1606,6 +1764,12 @@ function getMissingBuildResources(entityType, inventory) {
   return missing;
 }
 
+/**
+ * Spend Build Resources.
+ * @param {*} inventory - Input value used by this operation.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {void} No return value.
+ */
 function spendBuildResources(inventory, entityType) {
   const cost = getBuildCostForEntity(entityType);
   if (!cost || !inventory) {
@@ -1618,6 +1782,12 @@ function spendBuildResources(inventory, entityType) {
   }
 }
 
+/**
+ * Refund Build Resources.
+ * @param {*} inventory - Input value used by this operation.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {void} No return value.
+ */
 function refundBuildResources(inventory, entityType) {
   const cost = getBuildCostForEntity(entityType);
   if (!cost || !inventory) {
@@ -1630,6 +1800,12 @@ function refundBuildResources(inventory, entityType) {
   }
 }
 
+/**
+ * Trigger build cost feedback.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} missingResources - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function triggerBuildCostFeedback(entityType, missingResources) {
   if (!drawGame.state || !drawGame.state.feedback) {
     return;
@@ -1651,6 +1827,11 @@ function triggerBuildCostFeedback(entityType, missingResources) {
   feedback.buildCostMessageUntil = millis() + 1600;
 }
 
+/**
+ * Determine whether blink build hologram.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function shouldBlinkBuildHologram(entityType) {
   if (!drawGame.state || !drawGame.state.feedback || !entityType) {
     return false;
@@ -1670,6 +1851,10 @@ function shouldBlinkBuildHologram(entityType) {
   return phase % 2 === 0;
 }
 
+/**
+ * Draw build cost feedback message.
+ * @returns {void} No return value.
+ */
 function drawBuildCostFeedbackMessage() {
   if (!drawGame.state || !drawGame.state.feedback) {
     return;
@@ -1704,6 +1889,10 @@ function drawBuildCostFeedbackMessage() {
   pop();
 }
 
+/**
+ * Draw rocket completion modal.
+ * @returns {void} No return value.
+ */
 function drawRocketCompletionModal() {
   if (!drawGame.state || !drawGame.state.feedback) {
     return;
@@ -1753,6 +1942,12 @@ function drawRocketCompletionModal() {
   pop();
 }
 
+/**
+ * Update restricted mode shuttle intake.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} dt - Frame delta time in seconds.
+ * @returns {void} No return value.
+ */
 function updateRestrictedModeShuttleIntake(entities, dt) {
   const shuttle = getRestrictedModeShuttleEntity();
   if (!shuttle || !Number.isFinite(dt) || dt <= 0) {
@@ -1792,6 +1987,12 @@ function updateRestrictedModeShuttleIntake(entities, dt) {
   }
 }
 
+/**
+ * Add Produced Resource.
+ * @param {*} resourceType - Resource type identifier.
+ * @param {*} count - Quantity value.
+ * @returns {void} No return value.
+ */
 function addProducedResource(resourceType, count) {
   if (!resourceType || count <= 0) return;
 
@@ -1837,6 +2038,13 @@ function addProducedResource(resourceType, count) {
   }
 }
 
+/**
+ * Get safe footprint offsets.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} options - Optional configuration object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSafeFootprintOffsets(entityType, facing = "E", options = null) {
   const fallback = [{ x: 0, y: 0 }];
   if (typeof getEntityFootprintOffsets !== "function") {
@@ -1873,6 +2081,15 @@ function getSafeFootprintOffsets(entityType, facing = "E", options = null) {
   return baseOffsets;
 }
 
+/**
+ * Get safe footprint tiles at.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} tileX - Tile X coordinate.
+ * @param {*} tileY - Tile Y coordinate.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} options - Optional configuration object.
+ * @returns {void} No return value.
+ */
 function getSafeFootprintTilesAt(entityType, tileX, tileY, facing = "E", options = null) {
   const offsets = getSafeFootprintOffsets(entityType, facing, options);
   return offsets.map((offset) => ({
@@ -1881,6 +2098,12 @@ function getSafeFootprintTilesAt(entityType, tileX, tileY, facing = "E", options
   }));
 }
 
+/**
+ * Accumulate and publish factory throughput from active smelters and constructors.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} dt - Frame delta time in seconds.
+ * @returns {void} No return value.
+ */
 function updateFactoryProduction(entities, dt) {
   for (const entity of entities) {
     if (
@@ -1915,6 +2138,13 @@ function updateFactoryProduction(entities, dt) {
   }
 }
 
+/**
+ * Determine whether player near rocket for launch.
+ * @param {*} player - Player runtime state.
+ * @param {*} rocketEntity - Input value used by this operation.
+ * @param {*} config - Runtime configuration values for map/camera/UI.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isPlayerNearRocketForLaunch(player, rocketEntity, config) {
   if (!player || !rocketEntity || !config) {
     return false;
@@ -1930,6 +2160,12 @@ function isPlayerNearRocketForLaunch(player, rocketEntity, config) {
   return dx * dx + dy * dy <= launchRadius * launchRadius;
 }
 
+/**
+ * Advance rocket delivery progress from connected input lines and detect completion.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} dt - Frame delta time in seconds.
+ * @returns {void} No return value.
+ */
 function updateRocketConstructionProgress(entities, dt) {
   const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
   if (!rocket || !rocket.state) {
@@ -1997,6 +2233,12 @@ function updateRocketConstructionProgress(entities, dt) {
   };
 }
 
+/**
+ * Draw player sprite.
+ * @param {*} player - Player runtime state.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function drawPlayerSprite(player, tileSize) {
   const dims = spriteDimensions[currentDirection] &&
                spriteDimensions[currentDirection][currentAnimation];
@@ -2039,6 +2281,10 @@ function drawPlayerSprite(player, tileSize) {
   pop();
 }
 
+/**
+ * Update player animation.
+ * @returns {void} No return value.
+ */
 function updatePlayerAnimation() {
   if (!drawGame.state) return;
   const dims = spriteDimensions[currentDirection] &&
@@ -2057,6 +2303,12 @@ function updatePlayerAnimation() {
   }   
 }
 
+/**
+ * Get tube render path data.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getTubeRenderPathData(entity, tileSize) {
   if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
     return null;
@@ -2097,6 +2349,12 @@ function getTubeRenderPathData(entity, tileSize) {
   return { segments, totalLength, centerX, centerY };
 }
 
+/**
+ * Get point along tube path.
+ * @param {*} pathData - Input value used by this operation.
+ * @param {*} t - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPointAlongTubePath(pathData, t) {
   if (!pathData || !Array.isArray(pathData.segments) || pathData.totalLength <= 0) {
     return { x: 0, y: 0 };
@@ -2127,6 +2385,11 @@ function getPointAlongTubePath(pathData, t) {
   return { x: last.x2, y: last.y2 };
 }
 
+/**
+ * Get tube item glow color.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getTubeItemGlowColor(resourceType) {
   switch (resourceType) {
     case RESOURCE_TYPES.IRON_ORE: return [120, 120, 125];
@@ -2143,6 +2406,12 @@ function getTubeItemGlowColor(resourceType) {
   }
 }
 
+/**
+ * Draw tube flow effects.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function drawTubeFlowEffects(entity, tileSize) {
   if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
     return;
@@ -2208,6 +2477,12 @@ function drawTubeFlowEffects(entity, tileSize) {
   }
 }
 
+/**
+ * Determine whether tube flow indicator lit.
+ * @param {*} tubeState - Input value used by this operation.
+ * @param {*} nowSeconds - Current time in seconds.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
   if (!tubeState || tubeState.flowState !== "flowing") {
     return false;
@@ -2227,6 +2502,17 @@ function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
   return wave < 0.34;
 }
 
+/**
+ * Draw placed miner sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} minerState - Input value used by this operation.
+ * @param {*} nowSeconds - Current time in seconds.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, minerState, nowSeconds) {
   if (!minerSpriteSheetImg || minerSpriteSheetImg.width <= 0) {
     return false;
@@ -2264,6 +2550,11 @@ function drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, minerSta
   return true;
 }
 
+/**
+ * Get smelter sprite for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSmelterSpriteForFacing(facing) {
   const dir = facing || "E";
   if (dir === "E" || dir === "W") {
@@ -2275,6 +2566,11 @@ function getSmelterSpriteForFacing(facing) {
   return smelterFrontImg || smelterBackImg || smelterSideImg || null;
 }
 
+/**
+ * Get smelter manual pixel offset.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {void} No return value.
+ */
 function getSmelterManualPixelOffset(facing) {
   const dir = facing || "E";
   const key = SMELTER_MANUAL_PIXEL_OFFSETS[dir] ? dir : "E";
@@ -2287,6 +2583,18 @@ function getSmelterManualPixelOffset(facing) {
   };
 }
 
+/**
+ * Draw placed smelter sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} smelterState - Input value used by this operation.
+ * @param {*} nowSeconds - Current time in seconds.
+ * @param {*} alpha - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterState, nowSeconds, alpha = 255) {
   const sprite = getSmelterSpriteForFacing(facing);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
@@ -2359,6 +2667,11 @@ function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterS
   return true;
 }
 
+/**
+ * Get constructor sprite for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getConstructorSpriteForFacing(facing) {
   const dir = facing || "E";
   if (dir === "E") {
@@ -2376,6 +2689,17 @@ function getConstructorSpriteForFacing(facing) {
   return constructorSideImg || constructorFrontImg || constructorBackImg || null;
 }
 
+/**
+ * Draw placed constructor sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} alpha - Input value used by this operation.
+ * @param {*} options - Optional configuration object.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedConstructorSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
   const sprite = getConstructorSpriteForFacing(facing);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
@@ -2410,6 +2734,12 @@ function drawPlacedConstructorSprite(px, py, drawWidth, drawHeight, facing, alph
   return true;
 }
 
+/**
+ * Get splitter sprite for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} options - Optional configuration object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSplitterSpriteForFacing(facing, options = {}) {
   const preferSideForEast = !!options.preferSideForEast;
   const dir = facing || "E";
@@ -2431,6 +2761,17 @@ function getSplitterSpriteForFacing(facing, options = {}) {
   return splitterSideImg || splitterFrontImg || splitterBackImg || null;
 }
 
+/**
+ * Draw placed splitter sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} alpha - Input value used by this operation.
+ * @param {*} options - Optional configuration object.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
   const sprite = getSplitterSpriteForFacing(facing, options);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
@@ -2466,6 +2807,12 @@ function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha =
   return true;
 }
 
+/**
+ * Get merger sprite for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} options - Optional configuration object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMergerSpriteForFacing(facing, options = {}) {
   const preferSideForEast = !!options.preferSideForEast;
   const dir = facing || "E";
@@ -2487,6 +2834,17 @@ function getMergerSpriteForFacing(facing, options = {}) {
   return mergerSideImg || mergerFrontImg || mergerBackImg || null;
 }
 
+/**
+ * Draw placed merger sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} alpha - Input value used by this operation.
+ * @param {*} options - Optional configuration object.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
   const sprite = getMergerSpriteForFacing(facing, options);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
@@ -2520,6 +2878,16 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   return true;
 }
 
+/**
+ * Draw placed rocket platform sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} alpha - Input value used by this operation.
+ * @param {*} completed - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 255, completed = false) {
   const sprite = completed
     ? (rocketPlatformBuiltImg || rocketPlatformImg)
@@ -2549,6 +2917,11 @@ function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 2
   return true;
 }
 
+/**
+ * Get corner tube display frame size.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getCornerTubeDisplayFrameSize(facing) {
   const useCurve2Family = facing === "N" || facing === "W";
   const offImg = useCurve2Family
@@ -2568,6 +2941,18 @@ function getCornerTubeDisplayFrameSize(facing) {
   return { frameW, frameH };
 }
 
+/**
+ * Draw the hologram sprite preview for tube placement, including orientation handling.
+ * @param {*} footprintLeft - Left pixel of the preview footprint.
+ * @param {*} footprintTop - Top pixel of the preview footprint.
+ * @param {*} footprintWidth - Width of the preview footprint in pixels.
+ * @param {*} footprintHeight - Height of the preview footprint in pixels.
+ * @param {*} previewOptions - Tube preview configuration (shape and facing).
+ * @param {*} alpha - Preview transparency (0-255).
+ * @param {*} baseCol - Optional world tile column anchor.
+ * @param {*} baseRow - Optional world tile row anchor.
+ * @returns {boolean} True when a sprite frame is drawn; false when assets are unavailable.
+ */
 function drawTubePlacementHologramSprite(
   footprintLeft,
   footprintTop,
@@ -2594,6 +2979,7 @@ function drawTubePlacementHologramSprite(
   let numFrames = 1;
   let frameIndex = 0;
 
+  // Pick the same sprite family/frame logic used by placed tubes so previews match runtime visuals.
   if (isCorner) {
     const useCurve2Family = facing === "N" || facing === "W";
     img = useCurve2Family
@@ -2677,6 +3063,12 @@ const TUBE_LAYER_BANDS = Object.freeze({
   over: Object.freeze({ start: 0.0, end: 0.36 })
 });
 
+/**
+ * Get entity draw bounds.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function getEntityDrawBounds(entity, tileSize) {
   const footprintFacing = entity.state?.facing || "E";
   const footprintOffsets = getSafeFootprintOffsets(
@@ -2710,6 +3102,11 @@ function getEntityDrawBounds(entity, tileSize) {
   };
 }
 
+/**
+ * To Cardinal Direction Key.
+ * @param {*} offset - Input value used by this operation.
+ * @returns {string} Computed text result.
+ */
 function toCardinalDirectionKey(offset) {
   if (!offset) return null;
   if (offset.x === 1 && offset.y === 0) return "E";
@@ -2719,6 +3116,12 @@ function toCardinalDirectionKey(offset) {
   return null;
 }
 
+/**
+ * Compare tube descriptors for render.
+ * @param {*} a - Input value used by this operation.
+ * @param {*} b - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function compareTubeDescriptorsForRender(a, b) {
   if (a.zLane !== b.zLane) {
     return a.zLane - b.zLane;
@@ -2732,6 +3135,13 @@ function compareTubeDescriptorsForRender(a, b) {
   return (a.entity?.id || 0) - (b.entity?.id || 0);
 }
 
+/**
+ * Build tube render descriptor.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} nowMs - Current time in milliseconds.
+ * @returns {void} No return value.
+ */
 function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const state = entity.state || {};
@@ -2876,6 +3286,11 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
   };
 }
 
+/**
+ * Annotate Tube Descriptor Neighbors.
+ * @param {*} descriptors - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function annotateTubeDescriptorNeighbors(descriptors) {
   const lookup = new Map();
   for (const descriptor of descriptors) {
@@ -2913,6 +3328,12 @@ function annotateTubeDescriptorNeighbors(descriptors) {
   }
 }
 
+/**
+ * Draw connected vertical front tube layer.
+ * @param {*} descriptor - Input value used by this operation.
+ * @param {*} layerName - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawConnectedVerticalFrontTubeLayer(descriptor, layerName) {
   const band = TUBE_LAYER_BANDS[layerName] || TUBE_LAYER_BANDS.body;
   const frameH = descriptor.frameH;
@@ -2998,6 +3419,11 @@ function drawConnectedVerticalFrontTubeLayer(descriptor, layerName) {
   }
 }
 
+/**
+ * Draw front tube overlay.
+ * @param {*} descriptor - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawFrontTubeOverlay(descriptor) {
   if (!descriptor || !descriptor.frontOverlayImg) {
     return;
@@ -3016,6 +3442,12 @@ function drawFrontTubeOverlay(descriptor) {
   image(overlay, x, y, targetW, targetH);
 }
 
+/**
+ * Draw tube descriptor layer.
+ * @param {*} descriptor - Input value used by this operation.
+ * @param {*} layerName - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawTubeDescriptorLayer(descriptor, layerName) {
   if (!descriptor) {
     return;
@@ -3097,6 +3529,11 @@ function drawTubeDescriptorLayer(descriptor, layerName) {
   }
 }
 
+/**
+ * Draw tube descriptors in layered passes.
+ * @param {*} descriptors - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawTubeDescriptorsInLayeredPasses(descriptors) {
   if (!Array.isArray(descriptors) || descriptors.length === 0) {
     return;
@@ -3108,6 +3545,11 @@ function drawTubeDescriptorsInLayeredPasses(descriptors) {
   }
 }
 
+/**
+ * Get entity southmost render tile y.
+ * @param {*} entity - Target entity instance.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntitySouthmostRenderTileY(entity) {
   if (!entity) {
     return 0;
@@ -3124,6 +3566,12 @@ function getEntitySouthmostRenderTileY(entity) {
   return entity.tileY + maxOffsetY;
 }
 
+/**
+ * Get rocket pulse overlay for entity.
+ * @param {*} entity - Target entity instance.
+ * @param {*} nowSeconds - Current time in seconds.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getRocketPulseOverlayForEntity(entity, nowSeconds) {
   if (
     !entity ||
@@ -3152,6 +3600,13 @@ function getRocketPulseOverlayForEntity(entity, nowSeconds) {
   return { r: 84, g: 244, b: 124, a: 62 + pulse * 78 };
 }
 
+/**
+ * Draw non tube entity.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} nowSeconds - Current time in seconds.
+ * @returns {void} No return value.
+ */
 function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const px = bounds.px;
@@ -3282,6 +3737,13 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   }
 }
 
+/**
+ * Render all entities in depth order with layered tube passes and port overlays.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} map - Map wrapper containing tile data.
+ * @returns {void} No return value.
+ */
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
@@ -3290,6 +3752,7 @@ function drawEntities(entities, tileSize, map) {
   const tubeDescriptors = [];
   const renderQueue = [];
 
+  // Build a unified render queue so tubes and buildings share one stable depth sort.
   for (const entity of entities) {
     const sortY = getEntitySouthmostRenderTileY(entity);
     const sortX = entity?.tileX || 0;
@@ -3315,6 +3778,7 @@ function drawEntities(entities, tileSize, map) {
     }
   }
 
+  // Annotate tube neighbors before drawing so layered tube passes can resolve intersections cleanly.
   annotateTubeDescriptorNeighbors(tubeDescriptors);
   renderQueue.sort((a, b) => {
     if (a.sortY !== b.sortY) return a.sortY - b.sortY;
@@ -3370,6 +3834,13 @@ function drawDirectionalArrow(cx, cy, dirX, dirY, rgb, arrowLen) {
   );
 }
 
+/**
+ * Collapse direction to cardinal.
+ * @param {*} dirX - Input value used by this operation.
+ * @param {*} dirY - Input value used by this operation.
+ * @param {*} preferAxis - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function collapseDirectionToCardinal(dirX, dirY, preferAxis = "x") {
   const absX = Math.abs(dirX);
   const absY = Math.abs(dirY);
@@ -3391,11 +3862,23 @@ function collapseDirectionToCardinal(dirX, dirY, preferAxis = "x") {
   return { x: Math.sign(dirX) || 1, y: 0 };
 }
 
+/**
+ * Get preferred arrow axis for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPreferredArrowAxisForFacing(facing) {
   const dir = facing || "E";
   return dir === "N" || dir === "S" ? "y" : "x";
 }
 
+/**
+ * Determine whether port tile blocked by building.
+ * @param {*} tileX - Tile X coordinate.
+ * @param {*} tileY - Tile Y coordinate.
+ * @param {*} ignoreEntityId - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
   if (!drawGame.state) return false;
   const map = drawGame.state.map;
@@ -3406,6 +3889,12 @@ function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
   return tile.entityId !== ignoreEntityId;
 }
 
+/**
+ * Determine whether expose constructor output port.
+ * @param {*} entity - Target entity instance.
+ * @param {*} port - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function shouldExposeConstructorOutputPort(entity, port = null) {
   if (!entity || entity.type !== ENTITY_TYPES.CONSTRUCTOR) {
     return false;
@@ -3425,6 +3914,14 @@ function shouldExposeConstructorOutputPort(entity, port = null) {
   return true;
 }
 
+/**
+ * Draw constructor output item badge.
+ * @param {*} portPx - Input value used by this operation.
+ * @param {*} portPy - Input value used by this operation.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} outputType - Output resource type identifier.
+ * @returns {void} No return value.
+ */
 function drawConstructorOutputItemBadge(portPx, portPy, tileSize, outputType) {
   if (!outputType) {
     return;
@@ -3460,6 +3957,12 @@ function drawConstructorOutputItemBadge(portPx, portPy, tileSize, outputType) {
   textStyle(NORMAL);
 }
 
+/**
+ * Draw entity ports.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function drawEntityPorts(entity, tileSize) {
   const hideConnectedNonTube =
     entity.type !== ENTITY_TYPES.TUBE &&
@@ -3531,6 +4034,11 @@ function drawEntityPorts(entity, tileSize) {
   }
 }
 
+/**
+ * Get entity short label.
+ * @param {*} type - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntityShortLabel(type) {
   switch (type) {
     case ENTITY_TYPES.MINER: return "M";
@@ -3546,6 +4054,15 @@ function getEntityShortLabel(type) {
   }
 }
 
+/**
+ * Draw mini map.
+ * @param {*} map - Map wrapper containing tile data.
+ * @param {*} player - Player runtime state.
+ * @param {*} config - Runtime configuration values for map/camera/UI.
+ * @param {*} feedback - Transient UI feedback state.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function drawMiniMap(map, player, config, feedback, entities) {
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
 
@@ -3637,6 +4154,11 @@ function drawMiniMap(map, player, config, feedback, entities) {
   drawPlayerSprite(player, config.tileSize);
 }
 
+/**
+ * Build and cache the static world terrain layer used by the camera render pass.
+ * @param {*} state - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getOrBuildWorldLayer(state) {
   const cache = state.renderCache;
   if (cache.worldLayer) {
@@ -3718,6 +4240,14 @@ function getOrBuildWorldLayer(state) {
   return layer;
 }
 
+/**
+ * Build and cache the static minimap terrain layer.
+ * @param {*} state - Input value used by this operation.
+ * @param {*} mapCols - Total number of map columns.
+ * @param {*} mapRows - Total number of map rows.
+ * @param {*} miniTile - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getOrBuildMinimapLayer(state, mapCols, mapRows, miniTile) {
   const cache = state.renderCache;
   const unchanged =
@@ -3751,6 +4281,10 @@ function getOrBuildMinimapLayer(state, mapCols, mapRows, miniTile) {
   return layer;
 }
 
+/**
+ * Draw settings.
+ * @returns {void} No return value.
+ */
 function drawSettings() {
   if (settingsPage) {
     image(settingsPage, 0, 0, width, height);
@@ -3769,6 +4303,11 @@ function drawSettings() {
   if (showHelpMenu) drawHelpMenu();
 }
 
+/**
+ * Side Bar Text.
+ * @param {*} resource - Resource value or amount.
+ * @returns {void} No return value.
+ */
 function sideBarText(resource) {
   let digits = Math.floor(resource).toString().length;
     // Make the UI numbers pop and readable over ANY background icon
@@ -3784,6 +4323,11 @@ function sideBarText(resource) {
   }
 }
 
+/**
+ * Get entity display name.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntityDisplayName(entityType) {
   const idx = HOTBAR_ENTITY_TYPES.indexOf(entityType);
   if (idx >= 0) {
@@ -3792,6 +4336,11 @@ function getEntityDisplayName(entityType) {
   return entityType ? String(entityType) : "Building";
 }
 
+/**
+ * Get sidebar resource build uses.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSidebarResourceBuildUses(resourceType) {
   if (!resourceType) {
     return [];
@@ -3848,6 +4397,10 @@ function getSidebarResourceBuildUses(resourceType) {
   return uses;
 }
 
+/**
+ * Get hovered sidebar resource item.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getHoveredSidebarResourceItem() {
   if (
     currentState !== "GAME" ||
@@ -3883,11 +4436,20 @@ function getHoveredSidebarResourceItem() {
   return null;
 }
 
+/**
+ * Determine whether mouse over sidebar resource icon.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isMouseOverSidebarResourceIcon() {
   return !!getHoveredSidebarResourceItem();
 }
 
 // FIXED: Added a custom override just for Helium-3 to display text instead of a recipe!
+/**
+ * Draw sidebar resource hover tooltip.
+ * @param {*} hoveredItem - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawSidebarResourceHoverTooltip(hoveredItem) {
   if (!hoveredItem || !hoveredItem.resourceType) {
     return false;
@@ -4033,6 +4595,10 @@ function drawSidebarResourceHoverTooltip(hoveredItem) {
   return true;
 }
 
+/**
+ * Draw side bar.
+ * @returns {void} No return value.
+ */
 function drawSideBar() {
   if (!drawGame.state) return;
 
@@ -4136,6 +4702,10 @@ function drawSideBar() {
   drawSidebarResourceHoverTooltip(hoveredSidebarItem);
 }
 
+/**
+ * Get selected hotbar item.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSelectedHotbarItem() {
   if (selectedHotbarSlot < 0 || selectedHotbarSlot >= hotbarItems.length) {
     return null;
@@ -4143,6 +4713,10 @@ function getSelectedHotbarItem() {
   return hotbarItems[selectedHotbarSlot];
 }
 
+/**
+ * Get hotbar layout.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getHotbarLayout() {
   const slotSize = 42;
   const gap = 8;
@@ -4152,6 +4726,10 @@ function getHotbarLayout() {
   return { slotSize, gap, totalWidth, startX, y };
 }
 
+/**
+ * Determine whether mouse over hotbar area.
+ * @returns {void} No return value.
+ */
 function isMouseOverHotbarArea() {
   const { slotSize, totalWidth, startX, y } = getHotbarLayout();
   return (
@@ -4162,6 +4740,10 @@ function isMouseOverHotbarArea() {
   );
 }
 
+/**
+ * Get hovered hotbar slot.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getHoveredHotbarSlot() {
   if (currentState !== "GAME") {
     return -1;
@@ -4183,6 +4765,11 @@ function getHoveredHotbarSlot() {
   return -1;
 }
 
+/**
+ * Get hotbar cost tooltip lines.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getHotbarCostTooltipLines(entityType) {
   const cost = getBuildCostForEntity(entityType);
   if (!cost) {
@@ -4197,6 +4784,11 @@ function getHotbarCostTooltipLines(entityType) {
   }));
 }
 
+/**
+ * Get hotbar tooltip description.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getHotbarTooltipDescription(entityType) {
   if (typeof ENTITY_HOTBAR_DESCRIPTIONS === "undefined" || !entityType) {
     return "";
@@ -4205,6 +4797,10 @@ function getHotbarTooltipDescription(entityType) {
   return typeof description === "string" ? description : "";
 }
 
+/**
+ * Draw hotbar cost tooltip.
+ * @returns {void} No return value.
+ */
 function drawHotbarCostTooltip() {
   if (currentState !== "GAME") {
     return;
@@ -4344,6 +4940,11 @@ function drawHotbarCostTooltip() {
   pop();
 }
 
+/**
+ * Draw hologram build cost tooltip.
+ * @param {*} item - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawHologramBuildCostTooltip(item) {
   if (currentState !== "GAME") {
     return false;
@@ -4441,6 +5042,11 @@ function drawHologramBuildCostTooltip(item) {
   return true;
 }
 
+/**
+ * Facing To Angle.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {number} Computed numeric result.
+ */
 function facingToAngle(facing) {
   switch (facing) {
     case "E":
@@ -4456,6 +5062,10 @@ function facingToAngle(facing) {
   }
 }
 
+/**
+ * Cycle placement facing.
+ * @returns {void} No return value.
+ */
 function cyclePlacementFacing() {
   if (!drawGame.state) {
     return;
@@ -4466,6 +5076,11 @@ function cyclePlacementFacing() {
   drawGame.state.placementFacing = order[(i + 1) % order.length];
 }
 
+/**
+ * Hotbar Item Label.
+ * @param {*} item - Input value used by this operation.
+ * @returns {string} Computed text result.
+ */
 function hotbarItemLabel(item) {
   if (!item || !item.name) {
     return "??";
@@ -4480,11 +5095,24 @@ function hotbarItemLabel(item) {
   return t.substring(0, 2).toUpperCase();
 }
 
+/**
+ * Pick contrasting text color.
+ * @param {*} rgb - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function pickContrastingTextColor(rgb) {
   const lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
   return lum > 140 ? [24, 24, 32] : [255, 255, 255];
 }
 
+/**
+ * Draw placed building letter.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} building - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawPlacedBuildingLetter(px, py, tileSize, building) {
   const label = building.label || building.letter || "";
   if (!label) {
@@ -4507,6 +5135,12 @@ function drawPlacedBuildingLetter(px, py, tileSize, building) {
   textStyle(NORMAL);
 }
 
+/**
+ * Get placement preview ports.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} options - Optional configuration object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPlacementPreviewPorts(entityType, options = {}) {
   if (!entityType) {
     return [];
@@ -4535,6 +5169,19 @@ function getPlacementPreviewPorts(entityType, options = {}) {
   }));
 }
 
+/**
+ * Draw directional port arrows for a placement preview.
+ * @param {*} ports - Preview port descriptors containing kind and rotated offsets.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} originX - Center X pixel for the preview anchor.
+ * @param {*} originY - Center Y pixel for the preview anchor.
+ * @param {*} baseCol - Optional world tile column anchor.
+ * @param {*} baseRow - Optional world tile row anchor.
+ * @param {*} entityType - Entity type being previewed.
+ * @param {*} facing - Cardinal facing direction used to orient arrows.
+ * @param {*} blockedOffsetKeys - Optional set of blocked offset keys to skip.
+ * @returns {void} No return value.
+ */
 function drawPlacementPorts(
   ports,
   tileSize,
@@ -4603,6 +5250,7 @@ function drawPlacementPorts(
     let dirX = port.offset.x / len;
     let dirY = port.offset.y / len;
 
+    // Port directions are intentionally normalized per building type so splitters/mergers read correctly.
     if (port.kind === "input") {
       if (mergerForward) {
         dirX = mergerForward.x;
@@ -4629,6 +5277,17 @@ function drawPlacementPorts(
   }
 }
 
+/**
+ * Draw faint tile highlights under placement-preview ports.
+ * @param {*} ports - Preview port descriptors containing kind and rotated offsets.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} originX - Center X pixel for the preview anchor.
+ * @param {*} originY - Center Y pixel for the preview anchor.
+ * @param {*} baseCol - Optional world tile column anchor.
+ * @param {*} baseRow - Optional world tile row anchor.
+ * @param {*} blockedOffsetKeys - Optional set of blocked offset keys to skip.
+ * @returns {void} No return value.
+ */
 function drawPlacementPortTileHighlights(
   ports,
   tileSize,
@@ -4672,6 +5331,20 @@ function drawPlacementPortTileHighlights(
 }
 
 // FIXED: Unified the fade for all sprites to 150, and restored the pulsing border for generic buildings!
+/**
+ * Draw a full building placement hologram including footprint, sprite preview, and port overlays.
+ * @param {*} px - Tile-aligned X pixel position.
+ * @param {*} py - Tile-aligned Y pixel position.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} colorRgb - Base hologram RGB color.
+ * @param {*} label - Short fallback text label.
+ * @param {*} facing - Placement facing direction.
+ * @param {*} entityType - Entity type being previewed.
+ * @param {*} options - Placement options used for preview (shape/resource state).
+ * @param {*} baseCol - Optional world tile column anchor.
+ * @param {*} baseRow - Optional world tile row anchor.
+ * @returns {void} No return value.
+ */
 function drawBuildingPlacementHologram(
   px, py, tileSize, colorRgb, label, facing, entityType, options, baseCol = null, baseRow = null
 ) {
@@ -4706,6 +5379,7 @@ function drawBuildingPlacementHologram(
     footprintOffsets.map((offset) => `${offset.x},${offset.y}`)
   );
 
+  // Shade candidate port tiles first so blocked/invalid offsets are visible before sprite drawing.
   if (ports.length) {
     drawPlacementPortTileHighlights(
       ports,
@@ -4865,6 +5539,11 @@ function drawBuildingPlacementHologram(
   textStyle(NORMAL);
 }
 
+/**
+ * Get resource type for tile.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getResourceTypeForTile(tile) {
   if (!tile) {
     return null;
@@ -4884,6 +5563,12 @@ function getResourceTypeForTile(tile) {
   return null;
 }
 
+/**
+ * Get placement options for entity.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPlacementOptionsForEntity(entityType, tile) {
   if (entityType === ENTITY_TYPES.TUBE) {
     return {
@@ -4906,6 +5591,12 @@ function getPlacementOptionsForEntity(entityType, tile) {
   return {};
 }
 
+/**
+ * Draw selected building highlight.
+ * @param {*} map - Map wrapper containing tile data.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function drawSelectedBuildingHighlight(map, tileSize) {
   const sel = drawGame.state && drawGame.state.selectedBuilding;
   if (!sel) {
@@ -4961,6 +5652,11 @@ function drawSelectedBuildingHighlight(map, tileSize) {
   }
 }
 
+/**
+ * Get corner tube visual transform.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {void} No return value.
+ */
 function getCornerTubeVisualTransform(facing) {
   const dir = facing || "E";
   const key = CORNER_TUBE_BASE_VISUAL_TRANSFORMS[dir] ? dir : "E";
@@ -4977,6 +5673,11 @@ function getCornerTubeVisualTransform(facing) {
   };
 }
 
+/**
+ * Get tile base color.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getTileBaseColor(tile) {
   switch (tile.type) {
     case "dirt":
@@ -4994,6 +5695,11 @@ function getTileBaseColor(tile) {
 
 // World rendering uses grass bg tiles for every cell; "dirt" type is not drawn as brown terrain.
 // Minimap base must match what the player sees, not the internal dirt marker.
+/**
+ * Get minimap base terrain color.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMinimapBaseTerrainColor(tile) {
   if (!tile) {
     return [240, 240, 245];
@@ -5004,6 +5710,11 @@ function getMinimapBaseTerrainColor(tile) {
   return getTileBaseColor(tile);
 }
 
+/**
+ * Get placed building display name.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPlacedBuildingDisplayName(tile) {
   if (!tile || !tile.building) {
     return null;
@@ -5020,6 +5731,12 @@ function getPlacedBuildingDisplayName(tile) {
   return et != null ? String(et) : null;
 }
 
+/**
+ * Get rocket port hover label at tile.
+ * @param {*} col - Tile column index.
+ * @param {*} row - Tile row index.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getRocketPortHoverLabelAtTile(col, row) {
   if (!drawGame.state) {
     return null;
@@ -5037,6 +5754,11 @@ function getRocketPortHoverLabelAtTile(col, row) {
   return "Rocket Input Port";
 }
 
+/**
+ * Get map hover tooltip label.
+ * @param {*} hit - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMapHoverTooltipLabel(hit) {
   if (!hit) {
     return null;
@@ -5053,6 +5775,11 @@ function getMapHoverTooltipLabel(hit) {
   return getResourceDisplayName(hit.tile);
 }
 
+/**
+ * Get resource display name.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getResourceDisplayName(tile) {
   if (!tile) {
     return null;
@@ -5069,6 +5796,11 @@ function getResourceDisplayName(tile) {
   return null;
 }
 
+/**
+ * Determine whether resource node tile.
+ * @param {*} tile - Tile data object.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isResourceNodeTile(tile) {
   if (!tile) {
     return false;
@@ -5083,6 +5815,10 @@ function isResourceNodeTile(tile) {
   );
 }
 
+/**
+ * Determine whether pointer over minimap.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isPointerOverMinimap() {
   if (!drawGame.state) {
     return false;
@@ -5102,6 +5838,10 @@ function isPointerOverMinimap() {
   );
 }
 
+/**
+ * Determine whether mouse over resource tooltip blockers.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isMouseOverResourceTooltipBlockers() {
   if (backButtonGame.isHovered() || isPointerOverMinimap() || isMouseOverSidebarResourceIcon()) {
     return true;
@@ -5119,6 +5859,10 @@ function isMouseOverResourceTooltipBlockers() {
   );
 }
 
+/**
+ * Draw resource hover tooltip.
+ * @returns {void} No return value.
+ */
 function drawResourceHoverTooltip() {
   if (currentState !== "GAME" || !drawGame.state) {
     return;
@@ -5171,6 +5915,11 @@ function drawResourceHoverTooltip() {
   textAlign(CENTER, CENTER);
 }
 
+/**
+ * Format tooltip resource amount.
+ * @param {*} value - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function formatTooltipResourceAmount(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) {
@@ -5183,6 +5932,10 @@ function formatTooltipResourceAmount(value) {
   return amount.toFixed(2).replace(/\.?0+$/, "");
 }
 
+/**
+ * Get hovered active tube tooltip data.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getHoveredActiveTubeTooltipData() {
   if (currentState !== "GAME" || !drawGame.state) {
     return null;
@@ -5211,6 +5964,10 @@ function getHoveredActiveTubeTooltipData() {
   };
 }
 
+/**
+ * Draw active tube flow tooltip.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawActiveTubeFlowTooltip() {
   if (currentState !== "GAME" || !drawGame.state) {
     return false;
@@ -5294,6 +6051,10 @@ function drawActiveTubeFlowTooltip() {
   return true;
 }
 
+/**
+ * Get hovered rocket tooltip data.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getHoveredRocketTooltipData() {
   if (currentState !== "GAME" || !drawGame.state) {
     return null;
@@ -5341,6 +6102,10 @@ function getHoveredRocketTooltipData() {
   };
 }
 
+/**
+ * Draw rocket hover tooltip.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawRocketHoverTooltip() {
   const tooltip = getHoveredRocketTooltipData();
   if (!tooltip) {
@@ -5400,6 +6165,11 @@ function drawRocketHoverTooltip() {
   return true;
 }
 
+/**
+ * Get mini map tile color.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMiniMapTileColor(tile) {
   if (!tile) {
     return [240, 240, 245];
@@ -5422,6 +6192,12 @@ function getMiniMapTileColor(tile) {
   return getMinimapBaseTerrainColor(tile);
 }
 
+/**
+ * Get tile at screen position.
+ * @param {*} screenX - Screen-space X position in pixels.
+ * @param {*} screenY - Screen-space Y position in pixels.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getTileAtScreenPosition(screenX, screenY) {
   if (!drawGame.state) {
     return null;
@@ -5450,6 +6226,12 @@ function getTileAtScreenPosition(screenX, screenY) {
   };
 }
 
+/**
+ * Determine whether tile within modification range.
+ * @param {*} tileRow - Input value used by this operation.
+ * @param {*} tileCol - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isTileWithinModificationRange(tileRow, tileCol) {
   if (!drawGame.state) {
     return false;
@@ -5476,6 +6258,10 @@ function isTileWithinModificationRange(tileRow, tileCol) {
   return dx * dx + dy * dy <= radius * radius;
 }
 
+/**
+ * Trigger modification range blink.
+ * @returns {void} No return value.
+ */
 function triggerModificationRangeBlink() {
   if (!drawGame.state) {
     return;
@@ -5484,6 +6270,12 @@ function triggerModificationRangeBlink() {
   drawGame.state.feedback.rangeBlinkUntil = millis() + 600;
 }
 
+/**
+ * Draw modification range indicator.
+ * @param {*} config - Runtime configuration values for map/camera/UI.
+ * @param {*} feedback - Transient UI feedback state.
+ * @returns {void} No return value.
+ */
 function drawModificationRangeIndicator(config, feedback) {
   const remaining = feedback.rangeBlinkUntil - millis();
   if (remaining <= 0) {
@@ -5503,6 +6295,10 @@ function drawModificationRangeIndicator(config, feedback) {
   ellipse(width / 2, height / 2, radius * 2, radius * 2);
 }
 
+/**
+ * Draw hotbar.
+ * @returns {void} No return value.
+ */
 function drawHotbar() {
   push();
   const { slotSize, gap, startX, y } = getHotbarLayout();
@@ -5672,6 +6468,10 @@ function drawHotbar() {
   pop();
 }
 
+/**
+ * Handle click interactions for menus, overlays, and in-game placement.
+ * @returns {void} No return value.
+ */
 function mousePressed() {
   requestBackgroundMusicStart();
 
@@ -5739,6 +6539,10 @@ if (currentState != "GAME") return;
   placeSelectedEntityAtMouse();
 }
 
+/**
+ * Attempt to place the selected building at the hovered world tile.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function placeSelectedEntityAtMouse() {
   if (!drawGame.state) return;
   if (selectedHotbarSlot < 0 || selectedHotbarSlot >= HOTBAR_ENTITY_TYPES.length) return;
@@ -5791,6 +6595,8 @@ function placeSelectedEntityAtMouse() {
     );
   };
 
+  // Validate the full rotated footprint before placement:
+  // bounds, restricted-range rules, and occupancy exceptions.
   for (const entry of footprintTiles) {
     if (
       entry.x < 0 ||
@@ -5827,6 +6633,7 @@ function placeSelectedEntityAtMouse() {
   const newEntity = createEntity(type, tileX, tileY, options);
   newEntity.state.facing = placementFacing;
 
+  // Stamp entity occupancy across the full footprint, then update the anchor tile metadata used by UI.
   entities.push(newEntity);
   if (placeSound) placeSound.play();
 
@@ -5867,6 +6674,12 @@ function placeSelectedEntityAtMouse() {
   }
 }
 
+/**
+ * Get placement options for tile.
+ * @param {*} type - Input value used by this operation.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPlacementOptionsForTile(type, tile) {
   if (type === ENTITY_TYPES.MINER) {
     const onNode = isMineableTile(tile.type);
@@ -5880,6 +6693,13 @@ function getPlacementOptionsForTile(type, tile) {
   return getPlacementOptionsForEntity(type, tile);
 }
 
+/**
+ * Try Apply Tube Geometry.
+ * @param {*} entity - Target entity instance.
+ * @param {*} nextFacing - Input value used by this operation.
+ * @param {*} nextShape - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function tryApplyTubeGeometry(entity, nextFacing, nextShape) {
   if (!drawGame.state || !entity || entity.type !== ENTITY_TYPES.TUBE) {
     return false;
@@ -5959,6 +6779,12 @@ function tryApplyTubeGeometry(entity, nextFacing, nextShape) {
   return true;
 }
 
+/**
+ * Try Apply Non Tube Facing.
+ * @param {*} entity - Target entity instance.
+ * @param {*} nextFacing - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function tryApplyNonTubeFacing(entity, nextFacing) {
   if (!drawGame.state || !entity || entity.type === ENTITY_TYPES.TUBE) {
     return false;
@@ -6036,6 +6862,10 @@ function tryApplyNonTubeFacing(entity, nextFacing) {
 }
 
 
+/**
+ * Handle keyboard shortcuts for selection, editing, debug shortcuts, and navigation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function keyPressed() {
   requestBackgroundMusicStart();
   if (currentState === "CREDITS" || currentState === "ENDGAME") {
@@ -6151,6 +6981,10 @@ function keyPressed() {
   }
 }
 
+/**
+ * Delete entity under mouse.
+ * @returns {void} No return value.
+ */
 function deleteEntityUnderMouse() {
   if (!drawGame.state) {
     return;
@@ -6239,6 +7073,11 @@ function deleteEntityUnderMouse() {
   updateConnections(entities);
 }
 
+/**
+ * Sync tile building facing.
+ * @param {*} entity - Target entity instance.
+ * @returns {void} No return value.
+ */
 function syncTileBuildingFacing(entity) {
   if (!drawGame.state || !entity) {
     return;
@@ -6253,6 +7092,10 @@ function syncTileBuildingFacing(entity) {
   tile.building.facing = entity.state.facing || "E";
 }
 
+/**
+ * Repair entity under mouse.
+ * @returns {void} No return value.
+ */
 function repairEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
@@ -6262,6 +7105,10 @@ function repairEntityUnderMouse() {
   console.log("Repaired entity:", entity);
 }
 
+/**
+ * Toggle entity under mouse.
+ * @returns {void} No return value.
+ */
 function toggleEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
@@ -6298,6 +7145,10 @@ function toggleEntityUnderMouse() {
   console.log("Toggled entity:", entity);
 }
 
+/**
+ * Inspect entity under mouse.
+ * @returns {void} No return value.
+ */
 function inspectEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
@@ -6305,6 +7156,10 @@ function inspectEntityUnderMouse() {
   console.log("Inspect entity:", JSON.parse(JSON.stringify(entity)));
 }
 
+/**
+ * Get entity under mouse.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntityUnderMouse() {
   if (!drawGame.state) return null;
 
@@ -6328,6 +7183,11 @@ function getEntityUnderMouse() {
   return getEntityById(entities, tile.entityId);
 }
 
+/**
+ * Get tube sources by target.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getTubeSourcesByTarget(entities) {
   const tubeSources = new Map();
 
@@ -6344,7 +7204,18 @@ function getTubeSourcesByTarget(entities) {
   return tubeSources;
 }
 
+/**
+ * Recompute network connectivity and derived production rates across all entities.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function updateConnections(entities) {
+  // Multi-pass recompute:
+  // 1) baseline topology
+  // 2) splitter/merger rate derivation
+  // 3) topology refresh with derived rates
+  // 4) smelter/constructor recipe intake resolution
+  // 5) final topology/materialized carried-item state
   refreshEntityConnectionStates(entities);
   updateSplitterMergerRates(entities);
   refreshEntityConnectionStates(entities);
@@ -6353,6 +7224,11 @@ function updateConnections(entities) {
   refreshEntityConnectionStates(entities);
 }
 
+/**
+ * Log connection debug.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function logConnectionDebug(entities) {
   const miners = [];
   const tubes = [];
@@ -6466,6 +7342,12 @@ function logConnectionDebug(entities) {
   }
 }
 
+/**
+ * Get incoming tube inputs.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} targetId - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getIncomingTubeInputs(entities, targetId) {
   const inputs = [];
   const incomingKeys = new Set();
@@ -6537,6 +7419,13 @@ function getIncomingTubeInputs(entities, targetId) {
   return inputs;
 }
 
+/**
+ * Matches Direct Constructor Input Port.
+ * @param {*} portX - Input value used by this operation.
+ * @param {*} portY - Input value used by this operation.
+ * @param {*} constructorInputPortKeys - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function matchesDirectConstructorInputPort(portX, portY, constructorInputPortKeys) {
   const DIRECT_NEIGHBORS = [
     { x: 1, y: 0 },
@@ -6557,6 +7446,11 @@ function matchesDirectConstructorInputPort(portX, portY, constructorInputPortKey
   return false;
 }
 
+/**
+ * Resolve smelter intake validity and derive active recipe/output rates.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function updateSmelterInputs(entities) {
   const EPSILON = 1e-6;
   const SMELTER_VALID_INPUT_RATES = [1, 2];
@@ -6602,6 +7496,11 @@ function updateSmelterInputs(entities) {
   }
 }
 
+/**
+ * Find constructor recipe by types.
+ * @param {*} types - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function findConstructorRecipeByTypes(types) {
   if (typeof CONSTRUCTOR_RECIPES === "undefined") return null;
 
@@ -6617,6 +7516,11 @@ function findConstructorRecipeByTypes(types) {
   return null;
 }
 
+/**
+ * Resolve constructor recipes from incoming network rates and configure outputs.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function updateConstructorInputs(entities) {
   const EPSILON = 1e-6;
 
@@ -6640,6 +7544,7 @@ function updateConstructorInputs(entities) {
       ? findConstructorRecipeByTypes(uniqueTypes)
       : null;
 
+    // Keep slots in sync with inferred/active recipe so UI and downstream logic show expected inputs.
     constructorState.inputSlots = [
       { type: null, count: 0 },
       { type: null, count: 0 }
@@ -6670,6 +7575,8 @@ function updateConstructorInputs(entities) {
     }
 
     let hasExactRecipeInputs = true;
+    // Constructor throughput is intentionally strict: every required input rate
+    // must match the recipe count exactly (within epsilon) for production to run.
     for (const input of recipe.inputs) {
       const requiredCount = Number(input.count) || 0;
       const availableRate = incomingRatesByType.get(input.type) || 0;
@@ -6702,6 +7609,11 @@ function updateConstructorInputs(entities) {
   }
 }
 
+/**
+ * Recalculate splitter and merger throughput from network topology.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function updateSplitterMergerRates(entities) {
   const incoming = new Map();
   const outgoingCount = new Map();
@@ -6719,6 +7631,8 @@ function updateSplitterMergerRates(entities) {
     }
   }
 
+  // Collect unique incoming/outgoing component links so rates are not double-counted
+  // when multiple tube entities belong to one connected component.
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.TUBE) continue;
     const fromId = entity.state.fromEntityId;
@@ -6785,6 +7699,7 @@ function updateSplitterMergerRates(entities) {
       ? types[0]
       : null;
 
+    // Splitters divide one stream across all active outputs; mergers sum compatible inputs.
     if (entity.type === ENTITY_TYPES.SPLITTER) {
       const perOutputRate = outputConnectionCount > 0
         ? totalRate / outputConnectionCount
@@ -6809,6 +7724,16 @@ function updateSplitterMergerRates(entities) {
 }
 
 class Button {
+  /**
+   * Create a clickable UI button.
+   * @param {*} x - Left pixel coordinate.
+   * @param {*} y - Top pixel coordinate.
+   * @param {*} w - Button width in pixels.
+   * @param {*} h - Button height in pixels.
+   * @param {*} label - Text label shown inside the button.
+   * @param {*} onClick - Click handler invoked when the button is pressed.
+   * @returns {void} No return value.
+   */
   constructor(x, y, w, h, label, onClick) {
     this.x = x;
     this.y = y;
@@ -6818,11 +7743,19 @@ class Button {
     this.onClick = onClick;
   }
 
+  /**
+   * Determine whether the pointer is currently inside the button bounds.
+   * @returns {boolean} True when the pointer is hovering this button.
+   */
   isHovered() {
     return mouseX > this.x && mouseX < this.x + this.w &&
            mouseY > this.y && mouseY < this.y + this.h;
   }
 
+  /**
+   * Render the button and hover visuals, including hover sound on state entry.
+   * @returns {void} No return value.
+   */
   draw() {
     push();
 
@@ -6866,6 +7799,10 @@ class Button {
     pop();
   }
 
+  /**
+   * Invoke the click handler if the pointer is currently hovering the button.
+   * @returns {void} No return value.
+   */
   checkClick() {
     if (this.isHovered()) {
       if (clickSound) clickSound.play();
