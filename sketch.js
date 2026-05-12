@@ -4699,7 +4699,6 @@ function drawBuildingPlacementHologram(
 
   push();
   translate(cx, cy);
-  const previewAlpha = 225;
   const useMinerOffHologram =
     entityType === ENTITY_TYPES.MINER &&
     minerSpriteSheetImg &&
