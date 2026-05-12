@@ -1,0 +1,6 @@
+for the idle animation - 
+60 frames total
+each frame is 63px x 70px
+
+should be in bottom right of screen next to hotbar.
+when player places something, switch to the place image for 0.5s
