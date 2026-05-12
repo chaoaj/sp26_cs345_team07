@@ -905,9 +905,7 @@ function drawGame() {
     drawGame.state.isRestrictedMode = restrictedMode;
     drawGame.state.shuttleEntityId = null;
 
-    if (restrictedMode) {
-      spawnRestrictedModeShuttle(drawGame.state);
-    }
+    spawnRestrictedModeShuttle(drawGame.state);
     updateConnections(entities);
   }
 
@@ -3599,6 +3597,29 @@ function drawMiniMap(map, player, config, feedback, entities) {
     }
   }
 
+  // Full shuttle footprint (only center tile has tile.building; entity occupies all footprint tiles).
+  if (entities && entities.length) {
+    for (const entity of entities) {
+      if (entity.type !== ENTITY_TYPES.SHUTTLE) continue;
+      fill(138, 112, 22);
+      const facing = entity.state?.facing || "E";
+      const footprint = getSafeFootprintTilesAt(
+        ENTITY_TYPES.SHUTTLE,
+        entity.tileX,
+        entity.tileY,
+        facing
+      );
+      for (const fp of footprint) {
+        rect(
+          miniX + fp.x * miniTile,
+          miniY + fp.y * miniTile,
+          miniTile,
+          miniTile
+        );
+      }
+    }
+  }
+
   noStroke();
   
   const miniPlayerX = miniX + ((player.x - mapOriginX) / tileSize) * miniTile;
@@ -3717,7 +3738,7 @@ function getOrBuildMinimapLayer(state, mapCols, mapRows, miniTile) {
   for (let y = 0; y < mapRows; y++) {
     for (let x = 0; x < mapCols; x++) {
       const tile = map.tiles[y][x];
-      const tileColor = getTileBaseColor(tile);
+      const tileColor = getMinimapBaseTerrainColor(tile);
       layer.fill(tileColor[0], tileColor[1], tileColor[2]);
       layer.rect(x * miniTile, y * miniTile, miniTile, miniTile);
     }
@@ -4971,6 +4992,18 @@ function getTileBaseColor(tile) {
   }
 }
 
+// World rendering uses grass bg tiles for every cell; "dirt" type is not drawn as brown terrain.
+// Minimap base must match what the player sees, not the internal dirt marker.
+function getMinimapBaseTerrainColor(tile) {
+  if (!tile) {
+    return [240, 240, 245];
+  }
+  if (tile.type === "dirt") {
+    return [240, 240, 245];
+  }
+  return getTileBaseColor(tile);
+}
+
 function getPlacedBuildingDisplayName(tile) {
   if (!tile || !tile.building) {
     return null;
@@ -5094,6 +5127,10 @@ function drawResourceHoverTooltip() {
     return;
   }
   if (isMouseOverResourceTooltipBlockers()) {
+    return;
+  }
+
+  if (getHoveredRocketTooltipData()) {
     return;
   }
 
@@ -5300,7 +5337,7 @@ function getHoveredRocketTooltipData() {
 
   return {
     title: "Rocket Ship",
-    label: "Rocket Ship"
+    label: ""
   };
 }
 
@@ -5318,14 +5355,19 @@ function drawRocketHoverTooltip() {
   const titleW = textWidth(tooltip.title);
   const titleH = textAscent() + textDescent();
 
-  textStyle(NORMAL);
-  textSize(11);
-  const labelW = textWidth(tooltip.label);
-  const labelH = textAscent() + textDescent();
+  const showLabel = tooltip.label && String(tooltip.label).trim() !== "";
+  let labelW = 0;
+  let labelH = 0;
+  if (showLabel) {
+    textStyle(NORMAL);
+    textSize(11);
+    labelW = textWidth(tooltip.label);
+    labelH = textAscent() + textDescent();
+  }
 
   const pad = 8;
   const boxW = max(titleW, labelW) + pad * 2;
-  const boxH = pad * 2 + titleH + 4 + labelH;
+  const boxH = pad * 2 + titleH + (showLabel ? 4 + labelH : 0);
 
   let bx = mouseX + 14;
   let by = mouseY + 14;
@@ -5349,9 +5391,11 @@ function drawRocketHoverTooltip() {
   textSize(12);
   text(tooltip.title, bx + pad, by + pad);
 
-  textStyle(NORMAL);
-  textSize(11);
-  text(tooltip.label, bx + pad, by + pad + titleH + 4);
+  if (showLabel) {
+    textStyle(NORMAL);
+    textSize(11);
+    text(tooltip.label, bx + pad, by + pad + titleH + 4);
+  }
   pop();
   return true;
 }
@@ -5375,7 +5419,7 @@ function getMiniMapTileColor(tile) {
   if (tile.resource === RESOURCE_TYPES.HELIUM3) {
     return [0, 180, 220];
   }
-  return getTileBaseColor(tile);
+  return getMinimapBaseTerrainColor(tile);
 }
 
 function getTileAtScreenPosition(screenX, screenY) {
