@@ -3303,32 +3303,63 @@ function drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, shuttl
   }
 
   const frameCount = 10;
-  const frameW = shuttleSpriteSheetImg.width / frameCount;
+
+  const frameW = floor(shuttleSpriteSheetImg.width / frameCount);
   const frameH = shuttleSpriteSheetImg.height;
+
   const animationFps = 10;
   const frameIndex = floor(nowSeconds * animationFps) % frameCount;
-  
-  const targetHeight = max(drawHeight + 12, tileSize * 3.0); // Now 2x taller than a tile
-  const targetWidth = targetHeight * (frameW / frameH);
-  
-  const visualAlignmentOffset = 6; // Shift to the right by ~2.5 pixels for better centering
-  const spriteX = px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset;
-  
-  const spriteY = py + drawHeight - targetHeight; 
-  
+
+  const targetHeight = round(max(drawHeight + 12, tileSize * 3.0));
+  const targetWidth = round(targetHeight * (frameW / frameH));
+
+  const visualAlignmentOffset = 4;
+  const spriteX = round(px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset);
+  const spriteY = round(py + drawHeight - targetHeight);
+
   imageMode(CORNER);
   noTint();
+
+  const canToggleSmoothing =
+    typeof drawingContext !== "undefined" &&
+    drawingContext &&
+    "imageSmoothingEnabled" in drawingContext;
+
+  const previousImageSmoothing = canToggleSmoothing
+    ? drawingContext.imageSmoothingEnabled
+    : undefined;
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = false;
+  }
+
+  // Asymmetric source crop:
+  // Keep the left side intact because cropping it removes visible shuttle pixels.
+  // Trim only the right edge where the horizontal bleed line is showing.
+  const sourceInsetLeft = 0;
+  const sourceInsetRight = 1;
+
+  const sourceX = frameIndex * frameW + sourceInsetLeft;
+  const sourceY = 0;
+  const sourceWidth = frameW - sourceInsetLeft - sourceInsetRight;
+  const sourceHeight = frameH;
+
   image(
     shuttleSpriteSheetImg,
     spriteX,
     spriteY,
     targetWidth,
     targetHeight,
-    frameIndex * frameW,
-    0,
-    frameW,
-    frameH
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight
   );
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = previousImageSmoothing;
+  }
+
   return true;
 }
 
@@ -4571,16 +4602,32 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
+
   const nowSeconds = millis() / 1000;
   const nowMs = millis();
+
   const tubeDescriptors = [];
   const renderQueue = [];
+  const shuttleQueue = [];
 
-  // Build a unified render queue so tubes and buildings share one stable depth sort.
+  // Build render queues.
+  // Shuttle is split into two layers:
+  // south/lower part below tubes, north/top part above tubes.
   for (const entity of entities) {
     const sortY = getEntitySouthmostRenderTileY(entity);
     const sortX = entity?.tileX || 0;
     const sortId = entity?.id || 0;
+
+    if (entity.type === ENTITY_TYPES.SHUTTLE) {
+      shuttleQueue.push({
+        sortY,
+        sortX,
+        sortId,
+        entity
+      });
+      continue;
+    }
+
     if (entity.type === ENTITY_TYPES.TUBE) {
       const descriptor = buildTubeRenderDescriptor(entity, tileSize, nowMs);
       tubeDescriptors.push(descriptor);
@@ -4602,19 +4649,27 @@ function drawEntities(entities, tileSize, map) {
     }
   }
 
-  // Annotate tube neighbors before drawing so layered tube passes can resolve intersections cleanly.
   annotateTubeDescriptorNeighbors(tubeDescriptors);
-  renderQueue.sort((a, b) => {
+
+  const sortRenderItems = (a, b) => {
     if (a.sortY !== b.sortY) return a.sortY - b.sortY;
     if (a.sortX !== b.sortX) return a.sortX - b.sortX;
     return a.sortId - b.sortId;
-  });
+  };
+
+  shuttleQueue.sort(sortRenderItems);
+  renderQueue.sort(sortRenderItems);
 
   for (const entity of entities) {
     drawEntityPorts(entity, tileSize);
   }
 
-  // Draw the buildings and tubes on top of the ground layer
+  // 1. Draw lower/south shuttle below tubes.
+  for (const item of shuttleQueue) {
+    drawShuttleEntityLayer(item.entity, tileSize, nowSeconds, "south");
+  }
+
+  // 2. Draw tubes and normal buildings.
   for (const item of renderQueue) {
     if (item.kind === "tube") {
       drawTubeDescriptorLayer(item.descriptor, "body");
@@ -4622,8 +4677,124 @@ function drawEntities(entities, tileSize, map) {
       drawNonTubeEntity(item.entity, tileSize, nowSeconds);
     }
   }
+
+  // 3. Draw upper/north shuttle above tubes.
+  for (const item of shuttleQueue) {
+    drawShuttleEntityLayer(item.entity, tileSize, nowSeconds, "north");
+  }
 }
 
+function drawPlacedShuttleSpriteLayer(
+  px,
+  py,
+  drawWidth,
+  drawHeight,
+  tileSize,
+  shuttleState,
+  nowSeconds,
+  layerName
+) {
+  if (!shuttleSpriteSheetImg || shuttleSpriteSheetImg.width <= 0) {
+    return false;
+  }
+
+  const frameCount = 10;
+  const frameW = floor(shuttleSpriteSheetImg.width / frameCount);
+  const frameH = shuttleSpriteSheetImg.height;
+
+  const animationFps = 10;
+  const frameIndex = floor(nowSeconds * animationFps) % frameCount;
+
+  const targetHeight = round(max(drawHeight + 12, tileSize * 3.0));
+  const targetWidth = round(targetHeight * (frameW / frameH));
+
+  const visualAlignmentOffset = 3.5;
+  const spriteX = round(px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset);
+  const spriteY = round(py + drawHeight - targetHeight);
+
+  // Bigger top overlay:
+  // This makes the shuttle body redraw over tubes above/behind it.
+  // Increase to 0.78 if the tube still bleeds through.
+  const northLayerRatio = 0.65;
+
+  // Small overlap prevents a visible horizontal seam where the two slices meet.
+  const layerOverlapSourcePx = 2;
+
+  const splitSourceY = round(frameH * northLayerRatio);
+
+  let sourceY;
+  let sourceHeight;
+
+  if (layerName === "north") {
+    sourceY = 0;
+    sourceHeight = min(frameH, splitSourceY + layerOverlapSourcePx);
+  } else if (layerName === "south") {
+    sourceY = max(0, splitSourceY - layerOverlapSourcePx);
+    sourceHeight = frameH - sourceY;
+  } else {
+    return false;
+  }
+
+  const scaleY = targetHeight / frameH;
+  const destY = round(spriteY + sourceY * scaleY);
+  const destHeight = round(sourceHeight * scaleY);
+
+  imageMode(CORNER);
+  noTint();
+
+  const canToggleSmoothing =
+    typeof drawingContext !== "undefined" &&
+    drawingContext &&
+    "imageSmoothingEnabled" in drawingContext;
+
+  const previousImageSmoothing = canToggleSmoothing
+    ? drawingContext.imageSmoothingEnabled
+    : undefined;
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = false;
+  }
+
+  // Keep left edge intact. Trim only the right edge for sprite-sheet bleed.
+  const sourceInsetLeft = 0;
+  const sourceInsetRight = 1;
+
+  const sourceX = frameIndex * frameW + sourceInsetLeft;
+  const sourceWidth = frameW - sourceInsetLeft - sourceInsetRight;
+
+  image(
+    shuttleSpriteSheetImg,
+    spriteX,
+    destY,
+    targetWidth,
+    destHeight,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight
+  );
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = previousImageSmoothing;
+  }
+
+  return true;
+}
+
+function drawShuttleEntityLayer(entity, tileSize, nowSeconds, layerName) {
+  const bounds = getEntityDrawBounds(entity, tileSize);
+
+  return drawPlacedShuttleSpriteLayer(
+    bounds.px,
+    bounds.py,
+    bounds.drawWidth,
+    bounds.drawHeight,
+    tileSize,
+    entity.state,
+    nowSeconds,
+    layerName
+  );
+}
 /**
  * Draw port indicators for an entity.
  * Output ports are shown as green circles, input ports as orange circles.
