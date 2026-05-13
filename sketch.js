@@ -1076,6 +1076,9 @@ function updateOptimizationMetrics(runtimeState, entities, dt, rocketProgress) {
  */
 function setup() {
   canvas = createCanvas(600, 600);
+  noSmooth();
+  drawingContext.imageSmoothingEnabled = false;
+
   centerCanvas();
   textAlign(CENTER, CENTER);
 
@@ -1098,9 +1101,10 @@ function setup() {
     });
   }
 
-  helpButton = new Button(width - 275, 10, 100, 40, "Keybinds", () => {
+  helpButton = new Button(width - 255, 10, 80, 32, "Keybinds", () => {
     showHelpMenu = !showHelpMenu;
   });
+  helpButton.fontSize = 14;
   startButton = new Button (90, 350, 150, 55, "Start", () => {
     currentState = "GAME";
   });
@@ -1861,6 +1865,9 @@ function drawGame() {
     rocketProgress.rocket &&
     isPlayerNearRocketForLaunch(player, rocketProgress.rocket, config)
   ) {
+    if (movementSound && movementSound.isPlaying()) {
+      movementSound.stop();
+    }
     currentState = "CREDITS";
     creditsScrollY = height;
     creditsEndScreenStartedAt = null;
@@ -3300,32 +3307,63 @@ function drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, shuttl
   }
 
   const frameCount = 10;
-  const frameW = shuttleSpriteSheetImg.width / frameCount;
+
+  const frameW = floor(shuttleSpriteSheetImg.width / frameCount);
   const frameH = shuttleSpriteSheetImg.height;
+
   const animationFps = 10;
   const frameIndex = floor(nowSeconds * animationFps) % frameCount;
-  
-  const targetHeight = max(drawHeight + 12, tileSize * 3.0); // Now 2x taller than a tile
-  const targetWidth = targetHeight * (frameW / frameH);
-  
-  const visualAlignmentOffset = 6; // Shift to the right by ~2.5 pixels for better centering
-  const spriteX = px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset;
-  
-  const spriteY = py + drawHeight - targetHeight; 
-  
+
+  const targetHeight = round(max(drawHeight + 12, tileSize * 3.0));
+  const targetWidth = round(targetHeight * (frameW / frameH));
+
+  const visualAlignmentOffset = 4;
+  const spriteX = round(px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset);
+  const spriteY = round(py + drawHeight - targetHeight);
+
   imageMode(CORNER);
   noTint();
+
+  const canToggleSmoothing =
+    typeof drawingContext !== "undefined" &&
+    drawingContext &&
+    "imageSmoothingEnabled" in drawingContext;
+
+  const previousImageSmoothing = canToggleSmoothing
+    ? drawingContext.imageSmoothingEnabled
+    : undefined;
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = false;
+  }
+
+  // Asymmetric source crop:
+  // Keep the left side intact because cropping it removes visible shuttle pixels.
+  // Trim only the right edge where the horizontal bleed line is showing.
+  const sourceInsetLeft = 0;
+  const sourceInsetRight = 1;
+
+  const sourceX = frameIndex * frameW + sourceInsetLeft;
+  const sourceY = 0;
+  const sourceWidth = frameW - sourceInsetLeft - sourceInsetRight;
+  const sourceHeight = frameH;
+
   image(
     shuttleSpriteSheetImg,
     spriteX,
     spriteY,
     targetWidth,
     targetHeight,
-    frameIndex * frameW,
-    0,
-    frameW,
-    frameH
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight
   );
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = previousImageSmoothing;
+  }
+
   return true;
 }
 
@@ -4568,16 +4606,32 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
+
   const nowSeconds = millis() / 1000;
   const nowMs = millis();
+
   const tubeDescriptors = [];
   const renderQueue = [];
+  const shuttleQueue = [];
 
-  // Build a unified render queue so tubes and buildings share one stable depth sort.
+  // Build render queues.
+  // Shuttle is split into two layers:
+  // south/lower part below tubes, north/top part above tubes.
   for (const entity of entities) {
     const sortY = getEntitySouthmostRenderTileY(entity);
     const sortX = entity?.tileX || 0;
     const sortId = entity?.id || 0;
+
+    if (entity.type === ENTITY_TYPES.SHUTTLE) {
+      shuttleQueue.push({
+        sortY,
+        sortX,
+        sortId,
+        entity
+      });
+      continue;
+    }
+
     if (entity.type === ENTITY_TYPES.TUBE) {
       const descriptor = buildTubeRenderDescriptor(entity, tileSize, nowMs);
       tubeDescriptors.push(descriptor);
@@ -4599,19 +4653,27 @@ function drawEntities(entities, tileSize, map) {
     }
   }
 
-  // Annotate tube neighbors before drawing so layered tube passes can resolve intersections cleanly.
   annotateTubeDescriptorNeighbors(tubeDescriptors);
-  renderQueue.sort((a, b) => {
+
+  const sortRenderItems = (a, b) => {
     if (a.sortY !== b.sortY) return a.sortY - b.sortY;
     if (a.sortX !== b.sortX) return a.sortX - b.sortX;
     return a.sortId - b.sortId;
-  });
+  };
+
+  shuttleQueue.sort(sortRenderItems);
+  renderQueue.sort(sortRenderItems);
 
   for (const entity of entities) {
     drawEntityPorts(entity, tileSize);
   }
 
-  // Draw the buildings and tubes on top of the ground layer
+  // 1. Draw lower/south shuttle below tubes.
+  for (const item of shuttleQueue) {
+    drawShuttleEntityLayer(item.entity, tileSize, nowSeconds, "south");
+  }
+
+  // 2. Draw tubes and normal buildings.
   for (const item of renderQueue) {
     if (item.kind === "tube") {
       drawTubeDescriptorLayer(item.descriptor, "body");
@@ -4619,8 +4681,124 @@ function drawEntities(entities, tileSize, map) {
       drawNonTubeEntity(item.entity, tileSize, nowSeconds);
     }
   }
+
+  // 3. Draw upper/north shuttle above tubes.
+  for (const item of shuttleQueue) {
+    drawShuttleEntityLayer(item.entity, tileSize, nowSeconds, "north");
+  }
 }
 
+function drawPlacedShuttleSpriteLayer(
+  px,
+  py,
+  drawWidth,
+  drawHeight,
+  tileSize,
+  shuttleState,
+  nowSeconds,
+  layerName
+) {
+  if (!shuttleSpriteSheetImg || shuttleSpriteSheetImg.width <= 0) {
+    return false;
+  }
+
+  const frameCount = 10;
+  const frameW = floor(shuttleSpriteSheetImg.width / frameCount);
+  const frameH = shuttleSpriteSheetImg.height;
+
+  const animationFps = 10;
+  const frameIndex = floor(nowSeconds * animationFps) % frameCount;
+
+  const targetHeight = round(max(drawHeight + 12, tileSize * 3.0));
+  const targetWidth = round(targetHeight * (frameW / frameH));
+
+  const visualAlignmentOffset = 3.5;
+  const spriteX = round(px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset);
+  const spriteY = round(py + drawHeight - targetHeight);
+
+  // Bigger top overlay:
+  // This makes the shuttle body redraw over tubes above/behind it.
+  // Increase to 0.78 if the tube still bleeds through.
+  const northLayerRatio = 0.65;
+
+  // Small overlap prevents a visible horizontal seam where the two slices meet.
+  const layerOverlapSourcePx = 2;
+
+  const splitSourceY = round(frameH * northLayerRatio);
+
+  let sourceY;
+  let sourceHeight;
+
+  if (layerName === "north") {
+    sourceY = 0;
+    sourceHeight = min(frameH, splitSourceY + layerOverlapSourcePx);
+  } else if (layerName === "south") {
+    sourceY = max(0, splitSourceY - layerOverlapSourcePx);
+    sourceHeight = frameH - sourceY;
+  } else {
+    return false;
+  }
+
+  const scaleY = targetHeight / frameH;
+  const destY = round(spriteY + sourceY * scaleY);
+  const destHeight = round(sourceHeight * scaleY);
+
+  imageMode(CORNER);
+  noTint();
+
+  const canToggleSmoothing =
+    typeof drawingContext !== "undefined" &&
+    drawingContext &&
+    "imageSmoothingEnabled" in drawingContext;
+
+  const previousImageSmoothing = canToggleSmoothing
+    ? drawingContext.imageSmoothingEnabled
+    : undefined;
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = false;
+  }
+
+  // Keep left edge intact. Trim only the right edge for sprite-sheet bleed.
+  const sourceInsetLeft = 0;
+  const sourceInsetRight = 1;
+
+  const sourceX = frameIndex * frameW + sourceInsetLeft;
+  const sourceWidth = frameW - sourceInsetLeft - sourceInsetRight;
+
+  image(
+    shuttleSpriteSheetImg,
+    spriteX,
+    destY,
+    targetWidth,
+    destHeight,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight
+  );
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = previousImageSmoothing;
+  }
+
+  return true;
+}
+
+function drawShuttleEntityLayer(entity, tileSize, nowSeconds, layerName) {
+  const bounds = getEntityDrawBounds(entity, tileSize);
+
+  return drawPlacedShuttleSpriteLayer(
+    bounds.px,
+    bounds.py,
+    bounds.drawWidth,
+    bounds.drawHeight,
+    tileSize,
+    entity.state,
+    nowSeconds,
+    layerName
+  );
+}
 /**
  * Draw port indicators for an entity.
  * Output ports are shown as green circles, input ports as orange circles.
@@ -4971,6 +5149,43 @@ function drawMiniMap(map, player, config, feedback, entities) {
  * @param {*} runtimeState - Active drawGame.state object.
  * @returns {void} No return value.
  */
+function getOptimizationHudPanelPlacement() {
+  const panelW = OPTIMIZATION_PANEL_WIDTH;
+  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
+  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
+
+  // Anchor to the right of top-left controls instead of under the minimap.
+  let anchorX = 8;
+  let anchorY = 8;
+  const controls = [];
+  if (backButtonGame) {
+    controls.push(backButtonGame);
+  }
+  if (typeof testEndGameButton !== "undefined" && testEndGameButton) {
+    controls.push(testEndGameButton);
+  }
+  if (controls.length > 0) {
+    let rightMost = 8;
+    let topMost = controls[0].y;
+    for (const control of controls) {
+      rightMost = Math.max(rightMost, control.x + control.w);
+      topMost = Math.min(topMost, control.y);
+    }
+    anchorX = rightMost + 10 - 150;
+    anchorY = topMost;
+  }
+
+  const panelX = constrain(anchorX, 8, width - panelW - 8);
+  const panelY = constrain(anchorY, 8, height - expandedH - 8);
+
+  return { panelW, collapsedH, expandedH, panelX, panelY };
+}
+
+/**
+ * Draw the optimization HUD with a compact score and hover-expanded breakdown.
+ * @param {*} runtimeState - Active drawGame.state object.
+ * @returns {void} No return value.
+ */
 function drawOptimizationHud(runtimeState) {
   if (!runtimeState || !runtimeState.config) {
     return;
@@ -4980,26 +5195,8 @@ function drawOptimizationHud(runtimeState) {
     return;
   }
 
-  const config = runtimeState.config;
-  const mapCols = Math.max(1, Number(config.mapCols) || 1);
-  const mapRows = Math.max(1, Number(config.mapRows) || 1);
-  const miniMaxSize = 140;
-  const miniTile = max(1, floor(miniMaxSize / mapCols));
-  const miniWidth = mapCols * miniTile;
-  const miniHeight = mapRows * miniTile;
-  const miniX = width - miniWidth - 10;
-  const miniY = 10;
-
-  const panelW = OPTIMIZATION_PANEL_WIDTH;
-  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
-  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
-  const panelX = constrain(miniX + miniWidth - panelW, 8, width - panelW - 8);
-  const hudYOffset = 75;
-  const panelY = constrain(
-    miniY + miniHeight + 10 + hudYOffset,
-    8,
-    height - expandedH - 8
-  );
+  const { panelW, collapsedH, expandedH, panelX, panelY } =
+    getOptimizationHudPanelPlacement();
   const inCollapsedBounds =
     mouseX >= panelX &&
     mouseX <= panelX + panelW &&
@@ -5158,6 +5355,14 @@ function getOrBuildWorldLayer(state) {
   const { config, map } = state;
   const { tileSize, mapCols, mapRows } = config;
   const layer = createGraphics(mapCols * tileSize, mapRows * tileSize);
+
+  // Important for cached/offscreen rendering.
+  layer.noSmooth();
+
+  if (layer.drawingContext) {
+    layer.drawingContext.imageSmoothingEnabled = false;
+  }
+
   layer.noStroke();
   const depositDrawCalls = [];
 
@@ -6836,21 +7041,8 @@ function isPointerOverOptimizationHud() {
   if (!drawGame.state || !drawGame.state.config) {
     return false;
   }
-  const { mapCols, mapRows } = drawGame.state.config;
-  const safeCols = Math.max(1, Number(mapCols) || 1);
-  const safeRows = Math.max(1, Number(mapRows) || 1);
-  const miniMaxSize = 140;
-  const miniTile = max(1, floor(miniMaxSize / safeCols));
-  const miniWidth = safeCols * miniTile;
-  const miniHeight = safeRows * miniTile;
-  const miniX = width - miniWidth - 10;
-  const miniY = 10;
-
-  const panelW = OPTIMIZATION_PANEL_WIDTH;
-  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
-  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
-  const panelX = constrain(miniX + miniWidth - panelW, 8, width - panelW - 8);
-  const panelY = constrain(miniY + miniHeight + 10, 8, height - expandedH - 8);
+  const { panelW, collapsedH, expandedH, panelX, panelY } =
+    getOptimizationHudPanelPlacement();
 
   const inCollapsedBounds =
     mouseX >= panelX &&
@@ -7525,13 +7717,15 @@ function drawReactivePlayerCompanion() {
     reactivePlayerPlaceImg &&
     reactivePlayerPlaceImg.width > 0 &&
     reactivePlayerPlaceImg.height > 0;
+
   if (!hasIdleSheet && !hasPlaceFrame) {
     return;
   }
 
   const idleFrameWidth = REACTIVE_PLAYER_IDLE_FRAME_WIDTH;
   const idleFrameHeight = REACTIVE_PLAYER_IDLE_FRAME_HEIGHT;
-  const reactiveScale = 1.4;
+  const reactiveScale = 2;
+
   const drawWidth = round(idleFrameWidth * reactiveScale);
   const drawHeight = round(idleFrameHeight * reactiveScale);
 
@@ -7548,14 +7742,35 @@ function drawReactivePlayerCompanion() {
   imageMode(CORNER);
   noTint();
 
+  const canToggleSmoothing =
+    typeof drawingContext !== "undefined" &&
+    drawingContext &&
+    "imageSmoothingEnabled" in drawingContext;
+
+  const previousImageSmoothing = canToggleSmoothing
+    ? drawingContext.imageSmoothingEnabled
+    : undefined;
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = false;
+  }
+
+  const finishDraw = () => {
+    if (canToggleSmoothing) {
+      drawingContext.imageSmoothingEnabled = previousImageSmoothing;
+    }
+    pop();
+  };
+
   if (showPlaceFrame) {
-    // Place frame is slightly shorter than idle; scale and bottom-align to keep stance stable.
+    // Place/smiling frame uses its real image size and bottom-aligns.
     const placeWidth = reactivePlayerPlaceImg.width;
     const placeHeight = reactivePlayerPlaceImg.height;
     const placeDrawWidth = round(placeWidth * reactiveScale);
     const placeDrawHeight = round(placeHeight * reactiveScale);
     const placeX = round(x + (drawWidth - placeDrawWidth) / 2);
     const placeY = round(height - placeDrawHeight);
+
     image(
       reactivePlayerPlaceImg,
       placeX,
@@ -7563,12 +7778,13 @@ function drawReactivePlayerCompanion() {
       placeDrawWidth,
       placeDrawHeight
     );
-    pop();
+
+    finishDraw();
     return;
   }
 
   if (!hasIdleSheet) {
-    pop();
+    finishDraw();
     return;
   }
 
@@ -7576,24 +7792,44 @@ function drawReactivePlayerCompanion() {
     1,
     floor(reactivePlayerIdleSheetImg.width / idleFrameWidth)
   );
+
   const frameCount = Math.max(
     1,
     Math.min(REACTIVE_PLAYER_IDLE_FRAMES, availableFrameCount)
   );
-  const frameIndex = floor((nowMs / 1000) * REACTIVE_PLAYER_IDLE_FPS) % frameCount;
+
+  const frameIndex =
+    floor((nowMs / 1000) * REACTIVE_PLAYER_IDLE_FPS) % frameCount;
+
+  // Do NOT crop the source frame. Cropping source pixels was removing
+  // visible edge pixels from the idle sprite.
+  const sourceX = frameIndex * idleFrameWidth;
+  const sourceY = 0;
+  const sourceWidth = idleFrameWidth;
+  const sourceHeight = idleFrameHeight;
+
+  // Slightly fit idle inside the same visual box, similar to the smiling/place pose.
+  // Increase to 3 or 4 if idle still feels too large.
+  const idleFitPaddingPx = 1;
+
+  const idleDrawX = round(x) + idleFitPaddingPx;
+  const idleDrawY = round(yTop) + idleFitPaddingPx + 1;
+  const idleDrawWidth = drawWidth - idleFitPaddingPx * 2;
+  const idleDrawHeight = drawHeight - idleFitPaddingPx * 2;
 
   image(
     reactivePlayerIdleSheetImg,
-    round(x),
-    round(yTop),
-    drawWidth,
-    drawHeight,
-    frameIndex * idleFrameWidth,
-    0,
-    idleFrameWidth,
-    idleFrameHeight
+    idleDrawX,
+    idleDrawY,
+    idleDrawWidth,
+    idleDrawHeight,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight
   );
-  pop();
+
+  finishDraw();
 }
 
 /**
@@ -8885,6 +9121,7 @@ class Button {
     this.h = h;
     this.label = label;
     this.onClick = onClick;
+    this.fontSize = 20;
   }
 
   /**
@@ -8935,7 +9172,7 @@ class Button {
 
     fill(30, 30, 30);
     noStroke();
-    textSize(20);
+    textSize(this.fontSize || 20);
     textStyle(NORMAL);
     textAlign(CENTER, CENTER);
     text(this.label, this.x + this.w / 2, this.y + this.h / 2);
