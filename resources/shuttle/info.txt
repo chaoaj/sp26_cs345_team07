@@ -1,0 +1,3 @@
+10 frames
+
+each frame 21px x 45 px

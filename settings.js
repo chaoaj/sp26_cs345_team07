@@ -1,6 +1,6 @@
 let musicSlider, modeToggleTrack, modeToggleKnob;
 let musicVolume = 0.5; // Default music volume (50%)
-let restrictedModeEnabled = false; // false = Creative, true = Restricted
+let restrictedModeEnabled = true; // false = Creative, true = Restricted
 
 function isRestrictedModeEnabled() {
   return restrictedModeEnabled;

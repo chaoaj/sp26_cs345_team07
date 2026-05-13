@@ -1,0 +1,3 @@
+reactive sprite idle: 60 frames
+
+each frame is 63px by 70px
