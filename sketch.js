@@ -1015,9 +1015,9 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourc
   placeDepositPatch(leftCenterCol, centerRow, 2, 2, "iron");
   placeDepositPatch(rightCenterCol, centerRow, 2, 2, "copper");
 
-  // Helium-3 near center-bottom.
+  // Large helium-3 patch: lower-middle of the map, slightly east of horizontal center.
   const heliumRow = mapRows - 8;
-  const heliumCenterCol = Math.floor(mapCols / 2);
+  const heliumCenterCol = Math.floor(mapCols / 2) + 4;
   placeDepositPatch(heliumCenterCol, heliumRow, 1, 1, "helium3");
 
   // Sparse scatter across the map to keep exploration useful.
