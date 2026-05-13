@@ -1101,9 +1101,10 @@ function setup() {
     });
   }
 
-  helpButton = new Button(width - 275, 10, 100, 40, "Keybinds", () => {
+  helpButton = new Button(width - 255, 10, 80, 32, "Keybinds", () => {
     showHelpMenu = !showHelpMenu;
   });
+  helpButton.fontSize = 14;
   startButton = new Button (90, 350, 150, 55, "Start", () => {
     currentState = "GAME";
   });
@@ -5145,6 +5146,43 @@ function drawMiniMap(map, player, config, feedback, entities) {
  * @param {*} runtimeState - Active drawGame.state object.
  * @returns {void} No return value.
  */
+function getOptimizationHudPanelPlacement() {
+  const panelW = OPTIMIZATION_PANEL_WIDTH;
+  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
+  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
+
+  // Anchor to the right of top-left controls instead of under the minimap.
+  let anchorX = 8;
+  let anchorY = 8;
+  const controls = [];
+  if (backButtonGame) {
+    controls.push(backButtonGame);
+  }
+  if (typeof testEndGameButton !== "undefined" && testEndGameButton) {
+    controls.push(testEndGameButton);
+  }
+  if (controls.length > 0) {
+    let rightMost = 8;
+    let topMost = controls[0].y;
+    for (const control of controls) {
+      rightMost = Math.max(rightMost, control.x + control.w);
+      topMost = Math.min(topMost, control.y);
+    }
+    anchorX = rightMost + 10 - 150;
+    anchorY = topMost;
+  }
+
+  const panelX = constrain(anchorX, 8, width - panelW - 8);
+  const panelY = constrain(anchorY, 8, height - expandedH - 8);
+
+  return { panelW, collapsedH, expandedH, panelX, panelY };
+}
+
+/**
+ * Draw the optimization HUD with a compact score and hover-expanded breakdown.
+ * @param {*} runtimeState - Active drawGame.state object.
+ * @returns {void} No return value.
+ */
 function drawOptimizationHud(runtimeState) {
   if (!runtimeState || !runtimeState.config) {
     return;
@@ -5154,26 +5192,8 @@ function drawOptimizationHud(runtimeState) {
     return;
   }
 
-  const config = runtimeState.config;
-  const mapCols = Math.max(1, Number(config.mapCols) || 1);
-  const mapRows = Math.max(1, Number(config.mapRows) || 1);
-  const miniMaxSize = 140;
-  const miniTile = max(1, floor(miniMaxSize / mapCols));
-  const miniWidth = mapCols * miniTile;
-  const miniHeight = mapRows * miniTile;
-  const miniX = width - miniWidth - 10;
-  const miniY = 10;
-
-  const panelW = OPTIMIZATION_PANEL_WIDTH;
-  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
-  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
-  const panelX = constrain(miniX + miniWidth - panelW, 8, width - panelW - 8);
-  const hudYOffset = 75;
-  const panelY = constrain(
-    miniY + miniHeight + 10 + hudYOffset,
-    8,
-    height - expandedH - 8
-  );
+  const { panelW, collapsedH, expandedH, panelX, panelY } =
+    getOptimizationHudPanelPlacement();
   const inCollapsedBounds =
     mouseX >= panelX &&
     mouseX <= panelX + panelW &&
@@ -7018,21 +7038,8 @@ function isPointerOverOptimizationHud() {
   if (!drawGame.state || !drawGame.state.config) {
     return false;
   }
-  const { mapCols, mapRows } = drawGame.state.config;
-  const safeCols = Math.max(1, Number(mapCols) || 1);
-  const safeRows = Math.max(1, Number(mapRows) || 1);
-  const miniMaxSize = 140;
-  const miniTile = max(1, floor(miniMaxSize / safeCols));
-  const miniWidth = safeCols * miniTile;
-  const miniHeight = safeRows * miniTile;
-  const miniX = width - miniWidth - 10;
-  const miniY = 10;
-
-  const panelW = OPTIMIZATION_PANEL_WIDTH;
-  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
-  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
-  const panelX = constrain(miniX + miniWidth - panelW, 8, width - panelW - 8);
-  const panelY = constrain(miniY + miniHeight + 10, 8, height - expandedH - 8);
+  const { panelW, collapsedH, expandedH, panelX, panelY } =
+    getOptimizationHudPanelPlacement();
 
   const inCollapsedBounds =
     mouseX >= panelX &&
@@ -9111,6 +9118,7 @@ class Button {
     this.h = h;
     this.label = label;
     this.onClick = onClick;
+    this.fontSize = 20;
   }
 
   /**
@@ -9161,7 +9169,7 @@ class Button {
 
     fill(30, 30, 30);
     noStroke();
-    textSize(20);
+    textSize(this.fontSize || 20);
     textStyle(NORMAL);
     textAlign(CENTER, CENTER);
     text(this.label, this.x + this.w / 2, this.y + this.h / 2);
