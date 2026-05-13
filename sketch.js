@@ -1865,6 +1865,9 @@ function drawGame() {
     rocketProgress.rocket &&
     isPlayerNearRocketForLaunch(player, rocketProgress.rocket, config)
   ) {
+    if (movementSound && movementSound.isPlaying()) {
+      movementSound.stop();
+    }
     currentState = "CREDITS";
     creditsScrollY = height;
     creditsEndScreenStartedAt = null;
