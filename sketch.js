@@ -12,6 +12,10 @@ let ironOreImg, ironBarImg, ironPlateImg;
 let copperOreImg, copperBarImg, copperPlateImg, copperWireImg;
 let heliumImg, modularComponentImg, rocketFuelImg, electronicsImg, shipAlloyImg;
 let sideBarFrameImg, sideBarTabOpen, sideBarTabClosed;
+let endScreenImg;
+let creditsEndScreenStartedAt = null;
+const CREDITS_END_SCREEN_MS = 5000;
+const CREDITS_END_TRIGGER_Y = -950;
 
 let creditsButtonSettings, backButtonCredits;
 let creditsScrollY = 600;
@@ -1110,6 +1114,15 @@ function setup() {
   backButtonGame = new Button(10, 10, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
+<<<<<<< Updated upstream
+=======
+  testEndGameButton = new Button(140, 20, 120, 40, "Test End", () => {
+    currentState = "CREDITS";
+    creditsScrollY = height;
+    creditsEndScreenStartedAt = null;
+  });
+  
+>>>>>>> Stashed changes
   // Positioned side-by-side at the bottom of the settings panel
   backButtonSettings = new Button(180, 430, 110, 40, "<- Return", () => {
     currentState = "MENU";
@@ -1117,6 +1130,7 @@ function setup() {
   creditsButtonSettings = new Button(310, 430, 110, 40, "Credits", () => {
     currentState = "CREDITS";
     creditsScrollY = height;
+    creditsEndScreenStartedAt = null;
   });
   helpButtonSettings = new Button(250, 310, 100, 40, "Keybinds", () => {
     showHelpMenu = !showHelpMenu;
@@ -1151,7 +1165,11 @@ function preload() {
   pipeSideOffImg = loadImage('resources/pipes/pipeSideOff.png');
   pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
   pipeSideOnMiniImg = pipeSideOnImg;
+<<<<<<< Updated upstream
   shuttleSpriteSheetImg = loadImage('resources/shuttle/shuttle.png');
+=======
+  endScreenImg = loadImage('resources/endScreen.png');
+>>>>>>> Stashed changes
   minerSpriteSheetImg = loadImage('resources/miner/miner.png');
   smelterFrontImg = loadImage('resources/smelter/smelterFront.png');
   smelterSideImg = loadImage('resources/smelter/smelterSide.png');
@@ -1292,6 +1310,18 @@ function drawMenu() {
  */
 function drawCredits() {
   background(10, 10, 15);
+  if (creditsEndScreenStartedAt != null) {
+    if (endScreenImg) {
+      image(endScreenImg, 0, 0, width, height);
+    }
+
+    if (millis() - creditsEndScreenStartedAt >= CREDITS_END_SCREEN_MS) {
+      creditsEndScreenStartedAt = null;
+      currentState = "MENU";
+    }
+
+    return;
+  }
   
   creditsScrollY -= 1; 
   
@@ -1365,8 +1395,8 @@ function drawCredits() {
 
   pop();
   
-  if (creditsScrollY < -600) {
-    currentState = "MENU";
+  if (creditsScrollY < CREDITS_END_TRIGGER_Y) {
+    creditsEndScreenStartedAt = millis();
   }
   
   if (backButtonCredits) backButtonCredits.draw();
@@ -1839,6 +1869,7 @@ function drawGame() {
   ) {
     currentState = "CREDITS";
     creditsScrollY = height;
+    creditsEndScreenStartedAt = null;
     return;
   }
 
