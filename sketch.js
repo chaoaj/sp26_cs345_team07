@@ -1114,15 +1114,12 @@ function setup() {
   backButtonGame = new Button(10, 10, 100, 40, "<-- Back", () => {
     currentState = "MENU";
   });
-<<<<<<< Updated upstream
-=======
   testEndGameButton = new Button(140, 20, 120, 40, "Test End", () => {
     currentState = "CREDITS";
     creditsScrollY = height;
     creditsEndScreenStartedAt = null;
   });
   
->>>>>>> Stashed changes
   // Positioned side-by-side at the bottom of the settings panel
   backButtonSettings = new Button(180, 430, 110, 40, "<- Return", () => {
     currentState = "MENU";
@@ -1165,11 +1162,8 @@ function preload() {
   pipeSideOffImg = loadImage('resources/pipes/pipeSideOff.png');
   pipeSideOnImg = loadImage('resources/pipes/pipeSideOn.png');
   pipeSideOnMiniImg = pipeSideOnImg;
-<<<<<<< Updated upstream
   shuttleSpriteSheetImg = loadImage('resources/shuttle/shuttle.png');
-=======
   endScreenImg = loadImage('resources/endScreen.png');
->>>>>>> Stashed changes
   minerSpriteSheetImg = loadImage('resources/miner/miner.png');
   smelterFrontImg = loadImage('resources/smelter/smelterFront.png');
   smelterSideImg = loadImage('resources/smelter/smelterSide.png');
