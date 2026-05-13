@@ -3689,13 +3689,16 @@ function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 2
 
   const targetWidth = round(drawWidth);
   let targetHeight = round(drawHeight);
+  let spriteY;
   if (completed) {
     // Keep the completed rocket's original aspect ratio so it can extend above
     // the 3x3 footprint instead of being vertically squashed into it.
     targetHeight = round((sprite.height / sprite.width) * targetWidth);
+    spriteY = round(py - 10 + drawHeight - targetHeight);
+  } else {
+    spriteY = round(py + drawHeight - targetHeight);
   }
   const spriteX = round(px + (drawWidth - targetWidth) / 2);
-  const spriteY = round(py + drawHeight - targetHeight);
 
   imageMode(CORNER);
   if (alpha < 255) {
@@ -5050,7 +5053,7 @@ function drawOptimizationHud(runtimeState) {
   const bars = [
     {
       key: "throughput",
-      label: "Throughput (harvested/stored)",
+      label: "Throughput (stored/harvested)",
       value: Number(breakdown.throughput) || 0
     },
     {
@@ -5065,7 +5068,7 @@ function drawOptimizationHud(runtimeState) {
     },
     {
       key: "recipe",
-      label: "Recipe Validity (valid/relevant)",
+      label: "Recipe Validity (valid - invalid)",
       value: Number(breakdown.recipe) || 0
     }
   ];
