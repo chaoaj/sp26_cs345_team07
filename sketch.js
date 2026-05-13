@@ -4459,14 +4459,24 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const drewShuttleSprite = 
     entity.type === ENTITY_TYPES.SHUTTLE &&
     drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
-
+  const drewRocketSprite =
+    entity.type === ENTITY_TYPES.ROCKET_SITE &&
+    drawPlacedRocketPlatformSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      255,
+      !!entity.state?.completed
+    );
   const drewCustomSprite =
     drewMinerSprite ||
     drewSmelterSprite ||
     drewConstructorSprite ||
     drewSplitterSprite ||
     drewMergerSprite ||
-    drewShuttleSprite; 
+    drewShuttleSprite ||
+    drewRocketSprite;
 
   if (!drewCustomSprite) {
     // Regular building fallback rendering when no custom sprite is used.
@@ -5022,10 +5032,11 @@ function drawOptimizationHud(runtimeState) {
     panelY + 24
   );
 
-  if (optimization.isInGraceWindow) {
-    fill(248, 214, 124);
-    text("Editing grace active", panelX + panelW - 105, panelY + 24);
-  }
+  // no room for this message in the hud
+  // if (optimization.isInGraceWindow) {
+  //   fill(248, 214, 124);
+  //   text("Editing grace active", panelX + panelW - 105, panelY + 24);
+  // }
 
   if (!expanded) {
     fill(154, 166, 186);
