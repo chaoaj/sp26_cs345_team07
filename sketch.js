@@ -1076,6 +1076,8 @@ function updateOptimizationMetrics(runtimeState, entities, dt, rocketProgress) {
  */
 function setup() {
   canvas = createCanvas(600, 600);
+  noSmooth();
+
   centerCanvas();
   textAlign(CENTER, CENTER);
 
@@ -7525,13 +7527,14 @@ function drawReactivePlayerCompanion() {
     reactivePlayerPlaceImg &&
     reactivePlayerPlaceImg.width > 0 &&
     reactivePlayerPlaceImg.height > 0;
+
   if (!hasIdleSheet && !hasPlaceFrame) {
     return;
   }
 
   const idleFrameWidth = REACTIVE_PLAYER_IDLE_FRAME_WIDTH;
   const idleFrameHeight = REACTIVE_PLAYER_IDLE_FRAME_HEIGHT;
-  const reactiveScale = 1.4;
+  const reactiveScale = 2;
   const drawWidth = round(idleFrameWidth * reactiveScale);
   const drawHeight = round(idleFrameHeight * reactiveScale);
 
@@ -7548,6 +7551,27 @@ function drawReactivePlayerCompanion() {
   imageMode(CORNER);
   noTint();
 
+  // Prevent sub-pixel interpolation from pulling in neighboring sprite-sheet pixels.
+  const canToggleSmoothing =
+    typeof drawingContext !== "undefined" &&
+    drawingContext &&
+    "imageSmoothingEnabled" in drawingContext;
+
+  const previousImageSmoothing = canToggleSmoothing
+    ? drawingContext.imageSmoothingEnabled
+    : undefined;
+
+  if (canToggleSmoothing) {
+    drawingContext.imageSmoothingEnabled = false;
+  }
+
+  const finishDraw = () => {
+    if (canToggleSmoothing) {
+      drawingContext.imageSmoothingEnabled = previousImageSmoothing;
+    }
+    pop();
+  };
+
   if (showPlaceFrame) {
     // Place frame is slightly shorter than idle; scale and bottom-align to keep stance stable.
     const placeWidth = reactivePlayerPlaceImg.width;
@@ -7556,6 +7580,7 @@ function drawReactivePlayerCompanion() {
     const placeDrawHeight = round(placeHeight * reactiveScale);
     const placeX = round(x + (drawWidth - placeDrawWidth) / 2);
     const placeY = round(height - placeDrawHeight);
+
     image(
       reactivePlayerPlaceImg,
       placeX,
@@ -7563,12 +7588,13 @@ function drawReactivePlayerCompanion() {
       placeDrawWidth,
       placeDrawHeight
     );
-    pop();
+
+    finishDraw();
     return;
   }
 
   if (!hasIdleSheet) {
-    pop();
+    finishDraw();
     return;
   }
 
@@ -7576,24 +7602,42 @@ function drawReactivePlayerCompanion() {
     1,
     floor(reactivePlayerIdleSheetImg.width / idleFrameWidth)
   );
+
   const frameCount = Math.max(
     1,
     Math.min(REACTIVE_PLAYER_IDLE_FRAMES, availableFrameCount)
   );
-  const frameIndex = floor((nowMs / 1000) * REACTIVE_PLAYER_IDLE_FPS) % frameCount;
+
+  const frameIndex =
+    floor((nowMs / 1000) * REACTIVE_PLAYER_IDLE_FPS) % frameCount;
+
+  // Crop slightly inside each frame to avoid tiny edge/corner artifacts
+  // caused by sampling neighboring frames in the sprite sheet.
+  const sourceInsetPx = Math.min(
+    1,
+    floor((Math.min(idleFrameWidth, idleFrameHeight) - 1) / 2)
+  );
+
+  const sourceX = frameIndex * idleFrameWidth + sourceInsetPx;
+  const sourceY = sourceInsetPx;
+  const sourceWidth = idleFrameWidth - sourceInsetPx * 2;
+  const sourceHeight = idleFrameHeight - sourceInsetPx * 2;
+
+  const destInset = round(sourceInsetPx * reactiveScale);
 
   image(
     reactivePlayerIdleSheetImg,
-    round(x),
-    round(yTop),
-    drawWidth,
-    drawHeight,
-    frameIndex * idleFrameWidth,
-    0,
-    idleFrameWidth,
-    idleFrameHeight
+    round(x) + destInset,
+    round(yTop) + destInset,
+    round(sourceWidth * reactiveScale),
+    round(sourceHeight * reactiveScale),
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight
   );
-  pop();
+
+  finishDraw();
 }
 
 /**
