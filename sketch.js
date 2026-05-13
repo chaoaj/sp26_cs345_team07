@@ -1077,6 +1077,7 @@ function updateOptimizationMetrics(runtimeState, entities, dt, rocketProgress) {
 function setup() {
   canvas = createCanvas(600, 600);
   noSmooth();
+  drawingContext.imageSmoothingEnabled = false;
 
   centerCanvas();
   textAlign(CENTER, CENTER);
@@ -5160,6 +5161,14 @@ function getOrBuildWorldLayer(state) {
   const { config, map } = state;
   const { tileSize, mapCols, mapRows } = config;
   const layer = createGraphics(mapCols * tileSize, mapRows * tileSize);
+
+  // Important for cached/offscreen rendering.
+  layer.noSmooth();
+
+  if (layer.drawingContext) {
+    layer.drawingContext.imageSmoothingEnabled = false;
+  }
+
   layer.noStroke();
   const depositDrawCalls = [];
 
@@ -7535,6 +7544,7 @@ function drawReactivePlayerCompanion() {
   const idleFrameWidth = REACTIVE_PLAYER_IDLE_FRAME_WIDTH;
   const idleFrameHeight = REACTIVE_PLAYER_IDLE_FRAME_HEIGHT;
   const reactiveScale = 2;
+
   const drawWidth = round(idleFrameWidth * reactiveScale);
   const drawHeight = round(idleFrameHeight * reactiveScale);
 
@@ -7551,7 +7561,6 @@ function drawReactivePlayerCompanion() {
   imageMode(CORNER);
   noTint();
 
-  // Prevent sub-pixel interpolation from pulling in neighboring sprite-sheet pixels.
   const canToggleSmoothing =
     typeof drawingContext !== "undefined" &&
     drawingContext &&
@@ -7573,7 +7582,7 @@ function drawReactivePlayerCompanion() {
   };
 
   if (showPlaceFrame) {
-    // Place frame is slightly shorter than idle; scale and bottom-align to keep stance stable.
+    // Place/smiling frame uses its real image size and bottom-aligns.
     const placeWidth = reactivePlayerPlaceImg.width;
     const placeHeight = reactivePlayerPlaceImg.height;
     const placeDrawWidth = round(placeWidth * reactiveScale);
@@ -7611,26 +7620,28 @@ function drawReactivePlayerCompanion() {
   const frameIndex =
     floor((nowMs / 1000) * REACTIVE_PLAYER_IDLE_FPS) % frameCount;
 
-  // Crop slightly inside each frame to avoid tiny edge/corner artifacts
-  // caused by sampling neighboring frames in the sprite sheet.
-  const sourceInsetPx = Math.min(
-    1,
-    floor((Math.min(idleFrameWidth, idleFrameHeight) - 1) / 2)
-  );
+  // Do NOT crop the source frame. Cropping source pixels was removing
+  // visible edge pixels from the idle sprite.
+  const sourceX = frameIndex * idleFrameWidth;
+  const sourceY = 0;
+  const sourceWidth = idleFrameWidth;
+  const sourceHeight = idleFrameHeight;
 
-  const sourceX = frameIndex * idleFrameWidth + sourceInsetPx;
-  const sourceY = sourceInsetPx;
-  const sourceWidth = idleFrameWidth - sourceInsetPx * 2;
-  const sourceHeight = idleFrameHeight - sourceInsetPx * 2;
+  // Slightly fit idle inside the same visual box, similar to the smiling/place pose.
+  // Increase to 3 or 4 if idle still feels too large.
+  const idleFitPaddingPx = 1;
 
-  const destInset = round(sourceInsetPx * reactiveScale);
+  const idleDrawX = round(x) + idleFitPaddingPx;
+  const idleDrawY = round(yTop) + idleFitPaddingPx + 1;
+  const idleDrawWidth = drawWidth - idleFitPaddingPx * 2;
+  const idleDrawHeight = drawHeight - idleFitPaddingPx * 2;
 
   image(
     reactivePlayerIdleSheetImg,
-    round(x) + destInset,
-    round(yTop) + destInset,
-    round(sourceWidth * reactiveScale),
-    round(sourceHeight * reactiveScale),
+    idleDrawX,
+    idleDrawY,
+    idleDrawWidth,
+    idleDrawHeight,
     sourceX,
     sourceY,
     sourceWidth,
