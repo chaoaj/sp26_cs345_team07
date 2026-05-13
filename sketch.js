@@ -29,6 +29,7 @@ let modularComponent = 0, shipAlloy = 0, electronics = 0;
 let playerSpriteSheetFrontIdle, playerSpriteSheetFrontMove;
 let playerSpriteSheetBackIdle, playerSpriteSheetBackMove;
 let playerSpriteSheetSideIdle, playerSpriteSheetSideMove;
+let reactivePlayerIdleSheetImg, reactivePlayerPlaceImg;
 
 let pipeFrontOffImg, pipeFrontOnImg, pipeCurve1OffImg, pipeCurve1OnImg, pipeCurve2OffImg, pipeCurve2OnImg, pipeSideOffImg, pipeSideOnImg, pipeSideOnMiniImg, minerSpriteSheetImg, smelterFrontImg, smelterSideImg, smelterBackImg, constructorFrontImg, constructorSideImg, constructorBackImg, splitterFrontImg, splitterBackImg, splitterSideImg, mergerFrontImg, mergerBackImg, mergerSideImg, rocketPlatformImg, rocketPlatformBuiltImg;
 let ironDepositImg, copperDepositImg, heliumDepositImg;
@@ -45,6 +46,13 @@ let currentAnimation = "idle";
 let currentFrame = 0;
 let facingLeft = false;
 const animationFPS = 10;
+const REACTIVE_PLAYER_IDLE_FRAME_WIDTH = 63;
+const REACTIVE_PLAYER_IDLE_FRAME_HEIGHT = 70;
+const REACTIVE_PLAYER_IDLE_FRAMES = 60;
+const REACTIVE_PLAYER_IDLE_FPS = 12;
+const REACTIVE_PLAYER_PLACE_DURATION_MS = 500;
+let reactivePlayerPlacePoseUntilMs = 0;
+
 const ROCKET_HALF_WIDTH_TILES = 1;   // 3 tiles wide
 const ROCKET_HALF_HEIGHT_TILES = 1;  // 3 tiles tall
 
@@ -63,6 +71,11 @@ const spriteDimensions = {
   }
 };
 
+/**
+ * Get entity fill rgb.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntityFillRgb(entityType) {
   if (entityType === ENTITY_TYPES.MINER) return [90, 170, 90];
   if (entityType === ENTITY_TYPES.SMELTER) return [200, 120, 80];
@@ -172,6 +185,27 @@ let backgroundMusicScheduleToken = 0;
 let backgroundMusicLastVolume = null;
 let backgroundMusicWarnedMissing = false;
 
+const OPTIMIZATION_WINDOW_SECONDS = 30;
+const OPTIMIZATION_FLOW_WINDOW_SECONDS = 6;
+const OPTIMIZATION_BUILD_GRACE_MS = 2500;
+const OPTIMIZATION_WEIGHT_THROUGHPUT = 0.4;
+const OPTIMIZATION_WEIGHT_UTILIZATION = 0.2;
+const OPTIMIZATION_WEIGHT_FLOW = 0.2;
+const OPTIMIZATION_WEIGHT_RECIPE = 0.1;
+const OPTIMIZATION_WEIGHT_COST = 0.1;
+const OPTIMIZATION_COST_TARGET_RATE_PER_ENTITY = 0.35;
+const OPTIMIZATION_COST_PREBUILD_FLOOR = 0.08;
+const OPTIMIZATION_PANEL_WIDTH = 220;
+const OPTIMIZATION_PANEL_COLLAPSED_H = 48;
+const OPTIMIZATION_PANEL_EXPANDED_H = 262;
+const OPTIMIZATION_MAX_WEAKPOINT_LINES = 5;
+
+/**
+ * Random Int In Range.
+ * @param {*} minInclusive - Input value used by this operation.
+ * @param {*} maxInclusive - Input value used by this operation.
+ * @returns {*} Computed result value.
+ */
 function randomIntInRange(minInclusive, maxInclusive) {
   const min = Number(minInclusive) || 0;
   const max = Number(maxInclusive) || min;
@@ -180,12 +214,20 @@ function randomIntInRange(minInclusive, maxInclusive) {
   return Math.floor(min + Math.random() * (delta + 1));
 }
 
+/**
+ * Get music slider volume.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMusicSliderVolume() {
   const raw = Number(typeof musicVolume === "number" ? musicVolume : 0.5);
   if (!Number.isFinite(raw)) return 0.5;
   return Math.max(0, Math.min(1, raw));
 }
 
+/**
+ * Apply background music volume.
+ * @returns {void} No return value.
+ */
 function applyBackgroundMusicVolume() {
   const volume = getMusicSliderVolume();
   if (backgroundMusicLastVolume === volume) {
@@ -199,6 +241,10 @@ function applyBackgroundMusicVolume() {
   }
 }
 
+/**
+ * Bootstrap Background Music.
+ * @returns {object} Computed object result.
+ */
 function bootstrapBackgroundMusic() {
   if (backgroundMusicBootstrapped) {
     return;
@@ -225,6 +271,11 @@ function bootstrapBackgroundMusic() {
   });
 }
 
+/**
+ * Resolve track post delay ms.
+ * @param {*} track - Background music track descriptor.
+ * @returns {*} Computed value for the requested operation.
+ */
 function resolveTrackPostDelayMs(track) {
   if (!track) return 0;
   if (typeof track.postDelayMs === "function") {
@@ -235,6 +286,10 @@ function resolveTrackPostDelayMs(track) {
   return Number.isFinite(fixed) ? Math.max(0, Math.floor(fixed)) : 0;
 }
 
+/**
+ * Clear background music timer.
+ * @returns {void} No return value.
+ */
 function clearBackgroundMusicTimer() {
   if (backgroundMusicTimerId != null) {
     clearTimeout(backgroundMusicTimerId);
@@ -242,6 +297,12 @@ function clearBackgroundMusicTimer() {
   }
 }
 
+/**
+ * Schedule background music track.
+ * @param {*} index - Zero-based index value.
+ * @param {*} delayMs - Delay duration in milliseconds.
+ * @returns {void} No return value.
+ */
 function scheduleBackgroundMusicTrack(index, delayMs) {
   clearBackgroundMusicTimer();
   const safeDelay = Math.max(0, Number(delayMs) || 0);
@@ -254,6 +315,11 @@ function scheduleBackgroundMusicTrack(index, delayMs) {
   }, safeDelay);
 }
 
+/**
+ * On Background Music Track Ended.
+ * @param {*} endedIndex - Index of the track that finished playing.
+ * @returns {void} No return value.
+ */
 function onBackgroundMusicTrackEnded(endedIndex) {
   if (!backgroundMusicStarted || endedIndex !== backgroundMusicCurrentIndex) {
     return;
@@ -264,6 +330,11 @@ function onBackgroundMusicTrackEnded(endedIndex) {
   scheduleBackgroundMusicTrack(nextIndex, waitMs);
 }
 
+/**
+ * Play background music track.
+ * @param {*} index - Zero-based index value.
+ * @returns {void} No return value.
+ */
 function playBackgroundMusicTrack(index) {
   if (!backgroundMusicPlayers.length) {
     return;
@@ -303,6 +374,10 @@ function playBackgroundMusicTrack(index) {
   }
 }
 
+/**
+ * Request background music start.
+ * @returns {void} No return value.
+ */
 function requestBackgroundMusicStart() {
   bootstrapBackgroundMusic();
   if (backgroundMusicStarted || backgroundMusicPlayers.length === 0) {
@@ -318,6 +393,683 @@ function requestBackgroundMusicStart() {
   playBackgroundMusicTrack(0);
 }
 
+/**
+ * Clamp a numeric value into [0, 1].
+ * @param {*} value - Value to clamp.
+ * @returns {number} Clamped value between 0 and 1.
+ */
+function clampZeroToOne(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  if (numeric <= 0) return 0;
+  if (numeric >= 1) return 1;
+  return numeric;
+}
+
+/**
+ * Build the initial optimization-metric state object.
+ * @returns {object} Fresh optimization state with rolling-window accumulators.
+ */
+function createOptimizationState() {
+  return {
+    windowSeconds: OPTIMIZATION_WINDOW_SECONDS,
+    sampleDurationTotal: 0,
+    sampleQueue: [],
+    weightedSums: {
+      throughput: 0,
+      utilization: 0,
+      flow: 0,
+      recipe: 0,
+      cost: 0
+    },
+    graceUntilMs: 0,
+    isInGraceWindow: false,
+    isPanelExpanded: false,
+    liveScore: 100,
+    displayScore: 100,
+    grade: "A+",
+    breakdown: {
+      throughput: 1,
+      utilization: 1,
+      flow: 1,
+      recipe: 1,
+      cost: 1
+    },
+    latest: null,
+    bottlenecks: []
+  };
+}
+
+/**
+ * Ensure optimization state exists on the active run state.
+ * @param {*} runtimeState - Active drawGame.state object.
+ * @returns {object|null} Optimization state or null when runtime state is unavailable.
+ */
+function ensureOptimizationState(runtimeState) {
+  if (!runtimeState) {
+    return null;
+  }
+  if (!runtimeState.optimization) {
+    runtimeState.optimization = createOptimizationState();
+  }
+  return runtimeState.optimization;
+}
+
+/**
+ * Convert a score (0-100) into a grade label.
+ * @param {*} score - Numeric score.
+ * @returns {string} Grade text label.
+ */
+function getOptimizationGradeLabel(score) {
+  const s = Number(score) || 0;
+  if (s >= 95) return "S";
+  if (s >= 90) return "A";
+  if (s >= 80) return "B";
+  if (s >= 70) return "C";
+  if (s >= 60) return "D";
+  if (s >= 50) return "F";
+  return "F-";
+}
+
+/**
+ * Get a display color for a score tier.
+ * @param {*} score - Numeric score.
+ * @returns {number[]} RGB tuple for score tier coloring.
+ */
+function getOptimizationScoreColor(score) {
+  const s = Number(score) || 0;
+  if (s < 50) return [214, 84, 78];
+  if (s < 75) return [236, 185, 67];
+  return [95, 212, 120];
+}
+
+/**
+ * Estimate installed factory output capacity for a producer entity.
+ * @param {*} entity - Target entity instance.
+ * @returns {number} Estimated nominal output rate for this entity.
+ */
+function getFactoryNominalOutputRate(entity) {
+  const type = entity?.type;
+  const state = entity?.state;
+  if (!type || !state) {
+    return 0;
+  }
+
+  if (type === ENTITY_TYPES.MINER) {
+    if (!state.outputType) return 0;
+    // Miner implementation currently uses 2/sec for ore and helium in state logic.
+    return 2;
+  }
+
+  if (type === ENTITY_TYPES.SMELTER) {
+    const hasRecipeContext = !!state.inputType || !!state.outputType || !!state.currentRecipe;
+    return hasRecipeContext ? 1 : 0;
+  }
+
+  if (type === ENTITY_TYPES.CONSTRUCTOR) {
+    if (state.outputType && Number(state.outputCount) > 0) {
+      return Math.max(0, Number(state.outputCount) || 0);
+    }
+    const hasInputContext =
+      Array.isArray(state.inputSlots) &&
+      state.inputSlots.some((slot) => !!slot?.type);
+    return hasInputContext ? 1 : 0;
+  }
+
+  if (type === ENTITY_TYPES.EXTRACTOR) {
+    if (!state.outputType) return 0;
+    const rate = Number(state.outputRate);
+    return Number.isFinite(rate) && rate > 0 ? rate : 1;
+  }
+
+  return 0;
+}
+
+/**
+ * Add a sample to the rolling optimization window and trim overflow.
+ * @param {*} optimizationState - Optimization state object.
+ * @param {*} sample - Subscore sample object.
+ * @param {*} dt - Sample duration in seconds.
+ * @returns {void} No return value.
+ */
+function pushOptimizationRollingSample(optimizationState, sample, dt) {
+  if (!optimizationState || !sample) {
+    return;
+  }
+  const duration = Number(dt);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return;
+  }
+
+  const normalizedSample = {
+    dt: duration,
+    throughput: clampZeroToOne(sample.throughput),
+    utilization: clampZeroToOne(sample.utilization),
+    flow: clampZeroToOne(sample.flow),
+    recipe: clampZeroToOne(sample.recipe),
+    cost: clampZeroToOne(sample.cost)
+  };
+
+  optimizationState.sampleQueue.push(normalizedSample);
+  optimizationState.sampleDurationTotal += normalizedSample.dt;
+  optimizationState.weightedSums.throughput += normalizedSample.throughput * normalizedSample.dt;
+  optimizationState.weightedSums.utilization += normalizedSample.utilization * normalizedSample.dt;
+  optimizationState.weightedSums.flow += normalizedSample.flow * normalizedSample.dt;
+  optimizationState.weightedSums.recipe += normalizedSample.recipe * normalizedSample.dt;
+  optimizationState.weightedSums.cost += normalizedSample.cost * normalizedSample.dt;
+
+  const maxDuration = Math.max(1, Number(optimizationState.windowSeconds) || OPTIMIZATION_WINDOW_SECONDS);
+  while (optimizationState.sampleDurationTotal - maxDuration > 1e-6 && optimizationState.sampleQueue.length > 0) {
+    const overflow = optimizationState.sampleDurationTotal - maxDuration;
+    const head = optimizationState.sampleQueue[0];
+    if (!head) {
+      break;
+    }
+
+    const consume = Math.min(head.dt, overflow);
+    optimizationState.sampleDurationTotal -= consume;
+    optimizationState.weightedSums.throughput -= head.throughput * consume;
+    optimizationState.weightedSums.utilization -= head.utilization * consume;
+    optimizationState.weightedSums.flow -= head.flow * consume;
+    optimizationState.weightedSums.recipe -= head.recipe * consume;
+    optimizationState.weightedSums.cost -= head.cost * consume;
+    head.dt -= consume;
+
+    if (head.dt <= 1e-6) {
+      optimizationState.sampleQueue.shift();
+    }
+  }
+
+  optimizationState.weightedSums.throughput = Math.max(0, optimizationState.weightedSums.throughput);
+  optimizationState.weightedSums.utilization = Math.max(0, optimizationState.weightedSums.utilization);
+  optimizationState.weightedSums.flow = Math.max(0, optimizationState.weightedSums.flow);
+  optimizationState.weightedSums.recipe = Math.max(0, optimizationState.weightedSums.recipe);
+  optimizationState.weightedSums.cost = Math.max(0, optimizationState.weightedSums.cost);
+}
+
+/**
+ * Compute rolling-average subscores from the optimization sample window.
+ * @param {*} optimizationState - Optimization state object.
+ * @param {*} fallbackSample - Instant subscores used when the rolling window is empty.
+ * @returns {object} Rolling-average subscores in [0, 1].
+ */
+function getOptimizationRollingBreakdown(optimizationState, fallbackSample) {
+  const fallback = fallbackSample || {};
+  const totalDuration = Number(optimizationState?.sampleDurationTotal) || 0;
+  if (totalDuration <= 1e-6) {
+    return {
+      throughput: clampZeroToOne(fallback.throughput),
+      utilization: clampZeroToOne(fallback.utilization),
+      flow: clampZeroToOne(fallback.flow),
+      recipe: clampZeroToOne(fallback.recipe),
+      cost: clampZeroToOne(fallback.cost)
+    };
+  }
+
+  return {
+    throughput: clampZeroToOne(optimizationState.weightedSums.throughput / totalDuration),
+    utilization: clampZeroToOne(optimizationState.weightedSums.utilization / totalDuration),
+    flow: getRecentOptimizationMetricAverage(
+      optimizationState,
+      "flow",
+      OPTIMIZATION_FLOW_WINDOW_SECONDS,
+      fallback.flow
+    ),
+    recipe: clampZeroToOne(optimizationState.weightedSums.recipe / totalDuration),
+    cost: clampZeroToOne(optimizationState.weightedSums.cost / totalDuration)
+  };
+}
+
+/**
+ * Compute a trailing-window average for a specific optimization metric.
+ * @param {*} optimizationState - Optimization state object.
+ * @param {*} metricKey - Sample field name (for example: "flow").
+ * @param {*} windowSeconds - Trailing window duration in seconds.
+ * @param {*} fallbackValue - Value used when no recent samples exist.
+ * @returns {number} Clamped trailing average in [0, 1].
+ */
+function getRecentOptimizationMetricAverage(
+  optimizationState,
+  metricKey,
+  windowSeconds,
+  fallbackValue
+) {
+  const queue = Array.isArray(optimizationState?.sampleQueue)
+    ? optimizationState.sampleQueue
+    : [];
+  const targetWindow = Math.max(0, Number(windowSeconds) || 0);
+  if (queue.length === 0 || targetWindow <= 1e-6) {
+    return clampZeroToOne(fallbackValue);
+  }
+
+  let remaining = targetWindow;
+  let weightedTotal = 0;
+  let usedDuration = 0;
+
+  for (let i = queue.length - 1; i >= 0 && remaining > 1e-6; i--) {
+    const sample = queue[i];
+    const sampleDt = Math.max(0, Number(sample?.dt) || 0);
+    if (sampleDt <= 1e-6) {
+      continue;
+    }
+    const useDt = Math.min(sampleDt, remaining);
+    const metricValue = clampZeroToOne(sample?.[metricKey]);
+    weightedTotal += metricValue * useDt;
+    usedDuration += useDt;
+    remaining -= useDt;
+  }
+
+  if (usedDuration <= 1e-6) {
+    return clampZeroToOne(fallbackValue);
+  }
+  return clampZeroToOne(weightedTotal / usedDuration);
+}
+
+/**
+ * Compute instantaneous optimization subscores and bottleneck diagnostics.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} rocketProgress - Rocket progress summary from this frame.
+ * @returns {object} Instant metric snapshot.
+ */
+function computeInstantOptimizationSnapshot(entities, rocketProgress) {
+  const list = Array.isArray(entities) ? entities : [];
+  let tubeCount = 0;
+  let flowingTubeCount = 0;
+  let blockedTubeCount = 0;
+  let openPortTubeCount = 0;
+  let machineCount = 0;
+  let activeMachineCount = 0;
+  let relevantRecipeMachineCount = 0;
+  let validRecipeMachineCount = 0;
+  let placeableEntityCount = 0;
+  let factoryProducerCount = 0;
+  let throughputPotentialRate = 0;
+  let throughputActualRate = 0;
+
+  for (const entity of list) {
+    const type = entity?.type;
+    const state = entity?.state || null;
+    if (!type || !state) {
+      continue;
+    }
+
+    const isSpecialFixedEntity =
+      type === ENTITY_TYPES.ROCKET_SITE || type === ENTITY_TYPES.SHUTTLE;
+    if (!isSpecialFixedEntity) {
+      placeableEntityCount += 1;
+    }
+
+    if (type === ENTITY_TYPES.TUBE) {
+      tubeCount += 1;
+      if (state.flowState === "flowing") {
+        flowingTubeCount += 1;
+      } else if (state.flowState === "blocked") {
+        blockedTubeCount += 1;
+      }
+      if (state.hasOpenPort) {
+        openPortTubeCount += 1;
+      }
+      continue;
+    }
+
+    if (isSpecialFixedEntity) {
+      continue;
+    }
+
+    machineCount += 1;
+    if (state.isActive) {
+      activeMachineCount += 1;
+    }
+
+    // Total capacity is based on raw miner harvesting only.
+    const nominalFactoryRate = getFactoryNominalOutputRate(entity);
+    if (nominalFactoryRate > 0) {
+      factoryProducerCount += 1;
+      if (type === ENTITY_TYPES.MINER) {
+        throughputPotentialRate += nominalFactoryRate;
+      }
+    }
+
+    if (type !== ENTITY_TYPES.SMELTER && type !== ENTITY_TYPES.CONSTRUCTOR) {
+      continue;
+    }
+
+    const hasInputSignal = type === ENTITY_TYPES.SMELTER
+      ? (Number(state.inputRate) > 0 || !!state.inputType)
+      : (
+          Number(state.inputRate) > 0 ||
+          (Array.isArray(state.inputSlots) &&
+            state.inputSlots.some((slot) => !!slot?.type))
+        );
+
+    if (!hasInputSignal) {
+      continue;
+    }
+
+    relevantRecipeMachineCount += 1;
+    const validRecipe =
+      !!state.isActive &&
+      !!state.outputType &&
+      Number(state.outputRate) > 0;
+    if (validRecipe) {
+      validRecipeMachineCount += 1;
+    }
+  }
+
+  throughputPotentialRate = Math.max(0, throughputPotentialRate);
+  const rocketRequiredTypes = new Set();
+  const rocketRequired = rocketProgress?.rocket?.state?.required;
+  if (rocketRequired && typeof rocketRequired === "object") {
+    for (const resourceType of Object.keys(rocketRequired)) {
+      if (resourceType) {
+        rocketRequiredTypes.add(resourceType);
+      }
+    }
+  }
+
+  const entitiesById = new Map(list.map((entity) => [entity.id, entity]));
+  const tubeSourcesByTarget = getTubeSourcesByTarget(list);
+  const sinkSourceIds = new Set();
+  const countedSinkComponents = new Set();
+
+  for (const entity of list) {
+    if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
+      continue;
+    }
+    const tubeState = entity.state || null;
+    if (!tubeState?.isConnected) {
+      continue;
+    }
+    const sourceId = tubeState.fromEntityId;
+    const targetId = tubeState.toEntityId;
+    if (!sourceId || !targetId) {
+      continue;
+    }
+    const outputType = tubeState.carriedItem || null;
+    const flowRate = Math.max(0, Number(tubeState.outputRate) || 0);
+    if (!outputType || flowRate <= 0) {
+      continue;
+    }
+    const targetEntity = entitiesById.get(targetId);
+    const targetType = targetEntity?.type || null;
+    if (
+      targetType !== ENTITY_TYPES.SHUTTLE &&
+      targetType !== ENTITY_TYPES.ROCKET_SITE
+    ) {
+      continue;
+    }
+
+    // Rocket-required outputs only count when delivered to the rocket.
+    if (
+      targetType === ENTITY_TYPES.SHUTTLE &&
+      rocketRequiredTypes.has(outputType)
+    ) {
+      continue;
+    }
+    // Rocket intake only counts required output types.
+    if (
+      targetType === ENTITY_TYPES.ROCKET_SITE &&
+      rocketRequiredTypes.size > 0 &&
+      !rocketRequiredTypes.has(outputType)
+    ) {
+      continue;
+    }
+
+    const componentKey = tubeState.componentId != null
+      ? `c:${tubeState.componentId}`
+      : `t:${entity.id}`;
+    if (countedSinkComponents.has(componentKey)) {
+      continue;
+    }
+    countedSinkComponents.add(componentKey);
+    sinkSourceIds.add(sourceId);
+  }
+
+  const contributingMinerIds = new Set();
+  const visitedEntities = new Set();
+  const upstreamQueue = Array.from(sinkSourceIds);
+  while (upstreamQueue.length > 0) {
+    const entityId = upstreamQueue.pop();
+    if (!entityId || visitedEntities.has(entityId)) {
+      continue;
+    }
+    visitedEntities.add(entityId);
+
+    const sourceEntity = entitiesById.get(entityId);
+    if (!sourceEntity) {
+      continue;
+    }
+    if (sourceEntity.type === ENTITY_TYPES.MINER) {
+      contributingMinerIds.add(sourceEntity.id);
+      continue;
+    }
+
+    const upstreamSources = tubeSourcesByTarget.get(entityId);
+    if (!upstreamSources) {
+      continue;
+    }
+    for (const upstreamId of upstreamSources) {
+      if (!visitedEntities.has(upstreamId)) {
+        upstreamQueue.push(upstreamId);
+      }
+    }
+  }
+
+  let sinkThroughputRate = 0;
+  for (const minerId of contributingMinerIds) {
+    const miner = entitiesById.get(minerId);
+    if (!miner || miner.type !== ENTITY_TYPES.MINER) {
+      continue;
+    }
+    const minerState = miner.state || null;
+    if (!minerState?.isActive || !minerState.outputType) {
+      continue;
+    }
+    sinkThroughputRate += Math.max(0, Number(minerState.outputRate) || 0);
+  }
+
+  throughputActualRate = Math.max(0, sinkThroughputRate);
+  if (throughputPotentialRate > 0) {
+    throughputActualRate = Math.min(throughputActualRate, throughputPotentialRate);
+  }
+  const rocketCompleted = !!rocketProgress?.completed;
+
+  let throughputScore = 1;
+  if (throughputPotentialRate > 0) {
+    throughputScore = clampZeroToOne(throughputActualRate / throughputPotentialRate);
+  } else if (factoryProducerCount > 0 || placeableEntityCount > 0) {
+    throughputScore = 0;
+  }
+
+  const utilizationScore = machineCount > 0
+    ? clampZeroToOne(activeMachineCount / machineCount)
+    : 1;
+
+  let flowScore = 1;
+  if (tubeCount > 0) {
+    const flowRatio = flowingTubeCount / tubeCount;
+    const blockedPenalty = blockedTubeCount / tubeCount;
+    const openPenalty = openPortTubeCount / (tubeCount * 2);
+    flowScore = clampZeroToOne(flowRatio - blockedPenalty * 0.35 - openPenalty * 0.5);
+  }
+
+  const recipeScore = relevantRecipeMachineCount > 0
+    ? clampZeroToOne(validRecipeMachineCount / relevantRecipeMachineCount)
+    : 1;
+
+  const expectedRate = Math.max(
+    0.1,
+    placeableEntityCount * OPTIMIZATION_COST_TARGET_RATE_PER_ENTITY
+  );
+  const costBaseScore = placeableEntityCount > 0
+    ? clampZeroToOne(throughputActualRate / expectedRate)
+    : 1;
+  const costScore = (!rocketCompleted && placeableEntityCount > 0)
+    ? Math.max(OPTIMIZATION_COST_PREBUILD_FLOOR, costBaseScore)
+    : costBaseScore;
+
+  const idleMachineCount = Math.max(0, machineCount - activeMachineCount);
+  const invalidRecipeMachineCount = Math.max(
+    0,
+    relevantRecipeMachineCount - validRecipeMachineCount
+  );
+
+  const bottlenecks = [];
+  if (factoryProducerCount === 0 && placeableEntityCount > 0) {
+    bottlenecks.push({
+      severity: 1,
+      text: "No factory producers are configured."
+    });
+  }
+  if (factoryProducerCount > 0 && throughputActualRate <= 0.001) {
+    bottlenecks.push({
+      severity: 0.95,
+      text: "Factory output is near zero."
+    });
+  }
+  if (blockedTubeCount > 0 && tubeCount > 0) {
+    bottlenecks.push({
+      severity: blockedTubeCount / tubeCount,
+      text: `${blockedTubeCount} blocked tube${blockedTubeCount === 1 ? "" : "s"}.`
+    });
+  }
+  if (openPortTubeCount > 0 && tubeCount > 0) {
+    bottlenecks.push({
+      severity: openPortTubeCount / tubeCount,
+      text: `${openPortTubeCount} tube${openPortTubeCount === 1 ? "" : "s"} with open ports.`
+    });
+  }
+  if (idleMachineCount > 0 && machineCount > 0) {
+    bottlenecks.push({
+      severity: idleMachineCount / machineCount,
+      text: `${idleMachineCount} idle machine${idleMachineCount === 1 ? "" : "s"}.`
+    });
+  }
+  if (invalidRecipeMachineCount > 0 && relevantRecipeMachineCount > 0) {
+    bottlenecks.push({
+      severity: invalidRecipeMachineCount / relevantRecipeMachineCount,
+      text: `${invalidRecipeMachineCount} machine${invalidRecipeMachineCount === 1 ? "" : "s"} with invalid recipe ratios.`
+    });
+  }
+  bottlenecks.sort((a, b) => (b.severity || 0) - (a.severity || 0));
+
+  return {
+    throughputScore,
+    utilizationScore,
+    flowScore,
+    recipeScore,
+    costScore,
+    rocketCompleted,
+    throughputActualRate,
+    throughputPotentialRate,
+    counts: {
+      placeableEntityCount,
+      machineCount,
+      activeMachineCount,
+      factoryProducerCount,
+      tubeCount,
+      flowingTubeCount,
+      blockedTubeCount,
+      openPortTubeCount,
+      relevantRecipeMachineCount,
+      validRecipeMachineCount
+    },
+    bottlenecks: bottlenecks.slice(0, 3)
+  };
+}
+
+/**
+ * Activate the score grace window after build/edit operations.
+ * @param {*} durationMs - Grace duration in milliseconds.
+ * @returns {void} No return value.
+ */
+function triggerOptimizationBuildGraceWindow(durationMs = OPTIMIZATION_BUILD_GRACE_MS) {
+  if (!drawGame.state) {
+    return;
+  }
+  const optimization = ensureOptimizationState(drawGame.state);
+  if (!optimization) {
+    return;
+  }
+  const duration = Math.max(0, Number(durationMs) || 0);
+  optimization.graceUntilMs = Math.max(
+    Number(optimization.graceUntilMs) || 0,
+    millis() + duration
+  );
+}
+
+/**
+ * Update rolling optimization metrics and maintain display state.
+ * @param {*} runtimeState - Active drawGame.state object.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} dt - Frame delta time in seconds.
+ * @param {*} rocketProgress - Rocket progress summary from this frame.
+ * @returns {void} No return value.
+ */
+function updateOptimizationMetrics(runtimeState, entities, dt, rocketProgress) {
+  const optimization = ensureOptimizationState(runtimeState);
+  if (!optimization) {
+    return;
+  }
+
+  const instant = computeInstantOptimizationSnapshot(entities, rocketProgress);
+  optimization.latest = instant;
+
+  pushOptimizationRollingSample(
+    optimization,
+    {
+      throughput: instant.throughputScore,
+      utilization: instant.utilizationScore,
+      flow: instant.flowScore,
+      recipe: instant.recipeScore,
+      cost: instant.costScore
+    },
+    dt
+  );
+
+  const rolling = getOptimizationRollingBreakdown(optimization, {
+    throughput: instant.throughputScore,
+    utilization: instant.utilizationScore,
+    flow: instant.flowScore,
+    recipe: instant.recipeScore,
+    cost: instant.costScore
+  });
+
+  const weightedScore =
+    rolling.throughput * OPTIMIZATION_WEIGHT_THROUGHPUT +
+    rolling.utilization * OPTIMIZATION_WEIGHT_UTILIZATION +
+    rolling.flow * OPTIMIZATION_WEIGHT_FLOW +
+    rolling.recipe * OPTIMIZATION_WEIGHT_RECIPE +
+    rolling.cost * OPTIMIZATION_WEIGHT_COST;
+  const liveScore = clampZeroToOne(weightedScore) * 100;
+
+  optimization.liveScore = liveScore;
+  const previousDisplay = Number(optimization.displayScore);
+  if (!Number.isFinite(previousDisplay)) {
+    optimization.displayScore = liveScore;
+  }
+
+  const now = millis();
+  optimization.isInGraceWindow = now < (Number(optimization.graceUntilMs) || 0);
+  if (optimization.isInGraceWindow) {
+    // During edits, keep the score from dropping abruptly while still allowing improvements.
+    optimization.displayScore = Math.max(Number(optimization.displayScore) || liveScore, liveScore);
+  } else {
+    optimization.displayScore = liveScore;
+  }
+
+  optimization.breakdown = rolling;
+  optimization.grade = getOptimizationGradeLabel(optimization.displayScore);
+  optimization.bottlenecks = instant.bottlenecks || [];
+}
+
+// FIXED: Moved Credits button initialization to the Settings menu layout and restored Quit button position
+/**
+ * Initialize global UI, audio, and menu button state for the sketch runtime.
+ * @returns {void} No return value.
+ */
 function setup() {
   canvas = createCanvas(600, 600);
   centerCanvas();
@@ -380,6 +1132,10 @@ function setup() {
   bootstrapBackgroundMusic();
 }
 
+/**
+ * Load image and audio assets required by menus, entities, and UI overlays.
+ * @returns {void} No return value.
+ */
 function preload() {
   bgTiles[0] = loadImage('resources/tiles/tile1.png');
   bgTiles[1] = loadImage('resources/tiles/tile2.png');
@@ -436,6 +1192,8 @@ function preload() {
   playerSpriteSheetFrontMove = loadImage('resources/player/pFrontMove.png');
   playerSpriteSheetSideIdle = loadImage('resources/player/pSideIdle.png');
   playerSpriteSheetSideMove = loadImage('resources/player/pSideMove.png');
+  reactivePlayerIdleSheetImg = loadImage('resources/reactivePlayer/reactivePlayerIdle.png');
+  reactivePlayerPlaceImg = loadImage('resources/reactivePlayer/ReactivePlayerPlace.png');
   hotbarOutlineImg = loadImage('resources/UI/hotbarFrame.png');
   copperDepositImg = loadImage('resources/resourceNodes/copperDeposit.png');
   ironDepositImg = loadImage('resources/resourceNodes/ironDeposit.png');
@@ -446,6 +1204,10 @@ function preload() {
   movementSound = loadSound('resources/sounds/Movement.wav');
 }
 
+/**
+ * Center canvas.
+ * @returns {void} No return value.
+ */
 function centerCanvas() {
   if (!canvas) {
     return;
@@ -455,16 +1217,27 @@ function centerCanvas() {
   canvas.position(x, y);
 }
 
+/**
+ * Window Resized.
+ * @returns {void} No return value.
+ */
 function windowResized() {
   centerCanvas();
 }
 
+/**
+ * Render the current top-level game state and route to the active screen renderer.
+ * @returns {void} No return value.
+ */
 function draw() {
   applyBackgroundMusicVolume();
   cursor('default');
   if (currentState == "MENU") {
     drawMenu();
     hideSettingsUI();
+    if (!isMoving && movementSound && movementSound.isPlaying()) {
+      movementSound.stop();
+    }
   } else if (currentState == "GAME") {
     background(0);
     drawGame();
@@ -478,6 +1251,10 @@ function draw() {
 }
 
 // FIXED: Removed the Credits button from the main menu rendering
+/**
+ * Draw menu.
+ * @returns {void} No return value.
+ */
 function drawMenu() {
   if (titlePage) {
     image(titlePage, 0, 0, width, height);
@@ -509,6 +1286,10 @@ function drawMenu() {
   pop();
 }
 
+/**
+ * Draw credits.
+ * @returns {void} No return value.
+ */
 function drawCredits() {
   background(10, 10, 15);
   
@@ -591,6 +1372,12 @@ function drawCredits() {
   if (backButtonCredits) backButtonCredits.draw();
 }
 
+/**
+ * Get rocket footprint tiles.
+ * @param {*} centerTileX - Input value used by this operation.
+ * @param {*} centerTileY - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getRocketFootprintTiles(centerTileX, centerTileY) {
   const tiles = [];
   for (let dy = -ROCKET_HALF_HEIGHT_TILES; dy <= ROCKET_HALF_HEIGHT_TILES; dy++) {
@@ -605,6 +1392,10 @@ function getRocketFootprintTiles(centerTileX, centerTileY) {
   return tiles;
 }
 
+/**
+ * Reset Runtime Game State For New Run.
+ * @returns {void} No return value.
+ */
 function resetRuntimeGameStateForNewRun() {
   drawGame.state = null;
   selectedHotbarSlot = 0;
@@ -624,8 +1415,13 @@ function resetRuntimeGameStateForNewRun() {
   modularComponent = 0;
   shipAlloy = 0;
   electronics = 0;
+  reactivePlayerPlacePoseUntilMs = 0;
 }
 
+/**
+ * Draw end game.
+ * @returns {void} No return value.
+ */
 function drawEndGame() {
   background(20, 28, 44);
 
@@ -644,11 +1440,16 @@ function drawEndGame() {
   pop();
 }
 
+/**
+ * Run one gameplay frame including simulation updates, camera, world rendering, and UI.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawGame() {
   const restrictedMode = (typeof isRestrictedModeEnabled === "function")
     ? isRestrictedModeEnabled()
     : false;
 
+  // Rebuild the cached run state whenever the mode flag changes between frames.
   if (
     drawGame.state &&
     drawGame.state.isRestrictedMode !== restrictedMode
@@ -656,6 +1457,7 @@ function drawGame() {
     drawGame.state = null;
   }
 
+  // One-time world bootstrap for the active run.
   if (!drawGame.state) {
     const tileSize = 32;
     const mapCols = 75;
@@ -784,6 +1586,7 @@ function drawGame() {
       }
     };
 
+    // Apply mode-specific resource seeding after helper placement utilities are prepared.
     if (restrictedMode) {
       applyRestrictedModeResourceLayout(
         tiles,
@@ -840,6 +1643,7 @@ function drawGame() {
       placeResourceNodeBlock2x2(rocketRightCopperX, rocketRightCopperY, "copper");
     }
 
+    // Spawn and stamp the fixed rocket platform while preserving its input-port tiles for tube placement.
     const rocketEntity = createEntity(
       ENTITY_TYPES.ROCKET_SITE,
       rocketTileX,
@@ -917,6 +1721,7 @@ function drawGame() {
         minimapCols: null,
         minimapRows: null
       },
+      optimization: createOptimizationState(),
       animationTimer: 0,
       restrictedBuildRestrictionsDisabled: false
     };
@@ -958,11 +1763,13 @@ function drawGame() {
   if (feedback.rocketCompletionModalText == null) {
     feedback.rocketCompletionModalText = "";
   }
+  ensureOptimizationState(drawGame.state);
 
   if (drawGame.state.player.facing === undefined) {
     drawGame.state.player.facing = "N";
   }
 
+  // Resolve movement intent from input, then update motion and animation state.
   let moveX = 0;
   let moveY = 0;
   if (keyIsDown(65)) moveX -= 1;
@@ -985,6 +1792,7 @@ function drawGame() {
     if (movementSound && movementSound.isPlaying()) {
       movementSound.stop();
     }
+    else {}
   }
 
   const prevDirection = currentDirection;
@@ -1013,11 +1821,13 @@ function drawGame() {
   player.x = constrain(player.x, mapOriginX + halfPlayer, mapOriginX + mapWidth - halfPlayer);
   player.y = constrain(player.y, mapOriginY + halfPlayer, mapOriginY + mapHeight - halfPlayer);
 
-  // --- Miner harvesting tick ---
+  // Advance simulation systems in dependency order before rendering.
+  // Mining/factory rates update first, then shuttle intake and rocket completion checks.
   updateMinerHarvesting(entities, dt);
   updateFactoryProduction(entities, dt);
   updateRestrictedModeShuttleIntake(entities, dt);
   const rocketProgress = updateRocketConstructionProgress(entities, dt);
+  updateOptimizationMetrics(drawGame.state, entities, dt, rocketProgress);
   if (rocketProgress.justCompleted) {
     feedback.rocketCompletionModalUntil = millis() + 12000;
     feedback.rocketCompletionModalText = "Rocket ship complete. Walk to it to launch.";
@@ -1032,6 +1842,7 @@ function drawGame() {
     return;
   }
 
+  // Build camera and visibility bounds used by terrain, overlays, and hover interactions.
   const cameraX = player.x - width / 2;
   const cameraY = player.y - height / 2;
   const visibleMinCol = max(0, floor((cameraX - mapOriginX) / tileSize) - 1);
@@ -1045,7 +1856,8 @@ function drawGame() {
     floor((cameraY + height - mapOriginY) / tileSize) + 1
   );
 
-push();
+  // Draw parallax starfield in screen space before entering world-space camera transforms.
+  push();
   noStroke();
   let wrapW = width + 200;
   let wrapH = height + 200;
@@ -1072,6 +1884,7 @@ push();
   push();
   stroke(200);
   strokeWeight(1);
+  // Aggregate all exposed port tiles into a fast lookup so the visible-window highlight pass is cheap.
   const portOverlay = new Map();
   const rocketPortOverlay = new Set();
   const markPort = (x, y, kind) => {
@@ -1166,8 +1979,10 @@ push();
   pop();
 
   drawMiniMap(map, player, config, feedback, entities);
+  drawOptimizationHud(drawGame.state);
   backButtonGame.draw();
   drawHotbar();
+  drawReactivePlayerCompanion();
   drawSideBar();
   if (drawGame.state.isRestrictedMode) {
     drawHotbarCostTooltip();
@@ -1185,6 +2000,10 @@ push();
   if (showHelpMenu) drawHelpMenu();
 }
 
+/**
+ * Draw help menu.
+ * @returns {void} No return value.
+ */
 function drawHelpMenu() {
   push();
   fill(25, 25, 30, 220);
@@ -1245,6 +2064,14 @@ function drawHelpMenu() {
   pop();
 }
 
+/**
+ * Generate the restricted-mode resource distribution and reserved zones.
+ * @param {*} tiles - Input value used by this operation.
+ * @param {*} mapCols - Total number of map columns.
+ * @param {*} mapRows - Total number of map rows.
+ * @param {*} placeResourceNodeBlock2x2 - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourceNodeBlock2x2) {
   if (!Array.isArray(tiles) || typeof placeResourceNodeBlock2x2 !== "function") {
     return;
@@ -1414,6 +2241,11 @@ function applyRestrictedModeResourceLayout(tiles, mapCols, mapRows, placeResourc
   }
 }
 
+/**
+ * Spawn the restricted-mode shuttle and stamp its footprint onto the map.
+ * @param {*} state - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function spawnRestrictedModeShuttle(state) {
   if (!state || !state.map || !state.entities) {
     return;
@@ -1481,6 +2313,10 @@ function updateMinerHarvesting(entities, dt) {
   }
 }
 
+/**
+ * Get restricted mode shuttle entity.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getRestrictedModeShuttleEntity() {
   if (!drawGame.state || !drawGame.state.isRestrictedMode) {
     return null;
@@ -1498,6 +2334,10 @@ function getRestrictedModeShuttleEntity() {
   return shuttle && shuttle.type === ENTITY_TYPES.SHUTTLE ? shuttle : null;
 }
 
+/**
+ * Get restricted mode shuttle inventory.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getRestrictedModeShuttleInventory() {
   const shuttle = getRestrictedModeShuttleEntity();
   const inventory = shuttle?.state?.inventory;
@@ -1508,6 +2348,11 @@ function getRestrictedModeShuttleInventory() {
   return inventory;
 }
 
+/**
+ * Get build cost for entity.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getBuildCostForEntity(entityType) {
   if (typeof ENTITY_BUILD_COSTS === "undefined" || !entityType) {
     return null;
@@ -1515,6 +2360,11 @@ function getBuildCostForEntity(entityType) {
   return ENTITY_BUILD_COSTS[entityType] || null;
 }
 
+/**
+ * Get resource type label.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getResourceTypeLabel(resourceType) {
   switch (resourceType) {
     case RESOURCE_TYPES.IRON_ORE:
@@ -1546,6 +2396,11 @@ function getResourceTypeLabel(resourceType) {
   }
 }
 
+/**
+ * Get resource icon for type.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getResourceIconForType(resourceType) {
   switch (resourceType) {
     case RESOURCE_TYPES.IRON_ORE:
@@ -1577,6 +2432,11 @@ function getResourceIconForType(resourceType) {
   }
 }
 
+/**
+ * Get global resource count.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getGlobalResourceCount(resourceType) {
   switch (resourceType) {
     case RESOURCE_TYPES.IRON_ORE:
@@ -1608,6 +2468,12 @@ function getGlobalResourceCount(resourceType) {
   }
 }
 
+/**
+ * Get missing build resources.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} inventory - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMissingBuildResources(entityType, inventory) {
   const cost = getBuildCostForEntity(entityType);
   if (!cost) {
@@ -1628,6 +2494,12 @@ function getMissingBuildResources(entityType, inventory) {
   return missing;
 }
 
+/**
+ * Spend Build Resources.
+ * @param {*} inventory - Input value used by this operation.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {void} No return value.
+ */
 function spendBuildResources(inventory, entityType) {
   const cost = getBuildCostForEntity(entityType);
   if (!cost || !inventory) {
@@ -1640,6 +2512,12 @@ function spendBuildResources(inventory, entityType) {
   }
 }
 
+/**
+ * Refund Build Resources.
+ * @param {*} inventory - Input value used by this operation.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {void} No return value.
+ */
 function refundBuildResources(inventory, entityType) {
   const cost = getBuildCostForEntity(entityType);
   if (!cost || !inventory) {
@@ -1652,6 +2530,12 @@ function refundBuildResources(inventory, entityType) {
   }
 }
 
+/**
+ * Trigger build cost feedback.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} missingResources - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function triggerBuildCostFeedback(entityType, missingResources) {
   if (!drawGame.state || !drawGame.state.feedback) {
     return;
@@ -1673,6 +2557,11 @@ function triggerBuildCostFeedback(entityType, missingResources) {
   feedback.buildCostMessageUntil = millis() + 1600;
 }
 
+/**
+ * Determine whether blink build hologram.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function shouldBlinkBuildHologram(entityType) {
   if (!drawGame.state || !drawGame.state.feedback || !entityType) {
     return false;
@@ -1692,6 +2581,10 @@ function shouldBlinkBuildHologram(entityType) {
   return phase % 2 === 0;
 }
 
+/**
+ * Draw build cost feedback message.
+ * @returns {void} No return value.
+ */
 function drawBuildCostFeedbackMessage() {
   if (!drawGame.state || !drawGame.state.feedback) {
     return;
@@ -1726,6 +2619,10 @@ function drawBuildCostFeedbackMessage() {
   pop();
 }
 
+/**
+ * Draw rocket completion modal.
+ * @returns {void} No return value.
+ */
 function drawRocketCompletionModal() {
   if (!drawGame.state || !drawGame.state.feedback) {
     return;
@@ -1775,6 +2672,12 @@ function drawRocketCompletionModal() {
   pop();
 }
 
+/**
+ * Update restricted mode shuttle intake.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} dt - Frame delta time in seconds.
+ * @returns {void} No return value.
+ */
 function updateRestrictedModeShuttleIntake(entities, dt) {
   const shuttle = getRestrictedModeShuttleEntity();
   if (!shuttle || !Number.isFinite(dt) || dt <= 0) {
@@ -1814,6 +2717,12 @@ function updateRestrictedModeShuttleIntake(entities, dt) {
   }
 }
 
+/**
+ * Add Produced Resource.
+ * @param {*} resourceType - Resource type identifier.
+ * @param {*} count - Quantity value.
+ * @returns {void} No return value.
+ */
 function addProducedResource(resourceType, count) {
   if (!resourceType || count <= 0) return;
 
@@ -1859,6 +2768,13 @@ function addProducedResource(resourceType, count) {
   }
 }
 
+/**
+ * Get safe footprint offsets.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} options - Optional configuration object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSafeFootprintOffsets(entityType, facing = "E", options = null) {
   const fallback = [{ x: 0, y: 0 }];
   
@@ -1900,6 +2816,15 @@ function getSafeFootprintOffsets(entityType, facing = "E", options = null) {
   return baseOffsets;
 }
 
+/**
+ * Get safe footprint tiles at.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} tileX - Tile X coordinate.
+ * @param {*} tileY - Tile Y coordinate.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} options - Optional configuration object.
+ * @returns {void} No return value.
+ */
 function getSafeFootprintTilesAt(entityType, tileX, tileY, facing = "E", options = null) {
   const offsets = getSafeFootprintOffsets(entityType, facing, options);
   return offsets.map((offset) => ({
@@ -1908,6 +2833,12 @@ function getSafeFootprintTilesAt(entityType, tileX, tileY, facing = "E", options
   }));
 }
 
+/**
+ * Accumulate and publish factory throughput from active smelters and constructors.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} dt - Frame delta time in seconds.
+ * @returns {void} No return value.
+ */
 function updateFactoryProduction(entities, dt) {
   for (const entity of entities) {
     if (
@@ -1942,6 +2873,13 @@ function updateFactoryProduction(entities, dt) {
   }
 }
 
+/**
+ * Determine whether player near rocket for launch.
+ * @param {*} player - Player runtime state.
+ * @param {*} rocketEntity - Input value used by this operation.
+ * @param {*} config - Runtime configuration values for map/camera/UI.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isPlayerNearRocketForLaunch(player, rocketEntity, config) {
   if (!player || !rocketEntity || !config) {
     return false;
@@ -1957,15 +2895,33 @@ function isPlayerNearRocketForLaunch(player, rocketEntity, config) {
   return dx * dx + dy * dy <= launchRadius * launchRadius;
 }
 
+/**
+ * Advance rocket delivery progress from connected input lines and detect completion.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} dt - Frame delta time in seconds.
+ * @returns {object} Progress summary with completion and throughput-rate details.
+ */
 function updateRocketConstructionProgress(entities, dt) {
   const rocket = entities.find((entity) => entity.type === ENTITY_TYPES.ROCKET_SITE);
   if (!rocket || !rocket.state) {
-    return { completed: false, justCompleted: false, rocket: null };
+    return {
+      completed: false,
+      justCompleted: false,
+      rocket: null,
+      throughputActualRate: 0,
+      throughputPotentialRate: 0
+    };
   }
 
   const rocketState = rocket.state;
   if (rocketState.completed) {
-    return { completed: true, justCompleted: false, rocket };
+    return {
+      completed: true,
+      justCompleted: false,
+      rocket,
+      throughputActualRate: 0,
+      throughputPotentialRate: 0
+    };
   }
 
   const wasCompleted = !!rocketState.completed;
@@ -1998,10 +2954,15 @@ function updateRocketConstructionProgress(entities, dt) {
     increments[outputType] += outputRate * dt;
   }
 
+  let potentialDeliveredAmount = 0;
+  let actualDeliveredAmount = 0;
   for (const [resourceType, amount] of Object.entries(increments)) {
     if (amount <= 0 || required[resourceType] == null) continue;
+    potentialDeliveredAmount += amount;
     const current = Number(delivered[resourceType]) || 0;
-    delivered[resourceType] = min(required[resourceType], current + amount);
+    const next = min(required[resourceType], current + amount);
+    delivered[resourceType] = next;
+    actualDeliveredAmount += Math.max(0, next - current);
   }
 
   const requiredTotal = Object.values(required).reduce((sum, value) => sum + Number(value || 0), 0);
@@ -2017,13 +2978,31 @@ function updateRocketConstructionProgress(entities, dt) {
   rocketState.isActive = !complete && deliveredTotal > 0;
   rocketState.isOn = complete;
 
+  const safeDt = Number(dt);
+  const throughputActualRate =
+    Number.isFinite(safeDt) && safeDt > 0
+      ? actualDeliveredAmount / safeDt
+      : 0;
+  const throughputPotentialRate =
+    Number.isFinite(safeDt) && safeDt > 0
+      ? potentialDeliveredAmount / safeDt
+      : 0;
+
   return {
     completed: complete,
     justCompleted: complete && !wasCompleted,
-    rocket
+    rocket,
+    throughputActualRate,
+    throughputPotentialRate
   };
 }
 
+/**
+ * Draw player sprite.
+ * @param {*} player - Player runtime state.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function drawPlayerSprite(player, tileSize) {
   const dims = spriteDimensions[currentDirection] &&
                spriteDimensions[currentDirection][currentAnimation];
@@ -2069,6 +3048,10 @@ function drawPlayerSprite(player, tileSize) {
   pop();
 }
 
+/**
+ * Update player animation.
+ * @returns {void} No return value.
+ */
 function updatePlayerAnimation() {
   if (!drawGame.state) return;
   const dims = spriteDimensions[currentDirection] &&
@@ -2087,6 +3070,12 @@ function updatePlayerAnimation() {
   }   
 }
 
+/**
+ * Get tube render path data.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getTubeRenderPathData(entity, tileSize) {
   if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
     return null;
@@ -2127,6 +3116,12 @@ function getTubeRenderPathData(entity, tileSize) {
   return { segments, totalLength, centerX, centerY };
 }
 
+/**
+ * Get point along tube path.
+ * @param {*} pathData - Input value used by this operation.
+ * @param {*} t - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPointAlongTubePath(pathData, t) {
   if (!pathData || !Array.isArray(pathData.segments) || pathData.totalLength <= 0) {
     return { x: 0, y: 0 };
@@ -2157,6 +3152,11 @@ function getPointAlongTubePath(pathData, t) {
   return { x: last.x2, y: last.y2 };
 }
 
+/**
+ * Get tube item glow color.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getTubeItemGlowColor(resourceType) {
   switch (resourceType) {
     case RESOURCE_TYPES.IRON_ORE: return [120, 120, 125];
@@ -2173,6 +3173,12 @@ function getTubeItemGlowColor(resourceType) {
   }
 }
 
+/**
+ * Draw tube flow effects.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function drawTubeFlowEffects(entity, tileSize) {
   if (!entity || entity.type !== ENTITY_TYPES.TUBE) {
     return;
@@ -2238,6 +3244,12 @@ function drawTubeFlowEffects(entity, tileSize) {
   }
 }
 
+/**
+ * Determine whether tube flow indicator lit.
+ * @param {*} tubeState - Input value used by this operation.
+ * @param {*} nowSeconds - Current time in seconds.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isTubeFlowIndicatorLit(tubeState, nowSeconds) {
   if (!tubeState || tubeState.flowState !== "flowing") {
     return false;
@@ -2268,10 +3280,10 @@ function drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, shuttl
   const animationFps = 10;
   const frameIndex = floor(nowSeconds * animationFps) % frameCount;
   
-  const targetHeight = max(drawHeight + 12, tileSize * 2.0); // Now 2x taller than a tile
+  const targetHeight = max(drawHeight + 12, tileSize * 3.0); // Now 2x taller than a tile
   const targetWidth = targetHeight * (frameW / frameH);
   
-  const visualAlignmentOffset = 2.5; // Shift to the right by ~2.5 pixels for better centering
+  const visualAlignmentOffset = 6; // Shift to the right by ~2.5 pixels for better centering
   const spriteX = px + (drawWidth - targetWidth) / 2 + visualAlignmentOffset;
   
   const spriteY = py + drawHeight - targetHeight; 
@@ -2329,6 +3341,11 @@ function drawPlacedMinerSprite(px, py, drawWidth, drawHeight, tileSize, minerSta
   return true;
 }
 
+/**
+ * Get smelter sprite for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSmelterSpriteForFacing(facing) {
   const dir = facing || "E";
   if (dir === "E" || dir === "W") {
@@ -2340,6 +3357,11 @@ function getSmelterSpriteForFacing(facing) {
   return smelterFrontImg || smelterBackImg || smelterSideImg || null;
 }
 
+/**
+ * Get smelter manual pixel offset.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {void} No return value.
+ */
 function getSmelterManualPixelOffset(facing) {
   const dir = facing || "E";
   const key = SMELTER_MANUAL_PIXEL_OFFSETS[dir] ? dir : "E";
@@ -2352,6 +3374,18 @@ function getSmelterManualPixelOffset(facing) {
   };
 }
 
+/**
+ * Draw placed smelter sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} smelterState - Input value used by this operation.
+ * @param {*} nowSeconds - Current time in seconds.
+ * @param {*} alpha - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterState, nowSeconds, alpha = 255) {
   const sprite = getSmelterSpriteForFacing(facing);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
@@ -2424,6 +3458,11 @@ function drawPlacedSmelterSprite(px, py, drawWidth, drawHeight, facing, smelterS
   return true;
 }
 
+/**
+ * Get constructor sprite for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getConstructorSpriteForFacing(facing) {
   const dir = facing || "E";
   if (dir === "E") {
@@ -2441,6 +3480,17 @@ function getConstructorSpriteForFacing(facing) {
   return constructorSideImg || constructorFrontImg || constructorBackImg || null;
 }
 
+/**
+ * Draw placed constructor sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} alpha - Input value used by this operation.
+ * @param {*} options - Optional configuration object.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedConstructorSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
   const sprite = getConstructorSpriteForFacing(facing);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
@@ -2475,6 +3525,12 @@ function drawPlacedConstructorSprite(px, py, drawWidth, drawHeight, facing, alph
   return true;
 }
 
+/**
+ * Get splitter sprite for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} options - Optional configuration object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSplitterSpriteForFacing(facing, options = {}) {
   const preferSideForEast = !!options.preferSideForEast;
   const dir = facing || "E";
@@ -2496,6 +3552,17 @@ function getSplitterSpriteForFacing(facing, options = {}) {
   return splitterSideImg || splitterFrontImg || splitterBackImg || null;
 }
 
+/**
+ * Draw placed splitter sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} alpha - Input value used by this operation.
+ * @param {*} options - Optional configuration object.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
   const sprite = getSplitterSpriteForFacing(facing, options);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
@@ -2531,6 +3598,12 @@ function drawPlacedSplitterSprite(px, py, drawWidth, drawHeight, facing, alpha =
   return true;
 }
 
+/**
+ * Get merger sprite for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} options - Optional configuration object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMergerSpriteForFacing(facing, options = {}) {
   const preferSideForEast = !!options.preferSideForEast;
   const dir = facing || "E";
@@ -2552,6 +3625,17 @@ function getMergerSpriteForFacing(facing, options = {}) {
   return mergerSideImg || mergerFrontImg || mergerBackImg || null;
 }
 
+/**
+ * Draw placed merger sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} facing - Cardinal facing direction.
+ * @param {*} alpha - Input value used by this operation.
+ * @param {*} options - Optional configuration object.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 255, options = {}) {
   const sprite = getMergerSpriteForFacing(facing, options);
   if (!sprite || sprite.width <= 0 || sprite.height <= 0) {
@@ -2585,6 +3669,16 @@ function drawPlacedMergerSprite(px, py, drawWidth, drawHeight, facing, alpha = 2
   return true;
 }
 
+/**
+ * Draw placed rocket platform sprite.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} drawWidth - Input value used by this operation.
+ * @param {*} drawHeight - Input value used by this operation.
+ * @param {*} alpha - Input value used by this operation.
+ * @param {*} completed - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 255, completed = false) {
   const sprite = completed
     ? (rocketPlatformBuiltImg || rocketPlatformImg)
@@ -2614,6 +3708,11 @@ function drawPlacedRocketPlatformSprite(px, py, drawWidth, drawHeight, alpha = 2
   return true;
 }
 
+/**
+ * Get corner tube display frame size.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getCornerTubeDisplayFrameSize(facing) {
   const useCurve2Family = facing === "N" || facing === "W";
   const offImg = useCurve2Family
@@ -2633,6 +3732,18 @@ function getCornerTubeDisplayFrameSize(facing) {
   return { frameW, frameH };
 }
 
+/**
+ * Draw the hologram sprite preview for tube placement, including orientation handling.
+ * @param {*} footprintLeft - Left pixel of the preview footprint.
+ * @param {*} footprintTop - Top pixel of the preview footprint.
+ * @param {*} footprintWidth - Width of the preview footprint in pixels.
+ * @param {*} footprintHeight - Height of the preview footprint in pixels.
+ * @param {*} previewOptions - Tube preview configuration (shape and facing).
+ * @param {*} alpha - Preview transparency (0-255).
+ * @param {*} baseCol - Optional world tile column anchor.
+ * @param {*} baseRow - Optional world tile row anchor.
+ * @returns {boolean} True when a sprite frame is drawn; false when assets are unavailable.
+ */
 function drawTubePlacementHologramSprite(
   footprintLeft,
   footprintTop,
@@ -2659,6 +3770,7 @@ function drawTubePlacementHologramSprite(
   let numFrames = 1;
   let frameIndex = 0;
 
+  // Pick the same sprite family/frame logic used by placed tubes so previews match runtime visuals.
   if (isCorner) {
     const useCurve2Family = facing === "N" || facing === "W";
     img = useCurve2Family
@@ -2742,6 +3854,12 @@ const TUBE_LAYER_BANDS = Object.freeze({
   over: Object.freeze({ start: 0.0, end: 0.36 })
 });
 
+/**
+ * Get entity draw bounds.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function getEntityDrawBounds(entity, tileSize) {
   const footprintFacing = entity.state?.facing || "E";
   const footprintOffsets = getSafeFootprintOffsets(
@@ -2775,6 +3893,11 @@ function getEntityDrawBounds(entity, tileSize) {
   };
 }
 
+/**
+ * To Cardinal Direction Key.
+ * @param {*} offset - Input value used by this operation.
+ * @returns {string} Computed text result.
+ */
 function toCardinalDirectionKey(offset) {
   if (!offset) return null;
   if (offset.x === 1 && offset.y === 0) return "E";
@@ -2784,6 +3907,12 @@ function toCardinalDirectionKey(offset) {
   return null;
 }
 
+/**
+ * Compare tube descriptors for render.
+ * @param {*} a - Input value used by this operation.
+ * @param {*} b - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function compareTubeDescriptorsForRender(a, b) {
   if (a.zLane !== b.zLane) {
     return a.zLane - b.zLane;
@@ -2797,6 +3926,13 @@ function compareTubeDescriptorsForRender(a, b) {
   return (a.entity?.id || 0) - (b.entity?.id || 0);
 }
 
+/**
+ * Build tube render descriptor.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} nowMs - Current time in milliseconds.
+ * @returns {void} No return value.
+ */
 function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const state = entity.state || {};
@@ -2941,6 +4077,11 @@ function buildTubeRenderDescriptor(entity, tileSize, nowMs) {
   };
 }
 
+/**
+ * Annotate Tube Descriptor Neighbors.
+ * @param {*} descriptors - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function annotateTubeDescriptorNeighbors(descriptors) {
   const lookup = new Map();
   for (const descriptor of descriptors) {
@@ -2978,6 +4119,12 @@ function annotateTubeDescriptorNeighbors(descriptors) {
   }
 }
 
+/**
+ * Draw connected vertical front tube layer.
+ * @param {*} descriptor - Input value used by this operation.
+ * @param {*} layerName - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawConnectedVerticalFrontTubeLayer(descriptor, layerName) {
   const band = TUBE_LAYER_BANDS[layerName] || TUBE_LAYER_BANDS.body;
   const frameH = descriptor.frameH;
@@ -3063,6 +4210,11 @@ function drawConnectedVerticalFrontTubeLayer(descriptor, layerName) {
   }
 }
 
+/**
+ * Draw front tube overlay.
+ * @param {*} descriptor - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawFrontTubeOverlay(descriptor) {
   if (!descriptor || !descriptor.frontOverlayImg) {
     return;
@@ -3081,6 +4233,12 @@ function drawFrontTubeOverlay(descriptor) {
   image(overlay, x, y, targetW, targetH);
 }
 
+/**
+ * Draw tube descriptor layer.
+ * @param {*} descriptor - Input value used by this operation.
+ * @param {*} layerName - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawTubeDescriptorLayer(descriptor, layerName) {
   if (!descriptor) {
     return;
@@ -3162,6 +4320,11 @@ function drawTubeDescriptorLayer(descriptor, layerName) {
   }
 }
 
+/**
+ * Draw tube descriptors in layered passes.
+ * @param {*} descriptors - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawTubeDescriptorsInLayeredPasses(descriptors) {
   if (!Array.isArray(descriptors) || descriptors.length === 0) {
     return;
@@ -3173,6 +4336,11 @@ function drawTubeDescriptorsInLayeredPasses(descriptors) {
   }
 }
 
+/**
+ * Get entity southmost render tile y.
+ * @param {*} entity - Target entity instance.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntitySouthmostRenderTileY(entity) {
   if (!entity) {
     return 0;
@@ -3189,6 +4357,12 @@ function getEntitySouthmostRenderTileY(entity) {
   return entity.tileY + maxOffsetY;
 }
 
+/**
+ * Get rocket pulse overlay for entity.
+ * @param {*} entity - Target entity instance.
+ * @param {*} nowSeconds - Current time in seconds.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getRocketPulseOverlayForEntity(entity, nowSeconds) {
   if (
     !entity ||
@@ -3217,6 +4391,13 @@ function getRocketPulseOverlayForEntity(entity, nowSeconds) {
   return { r: 84, g: 244, b: 124, a: 62 + pulse * 78 };
 }
 
+/**
+ * Draw non tube entity.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} nowSeconds - Current time in seconds.
+ * @returns {void} No return value.
+ */
 function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const bounds = getEntityDrawBounds(entity, tileSize);
   const px = bounds.px;
@@ -3278,14 +4459,24 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   const drewShuttleSprite = 
     entity.type === ENTITY_TYPES.SHUTTLE &&
     drawPlacedShuttleSprite(px, py, drawWidth, drawHeight, tileSize, entity.state, nowSeconds);
-
+  const drewRocketSprite =
+    entity.type === ENTITY_TYPES.ROCKET_SITE &&
+    drawPlacedRocketPlatformSprite(
+      px,
+      py,
+      drawWidth,
+      drawHeight,
+      255,
+      !!entity.state?.completed
+    );
   const drewCustomSprite =
     drewMinerSprite ||
     drewSmelterSprite ||
     drewConstructorSprite ||
     drewSplitterSprite ||
     drewMergerSprite ||
-    drewShuttleSprite; 
+    drewShuttleSprite ||
+    drewRocketSprite;
 
   if (!drewCustomSprite) {
     // Regular building fallback rendering when no custom sprite is used.
@@ -3339,6 +4530,13 @@ function drawNonTubeEntity(entity, tileSize, nowSeconds) {
   }
 }
 
+/**
+ * Render all entities in depth order with layered tube passes and port overlays.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} map - Map wrapper containing tile data.
+ * @returns {void} No return value.
+ */
 function drawEntities(entities, tileSize, map) {
   textAlign(CENTER, CENTER);
   textSize(10);
@@ -3347,6 +4545,7 @@ function drawEntities(entities, tileSize, map) {
   const tubeDescriptors = [];
   const renderQueue = [];
 
+  // Build a unified render queue so tubes and buildings share one stable depth sort.
   for (const entity of entities) {
     const sortY = getEntitySouthmostRenderTileY(entity);
     const sortX = entity?.tileX || 0;
@@ -3372,6 +4571,7 @@ function drawEntities(entities, tileSize, map) {
     }
   }
 
+  // Annotate tube neighbors before drawing so layered tube passes can resolve intersections cleanly.
   annotateTubeDescriptorNeighbors(tubeDescriptors);
   renderQueue.sort((a, b) => {
     if (a.sortY !== b.sortY) return a.sortY - b.sortY;
@@ -3429,6 +4629,13 @@ function drawDirectionalArrow(cx, cy, dirX, dirY, rgb, arrowLen) {
   );
 }
 
+/**
+ * Collapse direction to cardinal.
+ * @param {*} dirX - Input value used by this operation.
+ * @param {*} dirY - Input value used by this operation.
+ * @param {*} preferAxis - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function collapseDirectionToCardinal(dirX, dirY, preferAxis = "x") {
   const absX = Math.abs(dirX);
   const absY = Math.abs(dirY);
@@ -3450,11 +4657,23 @@ function collapseDirectionToCardinal(dirX, dirY, preferAxis = "x") {
   return { x: Math.sign(dirX) || 1, y: 0 };
 }
 
+/**
+ * Get preferred arrow axis for facing.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPreferredArrowAxisForFacing(facing) {
   const dir = facing || "E";
   return dir === "N" || dir === "S" ? "y" : "x";
 }
 
+/**
+ * Determine whether port tile blocked by building.
+ * @param {*} tileX - Tile X coordinate.
+ * @param {*} tileY - Tile Y coordinate.
+ * @param {*} ignoreEntityId - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
   if (!drawGame.state) return false;
   const map = drawGame.state.map;
@@ -3465,6 +4684,12 @@ function isPortTileBlockedByBuilding(tileX, tileY, ignoreEntityId = null) {
   return tile.entityId !== ignoreEntityId;
 }
 
+/**
+ * Determine whether expose constructor output port.
+ * @param {*} entity - Target entity instance.
+ * @param {*} port - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function shouldExposeConstructorOutputPort(entity, port = null) {
   if (!entity || entity.type !== ENTITY_TYPES.CONSTRUCTOR) {
     return false;
@@ -3484,6 +4709,14 @@ function shouldExposeConstructorOutputPort(entity, port = null) {
   return true;
 }
 
+/**
+ * Draw constructor output item badge.
+ * @param {*} portPx - Input value used by this operation.
+ * @param {*} portPy - Input value used by this operation.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} outputType - Output resource type identifier.
+ * @returns {void} No return value.
+ */
 function drawConstructorOutputItemBadge(portPx, portPy, tileSize, outputType) {
   if (!outputType) {
     return;
@@ -3519,6 +4752,12 @@ function drawConstructorOutputItemBadge(portPx, portPy, tileSize, outputType) {
   textStyle(NORMAL);
 }
 
+/**
+ * Draw entity ports.
+ * @param {*} entity - Target entity instance.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function drawEntityPorts(entity, tileSize) {
   const hideConnectedNonTube =
     entity.type !== ENTITY_TYPES.TUBE &&
@@ -3590,6 +4829,11 @@ function drawEntityPorts(entity, tileSize) {
   }
 }
 
+/**
+ * Get entity short label.
+ * @param {*} type - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntityShortLabel(type) {
   switch (type) {
     case ENTITY_TYPES.MINER: return "M";
@@ -3605,6 +4849,15 @@ function getEntityShortLabel(type) {
   }
 }
 
+/**
+ * Draw mini map.
+ * @param {*} map - Map wrapper containing tile data.
+ * @param {*} player - Player runtime state.
+ * @param {*} config - Runtime configuration values for map/camera/UI.
+ * @param {*} feedback - Transient UI feedback state.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function drawMiniMap(map, player, config, feedback, entities) {
   const { tileSize, mapCols, mapRows, mapOriginX, mapOriginY } = config;
 
@@ -3685,6 +4938,189 @@ function drawMiniMap(map, player, config, feedback, entities) {
   drawModificationRangeIndicator(config, feedback);
 }
 
+/**
+ * Draw the optimization HUD with a compact score and hover-expanded breakdown.
+ * @param {*} runtimeState - Active drawGame.state object.
+ * @returns {void} No return value.
+ */
+function drawOptimizationHud(runtimeState) {
+  if (!runtimeState || !runtimeState.config) {
+    return;
+  }
+  const optimization = runtimeState.optimization;
+  if (!optimization) {
+    return;
+  }
+
+  const config = runtimeState.config;
+  const mapCols = Math.max(1, Number(config.mapCols) || 1);
+  const mapRows = Math.max(1, Number(config.mapRows) || 1);
+  const miniMaxSize = 140;
+  const miniTile = max(1, floor(miniMaxSize / mapCols));
+  const miniWidth = mapCols * miniTile;
+  const miniHeight = mapRows * miniTile;
+  const miniX = width - miniWidth - 10;
+  const miniY = 10;
+
+  const panelW = OPTIMIZATION_PANEL_WIDTH;
+  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
+  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
+  const panelX = constrain(miniX + miniWidth - panelW, 8, width - panelW - 8);
+  const hudYOffset = 75;
+  const panelY = constrain(
+    miniY + miniHeight + 10 + hudYOffset,
+    8,
+    height - expandedH - 8
+  );
+  const inCollapsedBounds =
+    mouseX >= panelX &&
+    mouseX <= panelX + panelW &&
+    mouseY >= panelY &&
+    mouseY <= panelY + collapsedH;
+  const inExpandedBounds =
+    mouseX >= panelX &&
+    mouseX <= panelX + panelW &&
+    mouseY >= panelY &&
+    mouseY <= panelY + expandedH;
+  if (inCollapsedBounds) {
+    optimization.isPanelExpanded = true;
+  } else if (!inExpandedBounds) {
+    optimization.isPanelExpanded = false;
+  }
+  const expanded = !!optimization.isPanelExpanded;
+
+  const score = Number(optimization.displayScore) || 0;
+  const grade = optimization.grade || getOptimizationGradeLabel(score);
+  const scoreColor = getOptimizationScoreColor(score);
+  const boxH = expanded ? expandedH : collapsedH;
+
+  const formatRate = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "0";
+    if (Math.abs(n - Math.round(n)) < 0.01) return String(Math.round(n));
+    return n.toFixed(2);
+  };
+
+  push();
+  rectMode(CORNER);
+  textAlign(LEFT, TOP);
+
+  fill(16, 20, 28, 225);
+  stroke(scoreColor[0], scoreColor[1], scoreColor[2], 230);
+  strokeWeight(2);
+  rect(panelX, panelY, panelW, boxH, 8);
+
+  noStroke();
+  fill(232, 238, 248);
+  textStyle(BOLD);
+  textSize(12);
+  text("Factory Efficiency", panelX + 10, panelY + 8);
+
+  fill(scoreColor[0], scoreColor[1], scoreColor[2]);
+  textAlign(RIGHT, TOP);
+  text(`${score.toFixed(0)} (${grade})`, panelX + panelW - 10, panelY + 8);
+
+  textAlign(LEFT, TOP);
+  textStyle(NORMAL);
+  textSize(10);
+  fill(188, 198, 214);
+  const throughputActualRate = Number(optimization.latest?.throughputActualRate) || 0;
+  const throughputPotentialRate = Number(optimization.latest?.throughputPotentialRate) || 0;
+  text(
+    `Factory Throughput: ${formatRate(throughputActualRate)}/${formatRate(throughputPotentialRate)} per sec`,
+    panelX + 10,
+    panelY + 24
+  );
+
+  // no room for this message in the hud
+  // if (optimization.isInGraceWindow) {
+  //   fill(248, 214, 124);
+  //   text("Editing grace active", panelX + panelW - 105, panelY + 24);
+  // }
+
+  if (!expanded) {
+    fill(154, 166, 186);
+    textAlign(RIGHT, TOP);
+    text("Hover for breakdown", panelX + panelW - 10, panelY + 36);
+    pop();
+    return;
+  }
+
+  const breakdown = optimization.breakdown || {};
+  const bars = [
+    {
+      key: "throughput",
+      label: "Throughput (harvested/stored)",
+      value: Number(breakdown.throughput) || 0
+    },
+    {
+      key: "utilization",
+      label: "Utilization (active/total)",
+      value: Number(breakdown.utilization) || 0
+    },
+    {
+      key: "flow",
+      label: "Flow Health (flow - penalties)",
+      value: Number(breakdown.flow) || 0
+    },
+    {
+      key: "recipe",
+      label: "Recipe Validity (valid/relevant)",
+      value: Number(breakdown.recipe) || 0
+    }
+  ];
+
+  let barY = panelY + 44;
+  const barX = panelX + 10;
+  const barW = panelW - 20;
+  const barH = 10;
+  for (const entry of bars) {
+    const value = clampZeroToOne(entry.value);
+    fill(154, 166, 186);
+    textSize(9);
+    textAlign(LEFT, TOP);
+    text(entry.label, barX, barY - 1);
+    textAlign(RIGHT, TOP);
+    text(`${Math.round(value * 100)}%`, barX + barW, barY - 1);
+
+    fill(45, 54, 70, 235);
+    noStroke();
+    rect(barX, barY + 10, barW, barH, 3);
+    fill(scoreColor[0], scoreColor[1], scoreColor[2], 220);
+    rect(barX, barY + 10, barW * value, barH, 3);
+    barY += 24;
+  }
+
+  fill(220, 228, 240);
+  textAlign(LEFT, TOP);
+  textStyle(BOLD);
+  textSize(10);
+  text("Top Bottlenecks", barX, barY + 2);
+  textStyle(NORMAL);
+  fill(174, 186, 204);
+  const bottlenecks = Array.isArray(optimization.bottlenecks)
+    ? optimization.bottlenecks
+    : [];
+  if (bottlenecks.length === 0) {
+    text("- No major bottlenecks detected.", barX, barY + 16);
+  } else {
+    let lineY = barY + 16;
+    for (const entry of bottlenecks.slice(0, OPTIMIZATION_MAX_WEAKPOINT_LINES)) {
+      const textLine = String(entry?.text || "").trim();
+      if (!textLine) continue;
+      text(`- ${textLine}`, barX, lineY);
+      lineY += 12;
+    }
+  }
+
+  pop();
+}
+
+/**
+ * Build and cache the static world terrain layer used by the camera render pass.
+ * @param {*} state - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getOrBuildWorldLayer(state) {
   const cache = state.renderCache;
   if (cache.worldLayer) {
@@ -3766,6 +5202,14 @@ function getOrBuildWorldLayer(state) {
   return layer;
 }
 
+/**
+ * Build and cache the static minimap terrain layer.
+ * @param {*} state - Input value used by this operation.
+ * @param {*} mapCols - Total number of map columns.
+ * @param {*} mapRows - Total number of map rows.
+ * @param {*} miniTile - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getOrBuildMinimapLayer(state, mapCols, mapRows, miniTile) {
   const cache = state.renderCache;
   const unchanged =
@@ -3799,6 +5243,10 @@ function getOrBuildMinimapLayer(state, mapCols, mapRows, miniTile) {
   return layer;
 }
 
+/**
+ * Draw settings.
+ * @returns {void} No return value.
+ */
 function drawSettings() {
   if (settingsPage) {
     image(settingsPage, 0, 0, width, height);
@@ -3817,6 +5265,11 @@ function drawSettings() {
   if (showHelpMenu) drawHelpMenu();
 }
 
+/**
+ * Side Bar Text.
+ * @param {*} resource - Resource value or amount.
+ * @returns {void} No return value.
+ */
 function sideBarText(resource) {
   let digits = Math.floor(resource).toString().length;
     // Make the UI numbers pop and readable over ANY background icon
@@ -3832,6 +5285,11 @@ function sideBarText(resource) {
   }
 }
 
+/**
+ * Get entity display name.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntityDisplayName(entityType) {
   const idx = HOTBAR_ENTITY_TYPES.indexOf(entityType);
   if (idx >= 0) {
@@ -3840,6 +5298,11 @@ function getEntityDisplayName(entityType) {
   return entityType ? String(entityType) : "Building";
 }
 
+/**
+ * Get sidebar resource build uses.
+ * @param {*} resourceType - Resource type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSidebarResourceBuildUses(resourceType) {
   if (!resourceType) {
     return [];
@@ -3896,6 +5359,10 @@ function getSidebarResourceBuildUses(resourceType) {
   return uses;
 }
 
+/**
+ * Get hovered sidebar resource item.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getHoveredSidebarResourceItem() {
   if (
     currentState !== "GAME" ||
@@ -3931,11 +5398,20 @@ function getHoveredSidebarResourceItem() {
   return null;
 }
 
+/**
+ * Determine whether mouse over sidebar resource icon.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isMouseOverSidebarResourceIcon() {
   return !!getHoveredSidebarResourceItem();
 }
 
 // FIXED: Added a custom override just for Helium-3 to display text instead of a recipe!
+/**
+ * Draw sidebar resource hover tooltip.
+ * @param {*} hoveredItem - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawSidebarResourceHoverTooltip(hoveredItem) {
   if (!hoveredItem || !hoveredItem.resourceType) {
     return false;
@@ -4081,6 +5557,10 @@ function drawSidebarResourceHoverTooltip(hoveredItem) {
   return true;
 }
 
+/**
+ * Draw side bar.
+ * @returns {void} No return value.
+ */
 function drawSideBar() {
   if (!drawGame.state) return;
 
@@ -4184,6 +5664,10 @@ function drawSideBar() {
   drawSidebarResourceHoverTooltip(hoveredSidebarItem);
 }
 
+/**
+ * Get selected hotbar item.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getSelectedHotbarItem() {
   if (selectedHotbarSlot < 0 || selectedHotbarSlot >= hotbarItems.length) {
     return null;
@@ -4191,6 +5675,10 @@ function getSelectedHotbarItem() {
   return hotbarItems[selectedHotbarSlot];
 }
 
+/**
+ * Get hotbar layout.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getHotbarLayout() {
   const slotSize = 42;
   const gap = 8;
@@ -4200,6 +5688,10 @@ function getHotbarLayout() {
   return { slotSize, gap, totalWidth, startX, y };
 }
 
+/**
+ * Determine whether mouse over hotbar area.
+ * @returns {void} No return value.
+ */
 function isMouseOverHotbarArea() {
   const { slotSize, totalWidth, startX, y } = getHotbarLayout();
   return (
@@ -4210,6 +5702,10 @@ function isMouseOverHotbarArea() {
   );
 }
 
+/**
+ * Get hovered hotbar slot.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getHoveredHotbarSlot() {
   if (currentState !== "GAME") {
     return -1;
@@ -4231,6 +5727,11 @@ function getHoveredHotbarSlot() {
   return -1;
 }
 
+/**
+ * Get hotbar cost tooltip lines.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getHotbarCostTooltipLines(entityType) {
   const cost = getBuildCostForEntity(entityType);
   if (!cost) {
@@ -4245,6 +5746,11 @@ function getHotbarCostTooltipLines(entityType) {
   }));
 }
 
+/**
+ * Get hotbar tooltip description.
+ * @param {*} entityType - Entity type identifier.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getHotbarTooltipDescription(entityType) {
   if (typeof ENTITY_HOTBAR_DESCRIPTIONS === "undefined" || !entityType) {
     return "";
@@ -4253,6 +5759,10 @@ function getHotbarTooltipDescription(entityType) {
   return typeof description === "string" ? description : "";
 }
 
+/**
+ * Draw hotbar cost tooltip.
+ * @returns {void} No return value.
+ */
 function drawHotbarCostTooltip() {
   if (currentState !== "GAME") {
     return;
@@ -4392,6 +5902,11 @@ function drawHotbarCostTooltip() {
   pop();
 }
 
+/**
+ * Draw hologram build cost tooltip.
+ * @param {*} item - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawHologramBuildCostTooltip(item) {
   if (currentState !== "GAME") {
     return false;
@@ -4489,6 +6004,11 @@ function drawHologramBuildCostTooltip(item) {
   return true;
 }
 
+/**
+ * Facing To Angle.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {number} Computed numeric result.
+ */
 function facingToAngle(facing) {
   switch (facing) {
     case "E":
@@ -4504,6 +6024,10 @@ function facingToAngle(facing) {
   }
 }
 
+/**
+ * Cycle placement facing.
+ * @returns {void} No return value.
+ */
 function cyclePlacementFacing() {
   if (!drawGame.state) {
     return;
@@ -4514,6 +6038,11 @@ function cyclePlacementFacing() {
   drawGame.state.placementFacing = order[(i + 1) % order.length];
 }
 
+/**
+ * Hotbar Item Label.
+ * @param {*} item - Input value used by this operation.
+ * @returns {string} Computed text result.
+ */
 function hotbarItemLabel(item) {
   if (!item || !item.name) {
     return "??";
@@ -4528,11 +6057,24 @@ function hotbarItemLabel(item) {
   return t.substring(0, 2).toUpperCase();
 }
 
+/**
+ * Pick contrasting text color.
+ * @param {*} rgb - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function pickContrastingTextColor(rgb) {
   const lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
   return lum > 140 ? [24, 24, 32] : [255, 255, 255];
 }
 
+/**
+ * Draw placed building letter.
+ * @param {*} px - X pixel position.
+ * @param {*} py - Y pixel position.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} building - Input value used by this operation.
+ * @returns {void} No return value.
+ */
 function drawPlacedBuildingLetter(px, py, tileSize, building) {
   const label = building.label || building.letter || "";
   if (!label) {
@@ -4555,6 +6097,12 @@ function drawPlacedBuildingLetter(px, py, tileSize, building) {
   textStyle(NORMAL);
 }
 
+/**
+ * Get placement preview ports.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} options - Optional configuration object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPlacementPreviewPorts(entityType, options = {}) {
   if (!entityType) {
     return [];
@@ -4583,6 +6131,19 @@ function getPlacementPreviewPorts(entityType, options = {}) {
   }));
 }
 
+/**
+ * Draw directional port arrows for a placement preview.
+ * @param {*} ports - Preview port descriptors containing kind and rotated offsets.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} originX - Center X pixel for the preview anchor.
+ * @param {*} originY - Center Y pixel for the preview anchor.
+ * @param {*} baseCol - Optional world tile column anchor.
+ * @param {*} baseRow - Optional world tile row anchor.
+ * @param {*} entityType - Entity type being previewed.
+ * @param {*} facing - Cardinal facing direction used to orient arrows.
+ * @param {*} blockedOffsetKeys - Optional set of blocked offset keys to skip.
+ * @returns {void} No return value.
+ */
 function drawPlacementPorts(
   ports,
   tileSize,
@@ -4651,6 +6212,7 @@ function drawPlacementPorts(
     let dirX = port.offset.x / len;
     let dirY = port.offset.y / len;
 
+    // Port directions are intentionally normalized per building type so splitters/mergers read correctly.
     if (port.kind === "input") {
       if (mergerForward) {
         dirX = mergerForward.x;
@@ -4677,6 +6239,17 @@ function drawPlacementPorts(
   }
 }
 
+/**
+ * Draw faint tile highlights under placement-preview ports.
+ * @param {*} ports - Preview port descriptors containing kind and rotated offsets.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} originX - Center X pixel for the preview anchor.
+ * @param {*} originY - Center Y pixel for the preview anchor.
+ * @param {*} baseCol - Optional world tile column anchor.
+ * @param {*} baseRow - Optional world tile row anchor.
+ * @param {*} blockedOffsetKeys - Optional set of blocked offset keys to skip.
+ * @returns {void} No return value.
+ */
 function drawPlacementPortTileHighlights(
   ports,
   tileSize,
@@ -4720,6 +6293,20 @@ function drawPlacementPortTileHighlights(
 }
 
 // FIXED: Unified the fade for all sprites to 150, and restored the pulsing border for generic buildings!
+/**
+ * Draw a full building placement hologram including footprint, sprite preview, and port overlays.
+ * @param {*} px - Tile-aligned X pixel position.
+ * @param {*} py - Tile-aligned Y pixel position.
+ * @param {*} tileSize - Tile size in pixels.
+ * @param {*} colorRgb - Base hologram RGB color.
+ * @param {*} label - Short fallback text label.
+ * @param {*} facing - Placement facing direction.
+ * @param {*} entityType - Entity type being previewed.
+ * @param {*} options - Placement options used for preview (shape/resource state).
+ * @param {*} baseCol - Optional world tile column anchor.
+ * @param {*} baseRow - Optional world tile row anchor.
+ * @returns {void} No return value.
+ */
 function drawBuildingPlacementHologram(
   px, py, tileSize, colorRgb, label, facing, entityType, options, baseCol = null, baseRow = null
 ) {
@@ -4754,6 +6341,7 @@ function drawBuildingPlacementHologram(
     footprintOffsets.map((offset) => `${offset.x},${offset.y}`)
   );
 
+  // Shade candidate port tiles first so blocked/invalid offsets are visible before sprite drawing.
   if (ports.length) {
     drawPlacementPortTileHighlights(
       ports,
@@ -4913,6 +6501,11 @@ function drawBuildingPlacementHologram(
   textStyle(NORMAL);
 }
 
+/**
+ * Get resource type for tile.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getResourceTypeForTile(tile) {
   if (!tile) {
     return null;
@@ -4932,6 +6525,12 @@ function getResourceTypeForTile(tile) {
   return null;
 }
 
+/**
+ * Get placement options for entity.
+ * @param {*} entityType - Entity type identifier.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPlacementOptionsForEntity(entityType, tile) {
   if (entityType === ENTITY_TYPES.TUBE) {
     return {
@@ -4954,6 +6553,12 @@ function getPlacementOptionsForEntity(entityType, tile) {
   return {};
 }
 
+/**
+ * Draw selected building highlight.
+ * @param {*} map - Map wrapper containing tile data.
+ * @param {*} tileSize - Tile size in pixels.
+ * @returns {void} No return value.
+ */
 function drawSelectedBuildingHighlight(map, tileSize) {
   const sel = drawGame.state && drawGame.state.selectedBuilding;
   if (!sel) {
@@ -5009,6 +6614,11 @@ function drawSelectedBuildingHighlight(map, tileSize) {
   }
 }
 
+/**
+ * Get corner tube visual transform.
+ * @param {*} facing - Cardinal facing direction.
+ * @returns {void} No return value.
+ */
 function getCornerTubeVisualTransform(facing) {
   const dir = facing || "E";
   const key = CORNER_TUBE_BASE_VISUAL_TRANSFORMS[dir] ? dir : "E";
@@ -5025,6 +6635,11 @@ function getCornerTubeVisualTransform(facing) {
   };
 }
 
+/**
+ * Get tile base color.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getTileBaseColor(tile) {
   switch (tile.type) {
     case "dirt":
@@ -5042,6 +6657,11 @@ function getTileBaseColor(tile) {
 
 // World rendering uses grass bg tiles for every cell; "dirt" type is not drawn as brown terrain.
 // Minimap base must match what the player sees, not the internal dirt marker.
+/**
+ * Get minimap base terrain color.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMinimapBaseTerrainColor(tile) {
   if (!tile) {
     return [240, 240, 245];
@@ -5052,6 +6672,11 @@ function getMinimapBaseTerrainColor(tile) {
   return getTileBaseColor(tile);
 }
 
+/**
+ * Get placed building display name.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPlacedBuildingDisplayName(tile) {
   if (!tile || !tile.building) {
     return null;
@@ -5068,6 +6693,12 @@ function getPlacedBuildingDisplayName(tile) {
   return et != null ? String(et) : null;
 }
 
+/**
+ * Get rocket port hover label at tile.
+ * @param {*} col - Tile column index.
+ * @param {*} row - Tile row index.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getRocketPortHoverLabelAtTile(col, row) {
   if (!drawGame.state) {
     return null;
@@ -5085,6 +6716,11 @@ function getRocketPortHoverLabelAtTile(col, row) {
   return "Rocket Input Port";
 }
 
+/**
+ * Get map hover tooltip label.
+ * @param {*} hit - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMapHoverTooltipLabel(hit) {
   if (!hit) {
     return null;
@@ -5101,6 +6737,11 @@ function getMapHoverTooltipLabel(hit) {
   return getResourceDisplayName(hit.tile);
 }
 
+/**
+ * Get resource display name.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getResourceDisplayName(tile) {
   if (!tile) {
     return null;
@@ -5117,6 +6758,11 @@ function getResourceDisplayName(tile) {
   return null;
 }
 
+/**
+ * Determine whether resource node tile.
+ * @param {*} tile - Tile data object.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isResourceNodeTile(tile) {
   if (!tile) {
     return false;
@@ -5131,7 +6777,10 @@ function isResourceNodeTile(tile) {
   );
 }
 
-// FIXED: Updated the hit-detection math to match the new 190 max size!
+/**
+ * Determine whether pointer over minimap.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isPointerOverMinimap() {
   if (!drawGame.state) {
     return false;
@@ -5151,8 +6800,56 @@ function isPointerOverMinimap() {
   );
 }
 
+/**
+ * Determine whether pointer is over the optimization HUD panel.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
+function isPointerOverOptimizationHud() {
+  if (!drawGame.state || !drawGame.state.config) {
+    return false;
+  }
+  const { mapCols, mapRows } = drawGame.state.config;
+  const safeCols = Math.max(1, Number(mapCols) || 1);
+  const safeRows = Math.max(1, Number(mapRows) || 1);
+  const miniMaxSize = 140;
+  const miniTile = max(1, floor(miniMaxSize / safeCols));
+  const miniWidth = safeCols * miniTile;
+  const miniHeight = safeRows * miniTile;
+  const miniX = width - miniWidth - 10;
+  const miniY = 10;
+
+  const panelW = OPTIMIZATION_PANEL_WIDTH;
+  const collapsedH = OPTIMIZATION_PANEL_COLLAPSED_H;
+  const expandedH = OPTIMIZATION_PANEL_EXPANDED_H;
+  const panelX = constrain(miniX + miniWidth - panelW, 8, width - panelW - 8);
+  const panelY = constrain(miniY + miniHeight + 10, 8, height - expandedH - 8);
+
+  const inCollapsedBounds =
+    mouseX >= panelX &&
+    mouseX <= panelX + panelW &&
+    mouseY >= panelY &&
+    mouseY <= panelY + collapsedH;
+  const inExpandedBounds =
+    mouseX >= panelX &&
+    mouseX <= panelX + panelW &&
+    mouseY >= panelY &&
+    mouseY <= panelY + expandedH;
+
+  const panelExpanded = !!drawGame.state?.optimization?.isPanelExpanded;
+  return inCollapsedBounds || (panelExpanded && inExpandedBounds);
+}
+
+/**
+ * Determine whether mouse over resource tooltip blockers.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isMouseOverResourceTooltipBlockers() {
-  if (backButtonGame.isHovered() || isPointerOverMinimap() || isMouseOverSidebarResourceIcon()) {
+  if (
+    backButtonGame.isHovered() ||
+    isPointerOverMinimap() ||
+    isPointerOverOptimizationHud() ||
+    isMouseOverSidebarResourceIcon()
+  ) {
     return true;
   }
   const slotSize = 42;
@@ -5168,6 +6865,10 @@ function isMouseOverResourceTooltipBlockers() {
   );
 }
 
+/**
+ * Draw resource hover tooltip.
+ * @returns {void} No return value.
+ */
 function drawResourceHoverTooltip() {
   if (currentState !== "GAME" || !drawGame.state) {
     return;
@@ -5220,6 +6921,11 @@ function drawResourceHoverTooltip() {
   textAlign(CENTER, CENTER);
 }
 
+/**
+ * Format tooltip resource amount.
+ * @param {*} value - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function formatTooltipResourceAmount(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) {
@@ -5232,6 +6938,10 @@ function formatTooltipResourceAmount(value) {
   return amount.toFixed(2).replace(/\.?0+$/, "");
 }
 
+/**
+ * Get hovered active tube tooltip data.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getHoveredActiveTubeTooltipData() {
   if (currentState !== "GAME" || !drawGame.state) {
     return null;
@@ -5260,6 +6970,10 @@ function getHoveredActiveTubeTooltipData() {
   };
 }
 
+/**
+ * Draw active tube flow tooltip.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawActiveTubeFlowTooltip() {
   if (currentState !== "GAME" || !drawGame.state) {
     return false;
@@ -5343,6 +7057,10 @@ function drawActiveTubeFlowTooltip() {
   return true;
 }
 
+/**
+ * Get hovered rocket tooltip data.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getHoveredRocketTooltipData() {
   if (currentState !== "GAME" || !drawGame.state) {
     return null;
@@ -5390,6 +7108,10 @@ function getHoveredRocketTooltipData() {
   };
 }
 
+/**
+ * Draw rocket hover tooltip.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function drawRocketHoverTooltip() {
   const tooltip = getHoveredRocketTooltipData();
   if (!tooltip) {
@@ -5449,6 +7171,11 @@ function drawRocketHoverTooltip() {
   return true;
 }
 
+/**
+ * Get mini map tile color.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getMiniMapTileColor(tile) {
   if (!tile) {
     return [240, 240, 245];
@@ -5471,6 +7198,12 @@ function getMiniMapTileColor(tile) {
   return getMinimapBaseTerrainColor(tile);
 }
 
+/**
+ * Get tile at screen position.
+ * @param {*} screenX - Screen-space X position in pixels.
+ * @param {*} screenY - Screen-space Y position in pixels.
+ * @returns {object|null} Computed object result, or null when unavailable.
+ */
 function getTileAtScreenPosition(screenX, screenY) {
   if (!drawGame.state) {
     return null;
@@ -5499,6 +7232,12 @@ function getTileAtScreenPosition(screenX, screenY) {
   };
 }
 
+/**
+ * Determine whether tile within modification range.
+ * @param {*} tileRow - Input value used by this operation.
+ * @param {*} tileCol - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function isTileWithinModificationRange(tileRow, tileCol) {
   if (!drawGame.state) {
     return false;
@@ -5525,6 +7264,10 @@ function isTileWithinModificationRange(tileRow, tileCol) {
   return dx * dx + dy * dy <= radius * radius;
 }
 
+/**
+ * Trigger modification range blink.
+ * @returns {void} No return value.
+ */
 function triggerModificationRangeBlink() {
   if (!drawGame.state) {
     return;
@@ -5533,6 +7276,12 @@ function triggerModificationRangeBlink() {
   drawGame.state.feedback.rangeBlinkUntil = millis() + 600;
 }
 
+/**
+ * Draw modification range indicator.
+ * @param {*} config - Runtime configuration values for map/camera/UI.
+ * @param {*} feedback - Transient UI feedback state.
+ * @returns {void} No return value.
+ */
 function drawModificationRangeIndicator(config, feedback) {
   const remaining = feedback.rangeBlinkUntil - millis();
   if (remaining <= 0) {
@@ -5552,6 +7301,10 @@ function drawModificationRangeIndicator(config, feedback) {
   ellipse(width / 2, height / 2, radius * 2, radius * 2);
 }
 
+/**
+ * Draw hotbar.
+ * @returns {void} No return value.
+ */
 function drawHotbar() {
   push();
   const { slotSize, gap, startX, y } = getHotbarLayout();
@@ -5721,6 +7474,104 @@ function drawHotbar() {
   pop();
 }
 
+/**
+ * Activate the reactive-player place pose for a short duration.
+ * @param {*} durationMs - Place-pose duration in milliseconds.
+ * @returns {void} No return value.
+ */
+function triggerReactivePlayerPlacePose(durationMs = REACTIVE_PLAYER_PLACE_DURATION_MS) {
+  const duration = Math.max(0, Number(durationMs) || 0);
+  reactivePlayerPlacePoseUntilMs = millis() + duration;
+}
+
+/**
+ * Draw the reactive-player companion near the hotbar.
+ * @returns {void} No return value.
+ */
+function drawReactivePlayerCompanion() {
+  const hasIdleSheet =
+    reactivePlayerIdleSheetImg &&
+    reactivePlayerIdleSheetImg.width > 0 &&
+    reactivePlayerIdleSheetImg.height > 0;
+  const hasPlaceFrame =
+    reactivePlayerPlaceImg &&
+    reactivePlayerPlaceImg.width > 0 &&
+    reactivePlayerPlaceImg.height > 0;
+  if (!hasIdleSheet && !hasPlaceFrame) {
+    return;
+  }
+
+  const idleFrameWidth = REACTIVE_PLAYER_IDLE_FRAME_WIDTH;
+  const idleFrameHeight = REACTIVE_PLAYER_IDLE_FRAME_HEIGHT;
+  const reactiveScale = 1.4;
+  const drawWidth = round(idleFrameWidth * reactiveScale);
+  const drawHeight = round(idleFrameHeight * reactiveScale);
+
+  const { totalWidth, startX } = getHotbarLayout();
+  const hotbarRight = startX + totalWidth;
+  const desiredX = hotbarRight + 22;
+  const x = constrain(desiredX, 0, width - drawWidth);
+  const yTop = max(0, height - drawHeight);
+
+  const nowMs = millis();
+  const showPlaceFrame = hasPlaceFrame && nowMs < reactivePlayerPlacePoseUntilMs;
+
+  push();
+  imageMode(CORNER);
+  noTint();
+
+  if (showPlaceFrame) {
+    // Place frame is slightly shorter than idle; scale and bottom-align to keep stance stable.
+    const placeWidth = reactivePlayerPlaceImg.width;
+    const placeHeight = reactivePlayerPlaceImg.height;
+    const placeDrawWidth = round(placeWidth * reactiveScale);
+    const placeDrawHeight = round(placeHeight * reactiveScale);
+    const placeX = round(x + (drawWidth - placeDrawWidth) / 2);
+    const placeY = round(height - placeDrawHeight);
+    image(
+      reactivePlayerPlaceImg,
+      placeX,
+      placeY,
+      placeDrawWidth,
+      placeDrawHeight
+    );
+    pop();
+    return;
+  }
+
+  if (!hasIdleSheet) {
+    pop();
+    return;
+  }
+
+  const availableFrameCount = Math.max(
+    1,
+    floor(reactivePlayerIdleSheetImg.width / idleFrameWidth)
+  );
+  const frameCount = Math.max(
+    1,
+    Math.min(REACTIVE_PLAYER_IDLE_FRAMES, availableFrameCount)
+  );
+  const frameIndex = floor((nowMs / 1000) * REACTIVE_PLAYER_IDLE_FPS) % frameCount;
+
+  image(
+    reactivePlayerIdleSheetImg,
+    round(x),
+    round(yTop),
+    drawWidth,
+    drawHeight,
+    frameIndex * idleFrameWidth,
+    0,
+    idleFrameWidth,
+    idleFrameHeight
+  );
+  pop();
+}
+
+/**
+ * Handle click interactions for menus, overlays, and in-game placement.
+ * @returns {void} No return value.
+ */
 function mousePressed() {
   requestBackgroundMusicStart();
 
@@ -5777,13 +7628,21 @@ if (currentState != "GAME") return;
     return;
   }
 
-  if (isMouseOverHotbarArea() || isPointerOverMinimap()) {
+  if (
+    isMouseOverHotbarArea() ||
+    isPointerOverMinimap() ||
+    isPointerOverOptimizationHud()
+  ) {
     return;
   }
 
   placeSelectedEntityAtMouse();
 }
 
+/**
+ * Attempt to place the selected building at the hovered world tile.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function placeSelectedEntityAtMouse() {
   if (!drawGame.state) return;
   if (selectedHotbarSlot < 0 || selectedHotbarSlot >= HOTBAR_ENTITY_TYPES.length) return;
@@ -5836,6 +7695,8 @@ function placeSelectedEntityAtMouse() {
     );
   };
 
+  // Validate the full rotated footprint before placement:
+  // bounds, restricted-range rules, and occupancy exceptions.
   for (const entry of footprintTiles) {
     if (
       entry.x < 0 ||
@@ -5872,8 +7733,11 @@ function placeSelectedEntityAtMouse() {
   const newEntity = createEntity(type, tileX, tileY, options);
   newEntity.state.facing = placementFacing;
 
+  // Stamp entity occupancy across the full footprint, then update the anchor tile metadata used by UI.
   entities.push(newEntity);
   if (placeSound) placeSound.play();
+  triggerReactivePlayerPlacePose(REACTIVE_PLAYER_PLACE_DURATION_MS);
+  triggerOptimizationBuildGraceWindow();
 
   for (const entry of footprintTiles) {
     const occupiedTile = map.tiles[entry.y][entry.x];
@@ -5912,6 +7776,12 @@ function placeSelectedEntityAtMouse() {
   }
 }
 
+/**
+ * Get placement options for tile.
+ * @param {*} type - Input value used by this operation.
+ * @param {*} tile - Tile data object.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getPlacementOptionsForTile(type, tile) {
   if (type === ENTITY_TYPES.MINER) {
     const onNode = isMineableTile(tile.type);
@@ -5925,6 +7795,13 @@ function getPlacementOptionsForTile(type, tile) {
   return getPlacementOptionsForEntity(type, tile);
 }
 
+/**
+ * Try Apply Tube Geometry.
+ * @param {*} entity - Target entity instance.
+ * @param {*} nextFacing - Input value used by this operation.
+ * @param {*} nextShape - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function tryApplyTubeGeometry(entity, nextFacing, nextShape) {
   if (!drawGame.state || !entity || entity.type !== ENTITY_TYPES.TUBE) {
     return false;
@@ -6001,9 +7878,16 @@ function tryApplyTubeGeometry(entity, nextFacing, nextShape) {
     tile.colorOverride = null;
   }
 
+  triggerOptimizationBuildGraceWindow();
   return true;
 }
 
+/**
+ * Try Apply Non Tube Facing.
+ * @param {*} entity - Target entity instance.
+ * @param {*} nextFacing - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function tryApplyNonTubeFacing(entity, nextFacing) {
   if (!drawGame.state || !entity || entity.type === ENTITY_TYPES.TUBE) {
     return false;
@@ -6077,10 +7961,15 @@ function tryApplyNonTubeFacing(entity, nextFacing) {
     tile.colorOverride = null;
   }
 
+  triggerOptimizationBuildGraceWindow();
   return true;
 }
 
 
+/**
+ * Handle keyboard shortcuts for selection, editing, debug shortcuts, and navigation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function keyPressed() {
   requestBackgroundMusicStart();
   if (currentState === "CREDITS" || currentState === "ENDGAME") {
@@ -6107,7 +7996,11 @@ function keyPressed() {
         typeof DevCheckpoint !== "undefined" &&
         typeof DevCheckpoint.applyRestrictedLateGameSkip === "function"
       ) {
-        DevCheckpoint.applyRestrictedLateGameSkip();
+        const applied = DevCheckpoint.applyRestrictedLateGameSkip();
+        if (applied && Array.isArray(drawGame.state.entities)) {
+          // One extra pass ensures derived constructor/splitter rates settle immediately.
+          updateConnections(drawGame.state.entities);
+        }
       } else {
         console.error("DevCheckpoint module is unavailable.");
       }
@@ -6196,6 +8089,10 @@ function keyPressed() {
   }
 }
 
+/**
+ * Delete entity under mouse.
+ * @returns {void} No return value.
+ */
 function deleteEntityUnderMouse() {
   if (!drawGame.state) {
     return;
@@ -6209,6 +8106,7 @@ function deleteEntityUnderMouse() {
   const { entities, map } = drawGame.state;
   const targetId = hit.tile.entityId;
   const targetEntity = targetId != null ? getEntityById(entities, targetId) : null;
+  let didModifyLayout = false;
 
   if (targetId == null && !hit.tile.building) {
     return;
@@ -6236,6 +8134,7 @@ function deleteEntityUnderMouse() {
         refundBuildResources(restrictedInventory, targetEntity.type);
       }
       entities.splice(index, 1);
+      didModifyLayout = true;
     }
     
     if (targetEntity) {
@@ -6259,6 +8158,7 @@ function deleteEntityUnderMouse() {
           tile.building = null;
         }
       }
+      didModifyLayout = true;
     } else {
       hit.tile.entityId = null;
       hit.tile.entity = null;
@@ -6267,9 +8167,11 @@ function deleteEntityUnderMouse() {
       if (hit.tile.building && hit.tile.building.entityId === targetId) {
         hit.tile.building = null;
       }
+      didModifyLayout = true;
     }
   } else if (hit.tile.building) {
     hit.tile.building = null;
+    didModifyLayout = true;
   }
 
   if (drawGame.state.selectedBuilding) {
@@ -6282,8 +8184,16 @@ function deleteEntityUnderMouse() {
   }
 
   updateConnections(entities);
+  if (didModifyLayout) {
+    triggerOptimizationBuildGraceWindow();
+  }
 }
 
+/**
+ * Sync tile building facing.
+ * @param {*} entity - Target entity instance.
+ * @returns {void} No return value.
+ */
 function syncTileBuildingFacing(entity) {
   if (!drawGame.state || !entity) {
     return;
@@ -6298,6 +8208,10 @@ function syncTileBuildingFacing(entity) {
   tile.building.facing = entity.state.facing || "E";
 }
 
+/**
+ * Repair entity under mouse.
+ * @returns {void} No return value.
+ */
 function repairEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
@@ -6307,6 +8221,10 @@ function repairEntityUnderMouse() {
   console.log("Repaired entity:", entity);
 }
 
+/**
+ * Toggle entity under mouse.
+ * @returns {void} No return value.
+ */
 function toggleEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
@@ -6343,6 +8261,10 @@ function toggleEntityUnderMouse() {
   console.log("Toggled entity:", entity);
 }
 
+/**
+ * Inspect entity under mouse.
+ * @returns {void} No return value.
+ */
 function inspectEntityUnderMouse() {
   const entity = getEntityUnderMouse();
   if (!entity) return;
@@ -6350,6 +8272,10 @@ function inspectEntityUnderMouse() {
   console.log("Inspect entity:", JSON.parse(JSON.stringify(entity)));
 }
 
+/**
+ * Get entity under mouse.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getEntityUnderMouse() {
   if (!drawGame.state) return null;
 
@@ -6373,6 +8299,11 @@ function getEntityUnderMouse() {
   return getEntityById(entities, tile.entityId);
 }
 
+/**
+ * Get tube sources by target.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getTubeSourcesByTarget(entities) {
   const tubeSources = new Map();
 
@@ -6389,7 +8320,18 @@ function getTubeSourcesByTarget(entities) {
   return tubeSources;
 }
 
+/**
+ * Recompute network connectivity and derived production rates across all entities.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function updateConnections(entities) {
+  // Multi-pass recompute:
+  // 1) baseline topology
+  // 2) splitter/merger rate derivation
+  // 3) topology refresh with derived rates
+  // 4) smelter/constructor recipe intake resolution
+  // 5) final topology/materialized carried-item state
   refreshEntityConnectionStates(entities);
   updateSplitterMergerRates(entities);
   refreshEntityConnectionStates(entities);
@@ -6398,6 +8340,11 @@ function updateConnections(entities) {
   refreshEntityConnectionStates(entities);
 }
 
+/**
+ * Log connection debug.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function logConnectionDebug(entities) {
   const miners = [];
   const tubes = [];
@@ -6511,6 +8458,12 @@ function logConnectionDebug(entities) {
   }
 }
 
+/**
+ * Get incoming tube inputs.
+ * @param {*} entities - Collection of active entities in the world.
+ * @param {*} targetId - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function getIncomingTubeInputs(entities, targetId) {
   const inputs = [];
   const incomingKeys = new Set();
@@ -6582,6 +8535,13 @@ function getIncomingTubeInputs(entities, targetId) {
   return inputs;
 }
 
+/**
+ * Matches Direct Constructor Input Port.
+ * @param {*} portX - Input value used by this operation.
+ * @param {*} portY - Input value used by this operation.
+ * @param {*} constructorInputPortKeys - Input value used by this operation.
+ * @returns {boolean} Whether the check or operation succeeds.
+ */
 function matchesDirectConstructorInputPort(portX, portY, constructorInputPortKeys) {
   const DIRECT_NEIGHBORS = [
     { x: 1, y: 0 },
@@ -6602,6 +8562,11 @@ function matchesDirectConstructorInputPort(portX, portY, constructorInputPortKey
   return false;
 }
 
+/**
+ * Resolve smelter intake validity and derive active recipe/output rates.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function updateSmelterInputs(entities) {
   const EPSILON = 1e-6;
   const SMELTER_VALID_INPUT_RATES = [1, 2];
@@ -6647,6 +8612,11 @@ function updateSmelterInputs(entities) {
   }
 }
 
+/**
+ * Find constructor recipe by types.
+ * @param {*} types - Input value used by this operation.
+ * @returns {*} Computed value for the requested operation.
+ */
 function findConstructorRecipeByTypes(types) {
   if (typeof CONSTRUCTOR_RECIPES === "undefined") return null;
 
@@ -6662,6 +8632,11 @@ function findConstructorRecipeByTypes(types) {
   return null;
 }
 
+/**
+ * Resolve constructor recipes from incoming network rates and configure outputs.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function updateConstructorInputs(entities) {
   const EPSILON = 1e-6;
 
@@ -6685,6 +8660,7 @@ function updateConstructorInputs(entities) {
       ? findConstructorRecipeByTypes(uniqueTypes)
       : null;
 
+    // Keep slots in sync with inferred/active recipe so UI and downstream logic show expected inputs.
     constructorState.inputSlots = [
       { type: null, count: 0 },
       { type: null, count: 0 }
@@ -6715,6 +8691,8 @@ function updateConstructorInputs(entities) {
     }
 
     let hasExactRecipeInputs = true;
+    // Constructor throughput is intentionally strict: every required input rate
+    // must match the recipe count exactly (within epsilon) for production to run.
     for (const input of recipe.inputs) {
       const requiredCount = Number(input.count) || 0;
       const availableRate = incomingRatesByType.get(input.type) || 0;
@@ -6747,6 +8725,11 @@ function updateConstructorInputs(entities) {
   }
 }
 
+/**
+ * Recalculate splitter and merger throughput from network topology.
+ * @param {*} entities - Collection of active entities in the world.
+ * @returns {void} No return value.
+ */
 function updateSplitterMergerRates(entities) {
   const incoming = new Map();
   const outgoingCount = new Map();
@@ -6764,6 +8747,8 @@ function updateSplitterMergerRates(entities) {
     }
   }
 
+  // Collect unique incoming/outgoing component links so rates are not double-counted
+  // when multiple tube entities belong to one connected component.
   for (const entity of entities) {
     if (entity.type !== ENTITY_TYPES.TUBE) continue;
     const fromId = entity.state.fromEntityId;
@@ -6830,6 +8815,7 @@ function updateSplitterMergerRates(entities) {
       ? types[0]
       : null;
 
+    // Splitters divide one stream across all active outputs; mergers sum compatible inputs.
     if (entity.type === ENTITY_TYPES.SPLITTER) {
       const perOutputRate = outputConnectionCount > 0
         ? totalRate / outputConnectionCount
@@ -6854,6 +8840,16 @@ function updateSplitterMergerRates(entities) {
 }
 
 class Button {
+  /**
+   * Create a clickable UI button.
+   * @param {*} x - Left pixel coordinate.
+   * @param {*} y - Top pixel coordinate.
+   * @param {*} w - Button width in pixels.
+   * @param {*} h - Button height in pixels.
+   * @param {*} label - Text label shown inside the button.
+   * @param {*} onClick - Click handler invoked when the button is pressed.
+   * @returns {void} No return value.
+   */
   constructor(x, y, w, h, label, onClick) {
     this.x = x;
     this.y = y;
@@ -6863,11 +8859,19 @@ class Button {
     this.onClick = onClick;
   }
 
+  /**
+   * Determine whether the pointer is currently inside the button bounds.
+   * @returns {boolean} True when the pointer is hovering this button.
+   */
   isHovered() {
     return mouseX > this.x && mouseX < this.x + this.w &&
            mouseY > this.y && mouseY < this.y + this.h;
   }
 
+  /**
+   * Render the button and hover visuals, including hover sound on state entry.
+   * @returns {void} No return value.
+   */
   draw() {
     push();
 
@@ -6911,6 +8915,10 @@ class Button {
     pop();
   }
 
+  /**
+   * Invoke the click handler if the pointer is currently hovering the button.
+   * @returns {void} No return value.
+   */
   checkClick() {
     if (this.isHovered()) {
       if (clickSound) clickSound.play();
